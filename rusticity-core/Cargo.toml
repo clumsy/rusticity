@@ -1,0 +1,30 @@
+[package]
+name = "rusticity-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Core AWS SDK integration for Rusticity"
+
+[dependencies]
+tokio = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-cloudwatchlogs = { workspace = true }
+aws-sdk-cloudwatch = { workspace = true }
+aws-sdk-cloudformation = "1"
+aws-sdk-ecr = "1.52"
+aws-sdk-ecrpublic = "1.49"
+aws-sdk-iam = "1"
+aws-sdk-lambda = "1"
+aws-sdk-s3 = { workspace = true }
+aws-sdk-sts = { workspace = true }
+aws-smithy-types = "1.2"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+percent-encoding = "2.3.2"

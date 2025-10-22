@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf rusticity-${{ matrix.target }}.tar.gz rusticity
+          mv rusticity-${{ matrix.target }}.tar.gz ${{ github.workspace }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rusticity-${{ matrix.target }}
+          path: rusticity-${{ matrix.target }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            rusticity-*/rusticity-*.tar.gz
+          draft: false
+          prerelease: false
+
+  publish:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish rusticity-core
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} -p rusticity-core
+
+      - name: Wait for crates.io to update
+        run: sleep 30
+
+      - name: Publish rusticity-term
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} -p rusticity-term
+
+      - name: Wait for crates.io to update
+        run: sleep 30
+
+      - name: Publish rusticity
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} -p rusticity

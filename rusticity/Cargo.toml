@@ -1,0 +1,24 @@
+[package]
+name = "rusticity"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "A snappy terminal UI for AWS written in Rust"
+
+[[bin]]
+name = "rusticity"
+path = "src/main.rs"
+
+[dependencies]
+rusticity-core = { version = "0.1.0", path = "../rusticity-core" }
+rusticity-term = { version = "0.1.0", path = "../rusticity-term" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+arboard = "3.4"
+

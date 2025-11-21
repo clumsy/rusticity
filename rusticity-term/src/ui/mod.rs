@@ -9,6 +9,7 @@ mod pagination;
 pub mod prefs;
 mod query_editor;
 pub mod s3;
+pub mod sqs;
 mod status;
 pub mod styles;
 pub mod table;
@@ -675,6 +676,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
+        Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),
         Service::IamUsers => iam::render_users(frame, app, area),
         Service::IamRoles => iam::render_roles(frame, app, area),
@@ -825,6 +827,19 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                     })
                     .collect()
             };
+            (items, " Preferences ", max_len)
+        } else if app.current_service == Service::SqsQueues {
+            let mut max_len = 0;
+            let items: Vec<ListItem> = app
+                .all_sqs_columns
+                .iter()
+                .map(|col| {
+                    let is_visible = app.visible_sqs_columns.contains(col);
+                    let (item, len) = render_column_toggle_item(col, is_visible, false);
+                    max_len = max_len.max(len);
+                    item
+                })
+                .collect();
             (items, " Preferences ", max_len)
         } else if app.current_service == Service::LambdaFunctions {
             let mut all_items: Vec<ListItem> = Vec::new();
@@ -1173,56 +1188,107 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(70, 40, area);
+    let popup_area = centered_rect(80, 60, area);
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(
+        Block::default()
+            .title(" Error ")
+            .borders(Borders::ALL)
+            .border_style(crate::ui::red_text())
+            .style(Style::default().bg(Color::Black)),
+        popup_area,
+    );
+
+    let inner = popup_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
 
     let error_text = app.error_message.as_deref().unwrap_or("Unknown error");
 
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "AWS Error",
-            crate::ui::red_text().add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(error_text),
-        Line::from(""),
-        Line::from("This may be due to:"),
-        Line::from("  • Expired AWS credentials/token"),
-        Line::from("  • Invalid AWS profile configuration"),
-        Line::from("  • Network connectivity issues"),
-        Line::from(""),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Press ", Style::default()),
-            Span::styled("^r", crate::ui::red_text()),
-            Span::styled(" to retry", Style::default()),
-        ]),
-        Line::from(vec![
-            Span::styled("Press ", Style::default()),
-            Span::styled("y", crate::ui::red_text()),
-            Span::styled(" to copy error", Style::default()),
-        ]),
-        Line::from(vec![
-            Span::styled("Press ", Style::default()),
-            Span::styled("q", crate::ui::red_text()),
-            Span::styled(" or ", Style::default()),
-            Span::styled("esc", crate::ui::red_text()),
-            Span::styled(" to quit", Style::default()),
-        ]),
-    ];
+    let chunks = vertical(
+        [
+            Constraint::Length(2), // Header
+            Constraint::Min(0),    // Error text (scrollable)
+            Constraint::Length(2), // Help text
+        ],
+        inner,
+    );
 
-    let paragraph = Paragraph::new(lines)
+    // Header
+    let header = Paragraph::new("AWS Error")
+        .alignment(Alignment::Center)
+        .style(crate::ui::red_text().add_modifier(Modifier::BOLD));
+    frame.render_widget(header, chunks[0]);
+
+    // Scrollable error text with border
+    let error_lines: Vec<Line> = error_text
+        .lines()
+        .skip(app.error_scroll)
+        .flat_map(|line| {
+            let width = chunks[1].width.saturating_sub(4) as usize; // Account for borders + padding
+            if line.len() <= width {
+                vec![Line::from(line)]
+            } else {
+                line.chars()
+                    .collect::<Vec<_>>()
+                    .chunks(width)
+                    .map(|chunk| Line::from(chunk.iter().collect::<String>()))
+                    .collect()
+            }
+        })
+        .collect();
+
+    let error_paragraph = Paragraph::new(error_lines)
         .block(
             Block::default()
-                .title(" Connection Error ")
                 .borders(Borders::ALL)
-                .border_style(crate::ui::red_text()),
+                .border_style(crate::ui::active_border()),
         )
-        .alignment(Alignment::Center)
-        .style(Style::default().bg(Color::Black));
+        .style(Style::default().fg(Color::White));
 
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(paragraph, popup_area);
+    frame.render_widget(error_paragraph, chunks[1]);
+
+    // Render scrollbar if needed
+    let total_lines: usize = error_text
+        .lines()
+        .map(|line| {
+            let width = chunks[1].width.saturating_sub(4) as usize;
+            if line.len() <= width {
+                1
+            } else {
+                line.len().div_ceil(width)
+            }
+        })
+        .sum();
+    let visible_lines = chunks[1].height.saturating_sub(2) as usize;
+    if total_lines > visible_lines {
+        crate::common::render_scrollbar(
+            frame,
+            chunks[1].inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            total_lines,
+            app.error_scroll,
+        );
+    }
+
+    // Help text
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled("^r", crate::ui::red_text()),
+        Span::raw(" retry  "),
+        Span::styled("y", crate::ui::red_text()),
+        Span::raw(" copy  "),
+        Span::styled("↑↓/^u/^d", crate::ui::red_text()),
+        Span::raw(" scroll  "),
+        Span::styled("q/esc", crate::ui::red_text()),
+        Span::raw(" close"),
+    ]))
+    .alignment(Alignment::Center);
+
+    frame.render_widget(help, chunks[2]);
 }
 
 fn render_space_menu(frame: &mut Frame, area: Rect) {
@@ -1420,6 +1486,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
+        Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),
         Service::IamUsers => iam::render_users(frame, app, area),
         Service::IamRoles => iam::render_roles(frame, app, area),

@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
                 app.mode = rusticity_term::keymap::Mode::RegionPicker;
             } else {
                 app.error_message = Some(error_str);
+                app.error_scroll = 0;
                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
             }
             app
@@ -122,9 +123,24 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::s3::load_s3_buckets(&mut app).await {
                                 app.error_message = Some(format!("Failed to load S3 buckets: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.s3_state.buckets.loading = false;
+                        }
+
+                        // Load SQS queues when service is switched to and empty
+                        if app.service_selected && app.current_service == Service::SqsQueues
+                            && (!prev_service_selected || prev_service != Service::SqsQueues)
+                            && app.sqs_state.queues.items.is_empty() {
+                            app.sqs_state.queues.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = rusticity_term::ui::sqs::load_sqs_queues(&mut app).await {
+                                app.error_message = Some(format!("Failed to load SQS queues: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.sqs_state.queues.loading = false;
                         }
 
                         // Load CloudWatch Alarms when service is switched to and empty
@@ -135,6 +151,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_alarms().await {
                                 app.error_message = Some(format!("Failed to load alarms: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.alarms_state.table.loading = false;
@@ -149,6 +166,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_ecr_repositories().await {
                                 app.error_message = Some(format!("Failed to load ECR repositories: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.ecr_state.repositories.loading = false;
@@ -161,6 +179,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_ecr_images().await {
                                 app.error_message = Some(format!("Failed to load ECR images: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.ecr_state.repositories.loading = false;
@@ -174,6 +193,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::lambda::load_lambda_functions(&mut app).await {
                                 app.error_message = Some(format!("Failed to load Lambda functions: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.lambda_state.table.loading = false;
@@ -187,6 +207,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::lambda::load_lambda_applications(&mut app).await {
                                 app.error_message = Some(format!("Failed to load Lambda applications: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.lambda_application_state.table.loading = false;
@@ -200,6 +221,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_cloudformation_stacks().await {
                                 app.error_message = Some(format!("Failed to load CloudFormation stacks: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.cfn_state.table.loading = false;
@@ -213,6 +235,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::iam::load_iam_users(&mut app).await {
                                 app.error_message = Some(format!("Failed to load IAM users: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.users.loading = false;
@@ -226,6 +249,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::iam::load_iam_roles(&mut app).await {
                                 app.error_message = Some(format!("Failed to load IAM roles: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.roles.loading = false;
@@ -239,6 +263,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::iam::load_iam_user_groups(&mut app).await {
                                 app.error_message = Some(format!("Failed to load IAM user groups: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.groups.loading = false;
@@ -254,16 +279,19 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_role_policies(&role_name).await {
                                 app.error_message = Some(format!("Failed to load role policies: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             // Also load trust policy
                             if let Err(e) = app.load_trust_policy(&role_name).await {
                                 app.error_message = Some(format!("Failed to load trust policy: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             // Also load last accessed services
                             if let Err(e) = app.load_last_accessed_services(&role_name).await {
                                 app.error_message = Some(format!("Failed to load last accessed services: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.policies.loading = false;
@@ -279,6 +307,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_group_policies(&group_name).await {
                                 app.error_message = Some(format!("Failed to load group policies: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.policies.loading = false;
@@ -288,6 +317,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_group_users(&group_name).await {
                                 app.error_message = Some(format!("Failed to load group users: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.group_users.loading = false;
@@ -305,6 +335,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::lambda::load_lambda_versions(&mut app, &function_name).await {
                                 app.error_message = Some(format!("Failed to load Lambda versions: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.lambda_state.version_table.loading = false;
@@ -322,6 +353,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = rusticity_term::ui::lambda::load_lambda_aliases(&mut app, &function_name).await {
                                 app.error_message = Some(format!("Failed to load Lambda aliases: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.lambda_state.alias_table.loading = false;
@@ -337,6 +369,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_role_tags(&role_name).await {
                                 app.error_message = Some(format!("Failed to load role tags: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.tags.loading = false;
@@ -352,6 +385,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_user_tags(&user_name).await {
                                 app.error_message = Some(format!("Failed to load user tags: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.iam_state.user_tags.loading = false;
@@ -368,7 +402,8 @@ async fn main() -> Result<()> {
                                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                                 if let Err(e) = app.load_policy_document(&role_name, &policy_name).await {
                                     app.error_message = Some(format!("Failed to load policy document: {:#}", e));
-                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
                                 }
                                 app.iam_state.policies.loading = false;
                             }
@@ -492,6 +527,7 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.execute_insights_query().await {
                                 app.error_message = Some(format!("Query failed: {:#}", e));
+                                app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.log_groups_state.loading = false;
@@ -529,7 +565,8 @@ async fn main() -> Result<()> {
                                     },
                                     Err(e) => {
                                         app.error_message = Some(format!("Failed to connect: {:#}", e));
-                                        app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                        app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
                                     }
                                 }
                                 app.log_groups_state.loading = false;
@@ -557,7 +594,8 @@ async fn main() -> Result<()> {
                                 },
                                 Err(e) => {
                                     app.error_message = Some(format!("Failed to connect: {:#}", e));
-                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
                                 }
                             }
                             app.log_groups_state.loading = false;
@@ -581,7 +619,8 @@ async fn main() -> Result<()> {
                                     terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                                     if let Err(e) = app.load_log_groups().await {
                                         app.error_message = Some(format!("{:#}", e));
-                                        app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                        app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
                                     }
                                     app.log_groups_state.loading = false;
                                     app.log_groups_state.loading_message.clear();
@@ -589,7 +628,8 @@ async fn main() -> Result<()> {
                                 },
                                 Err(e) => {
                                     app.error_message = Some(format!("{:#}", e));
-                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
                                 }
                             }
                         }

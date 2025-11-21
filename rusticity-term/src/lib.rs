@@ -10,6 +10,7 @@ pub mod keymap;
 pub mod lambda;
 pub mod s3;
 pub mod session;
+pub mod sqs;
 pub mod table;
 pub mod ui;
 

@@ -14,6 +14,7 @@ pub use crate::lambda::{
     Column as LambdaColumn, Function as LambdaFunction,
 };
 pub use crate::s3::{Bucket as S3Bucket, BucketColumn as S3BucketColumn, Object as S3Object};
+pub use crate::sqs::Column as SqsColumn;
 pub use crate::ui::cfn::{
     DetailTab as CfnDetailTab, State as CfnState, StatusFilter as CfnStatusFilter,
 };
@@ -24,13 +25,14 @@ pub use crate::ui::lambda::{
     ApplicationState as LambdaApplicationState, DetailTab as LambdaDetailTab, State as LambdaState,
 };
 pub use crate::ui::s3::{BucketType as S3BucketType, ObjectTab as S3ObjectTab, State as S3State};
+pub use crate::ui::sqs::State as SqsState;
 pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, EventFilterFocus,
     LogGroupColumn, Preferences, StreamColumn, StreamSort, TimeUnit,
 };
 use rusticity_core::{
     AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, EcrClient, IamClient,
-    LambdaClient, LogEvent, LogGroup, LogStream, S3Client,
+    LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
 };
 
 #[derive(Clone)]
@@ -46,6 +48,7 @@ pub struct App {
     pub config: AwsConfig,
     pub cloudwatch_client: CloudWatchClient,
     pub s3_client: S3Client,
+    pub sqs_client: SqsClient,
     pub alarms_client: AlarmsClient,
     pub ecr_client: EcrClient,
     pub iam_client: IamClient,
@@ -61,6 +64,7 @@ pub struct App {
     pub insights_state: CloudWatchInsightsState,
     pub alarms_state: CloudWatchAlarmsState,
     pub s3_state: S3State,
+    pub sqs_state: SqsState,
     pub ecr_state: EcrState,
     pub lambda_state: LambdaState,
     pub lambda_application_state: LambdaApplicationState,
@@ -83,6 +87,8 @@ pub struct App {
     pub all_alarm_columns: Vec<AlarmColumn>,
     pub visible_bucket_columns: Vec<S3BucketColumn>,
     pub all_bucket_columns: Vec<S3BucketColumn>,
+    pub visible_sqs_columns: Vec<SqsColumn>,
+    pub all_sqs_columns: Vec<SqsColumn>,
     pub visible_ecr_columns: Vec<EcrColumn>,
     pub all_ecr_columns: Vec<EcrColumn>,
     pub visible_ecr_image_columns: Vec<EcrImageColumn>,
@@ -105,6 +111,7 @@ pub struct App {
     pub all_policy_columns: Vec<String>,
     pub view_mode: ViewMode,
     pub error_message: Option<String>,
+    pub error_scroll: usize,
     pub page_input: String,
     pub calendar_date: Option<time::Date>,
     pub calendar_selecting: CalendarField,
@@ -221,6 +228,7 @@ pub enum Service {
     CloudWatchInsights,
     CloudWatchAlarms,
     S3Buckets,
+    SqsQueues,
     EcrRepositories,
     LambdaFunctions,
     LambdaApplications,
@@ -237,6 +245,7 @@ impl Service {
             Service::CloudWatchInsights => "CloudWatch > Logs Insights",
             Service::CloudWatchAlarms => "CloudWatch > Alarms",
             Service::S3Buckets => "S3 > Buckets",
+            Service::SqsQueues => "SQS > Queues",
             Service::EcrRepositories => "ECR > Repositories",
             Service::LambdaFunctions => "Lambda > Functions",
             Service::LambdaApplications => "Lambda > Applications",
@@ -281,6 +290,8 @@ impl App {
             } else {
                 Some(&mut self.ecr_state.repositories.filter)
             }
+        } else if self.current_service == Service::SqsQueues {
+            Some(&mut self.sqs_state.queues.filter)
         } else if self.current_service == Service::LambdaFunctions {
             if self.lambda_state.current_version.is_some()
                 && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
@@ -365,6 +376,7 @@ impl App {
         let config = AwsConfig::new(region).await?;
         let cloudwatch_client = CloudWatchClient::new(config.clone()).await?;
         let s3_client = S3Client::new(config.clone());
+        let sqs_client = SqsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
         let iam_client = IamClient::new(config.clone());
@@ -378,6 +390,7 @@ impl App {
             config,
             cloudwatch_client,
             s3_client,
+            sqs_client,
             alarms_client,
             ecr_client,
             iam_client,
@@ -393,6 +406,7 @@ impl App {
             insights_state: CloudWatchInsightsState::new(),
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
+            sqs_state: SqsState::new(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -424,6 +438,16 @@ impl App {
                 S3BucketColumn::CreationDate,
             ],
             all_bucket_columns: S3BucketColumn::all(),
+            visible_sqs_columns: vec![
+                SqsColumn::Name,
+                SqsColumn::Type,
+                SqsColumn::Created,
+                SqsColumn::MessagesAvailable,
+                SqsColumn::MessagesInFlight,
+                SqsColumn::Encryption,
+                SqsColumn::ContentBasedDeduplication,
+            ],
+            all_sqs_columns: SqsColumn::all(),
             visible_ecr_columns: EcrColumn::all(),
             all_ecr_columns: EcrColumn::all(),
             visible_ecr_image_columns: EcrImageColumn::all(),
@@ -519,6 +543,7 @@ impl App {
             preference_section: Preferences::Columns,
             view_mode: ViewMode::List,
             error_message: None,
+            error_scroll: 0,
             page_input: String::new(),
             calendar_date: None,
             calendar_selecting: CalendarField::StartDate,
@@ -545,6 +570,7 @@ impl App {
             config: config.clone(),
             cloudwatch_client: CloudWatchClient::dummy(config.clone()),
             s3_client: S3Client::new(config.clone()),
+            sqs_client: SqsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
@@ -560,6 +586,7 @@ impl App {
             insights_state: CloudWatchInsightsState::new(),
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
+            sqs_state: SqsState::new(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -592,6 +619,16 @@ impl App {
                 S3BucketColumn::CreationDate,
             ],
             all_bucket_columns: S3BucketColumn::all(),
+            visible_sqs_columns: vec![
+                SqsColumn::Name,
+                SqsColumn::Type,
+                SqsColumn::Created,
+                SqsColumn::MessagesAvailable,
+                SqsColumn::MessagesInFlight,
+                SqsColumn::Encryption,
+                SqsColumn::ContentBasedDeduplication,
+            ],
+            all_sqs_columns: SqsColumn::all(),
             visible_ecr_columns: EcrColumn::all(),
             all_ecr_columns: EcrColumn::all(),
             visible_ecr_image_columns: EcrImageColumn::all(),
@@ -686,6 +723,7 @@ impl App {
             ],
             view_mode: ViewMode::List,
             error_message: None,
+            error_scroll: 0,
             page_input: String::new(),
             calendar_date: None,
             calendar_selecting: CalendarField::StartDate,
@@ -824,6 +862,7 @@ impl App {
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
                             "S3Buckets" => Service::S3Buckets,
+                            "SqsQueues" => Service::SqsQueues,
                             "EcrRepositories" => Service::EcrRepositories,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
@@ -1085,7 +1124,10 @@ impl App {
                 }
             }
             Action::FilterBackspace => {
-                if self.mode == Mode::TabPicker {
+                if self.mode == Mode::ServicePicker {
+                    self.service_picker.filter.pop();
+                    self.service_picker.selected = 0;
+                } else if self.mode == Mode::TabPicker {
                     self.tab_filter.pop();
                     self.tab_picker_selected = 0;
                 } else if self.mode == Mode::RegionPicker {
@@ -1279,6 +1321,14 @@ impl App {
                             } else {
                                 self.visible_ecr_columns.push(col);
                             }
+                        }
+                    }
+                } else if self.current_service == Service::SqsQueues {
+                    if let Some(&col) = self.all_sqs_columns.get(self.column_selector_index) {
+                        if let Some(pos) = self.visible_sqs_columns.iter().position(|&c| c == col) {
+                            self.visible_sqs_columns.remove(pos);
+                        } else {
+                            self.visible_sqs_columns.push(col);
                         }
                     }
                 } else if self.current_service == Service::LambdaFunctions {
@@ -1864,6 +1914,9 @@ impl App {
                 } else if self.current_service == Service::CloudFormationStacks {
                     self.mode = Mode::FilterInput;
                     self.cfn_state.input_focus = InputFocus::Filter;
+                } else if self.current_service == Service::SqsQueues {
+                    self.mode = Mode::FilterInput;
+                    self.sqs_state.input_focus = InputFocus::Filter;
                 } else if self.view_mode == ViewMode::List
                     || (self.view_mode == ViewMode::Detail
                         && self.log_groups_state.detail_tab == DetailTab::LogStreams)
@@ -1948,6 +2001,11 @@ impl App {
                         .input_focus
                         .next(&crate::ui::cfn::State::FILTER_CONTROLS);
                 } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::SqsQueues
+                {
+                    use crate::ui::sqs::FILTER_CONTROLS;
+                    self.sqs_state.input_focus = self.sqs_state.input_focus.next(FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchLogGroups
                 {
                     use crate::ui::cw::logs::FILTER_CONTROLS;
@@ -2026,6 +2084,11 @@ impl App {
                         .cfn_state
                         .input_focus
                         .prev(&crate::ui::cfn::State::FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::SqsQueues
+                {
+                    use crate::ui::sqs::FILTER_CONTROLS;
+                    self.sqs_state.input_focus = self.sqs_state.input_focus.prev(FILTER_CONTROLS);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_none()
@@ -2172,7 +2235,9 @@ impl App {
                 }
             }
             Action::ScrollUp => {
-                if self.view_mode == ViewMode::PolicyView {
+                if self.mode == Mode::ErrorModal {
+                    self.error_scroll = self.error_scroll.saturating_sub(1);
+                } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
@@ -2214,7 +2279,13 @@ impl App {
                 }
             }
             Action::ScrollDown => {
-                if self.view_mode == ViewMode::PolicyView {
+                if self.mode == Mode::ErrorModal {
+                    if let Some(error_msg) = &self.error_message {
+                        let lines = error_msg.lines().count();
+                        let max_scroll = lines.saturating_sub(1);
+                        self.error_scroll = (self.error_scroll + 1).min(max_scroll);
+                    }
+                } else if self.view_mode == ViewMode::PolicyView {
                     let lines = self.iam_state.policy_document.lines().count();
                     let max_scroll = lines.saturating_sub(1);
                     self.iam_state.policy_scroll =
@@ -2774,6 +2845,10 @@ impl App {
                     parts.push("Buckets".to_string());
                 }
             }
+            Service::SqsQueues => {
+                parts.push("SQS".to_string());
+                parts.push("Queues".to_string());
+            }
             Service::EcrRepositories => {
                 parts.push("ECR".to_string());
                 if let Some(repo) = &self.ecr_state.current_repository {
@@ -2887,6 +2962,7 @@ impl App {
                     s3::console_url_buckets(&self.config.region)
                 }
             }
+            Service::SqsQueues => crate::sqs::console_url_queues(&self.config.region),
             Service::EcrRepositories => {
                 if let Some(repo_name) = &self.ecr_state.current_repository {
                     ecr::console_url_private_repository(
@@ -3054,6 +3130,8 @@ impl App {
                         // Repositories: just columns
                         self.all_ecr_columns.len() - 1
                     }
+                } else if self.current_service == Service::SqsQueues {
+                    self.all_sqs_columns.len() - 1
                 } else if self.current_service == Service::LambdaFunctions {
                     // Lambda: N columns + 1 header + 1 empty + 1 header + 4 page sizes = N + 7
                     self.lambda_state.all_columns.len() + 6
@@ -3213,6 +3291,14 @@ impl App {
                                     .min(filtered_repos.len() - 1);
                             self.ecr_state.repositories.snap_to_page();
                         }
+                    }
+                } else if self.current_service == Service::SqsQueues {
+                    let filtered_queues = crate::ui::sqs::filtered_queues(
+                        &self.sqs_state.queues.items,
+                        &self.sqs_state.queues.filter,
+                    );
+                    if !filtered_queues.is_empty() {
+                        self.sqs_state.queues.next_item(filtered_queues.len());
                     }
                 } else if self.current_service == Service::LambdaFunctions {
                     if self.lambda_state.current_function.is_some()
@@ -3542,6 +3628,8 @@ impl App {
                     } else {
                         self.ecr_state.repositories.prev_item();
                     }
+                } else if self.current_service == Service::SqsQueues {
+                    self.sqs_state.queues.prev_item();
                 } else if self.current_service == Service::LambdaFunctions {
                     if self.lambda_state.current_function.is_some()
                         && self.lambda_state.detail_tab == LambdaDetailTab::Code
@@ -3878,6 +3966,12 @@ impl App {
                     let filtered = self.filtered_ecr_repositories();
                     self.ecr_state.repositories.page_down(filtered.len());
                 }
+            } else if self.current_service == Service::SqsQueues {
+                let filtered = crate::ui::sqs::filtered_queues(
+                    &self.sqs_state.queues.items,
+                    &self.sqs_state.queues.filter,
+                );
+                self.sqs_state.queues.page_down(filtered.len());
             } else if self.current_service == Service::LambdaFunctions {
                 let len = crate::ui::lambda::filtered_lambda_functions(self).len();
                 self.lambda_state.table.page_down(len);
@@ -4125,6 +4219,8 @@ impl App {
                 } else {
                     self.ecr_state.repositories.page_up();
                 }
+            } else if self.current_service == Service::SqsQueues {
+                self.sqs_state.queues.page_up();
             } else if self.current_service == Service::LambdaFunctions {
                 self.lambda_state.table.page_up();
             } else if self.current_service == Service::LambdaApplications {
@@ -4405,6 +4501,8 @@ impl App {
                 // In repositories view - expand selected repository
                 self.ecr_state.repositories.toggle_expand();
             }
+        } else if self.current_service == Service::SqsQueues {
+            self.sqs_state.queues.toggle_expand();
         } else if self.current_service == Service::LambdaFunctions {
             if self.lambda_state.current_function.is_some()
                 && self.lambda_state.detail_tab == LambdaDetailTab::Code
@@ -4586,6 +4684,14 @@ impl App {
                         .len();
                     self.ecr_state.repositories.goto_page(page, filtered_count);
                 }
+            }
+            Service::SqsQueues => {
+                let filtered_count = crate::ui::sqs::filtered_queues(
+                    &self.sqs_state.queues.items,
+                    &self.sqs_state.queues.filter,
+                )
+                .len();
+                self.sqs_state.queues.goto_page(page, filtered_count);
             }
             Service::S3Buckets => {
                 if self.s3_state.current_bucket.is_some() {
@@ -4886,6 +4992,8 @@ impl App {
                 // In repositories view - collapse expanded repository
                 self.ecr_state.repositories.collapse();
             }
+        } else if self.current_service == Service::SqsQueues {
+            self.sqs_state.queues.collapse();
         } else if self.current_service == Service::LambdaFunctions {
             if self.lambda_state.current_function.is_some()
                 && self.lambda_state.detail_tab == LambdaDetailTab::Code
@@ -5051,6 +5159,7 @@ impl App {
                     "Lambda > Functions" => Service::LambdaFunctions,
                     "Lambda > Applications" => Service::LambdaApplications,
                     "S3 > Buckets" => Service::S3Buckets,
+                    "SQS > Queues" => Service::SqsQueues,
                     _ => return,
                 };
 
@@ -5097,6 +5206,7 @@ impl App {
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
                             "S3Buckets" => Service::S3Buckets,
+                            "SqsQueues" => Service::SqsQueues,
                             _ => Service::CloudWatchLogGroups,
                         },
                         title: st.title.clone(),
@@ -6236,6 +6346,7 @@ impl ServicePickerState {
                 "Lambda > Functions",
                 "Lambda > Applications",
                 "S3 > Buckets",
+                "SQS > Queues",
             ],
         }
     }
@@ -12738,5 +12849,213 @@ mod region_latency_tests {
         app.s3_state.selected_row = 0;
         app.handle_action(Action::PrevPane);
         assert!(!app.s3_state.expanded_prefixes.contains("test-bucket"));
+    }
+}
+
+#[cfg(test)]
+mod sqs_tests {
+    use super::*;
+    use test_helpers::*;
+
+    #[test]
+    fn test_sqs_filter_input() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::FilterInput('t'));
+        app.handle_action(Action::FilterInput('e'));
+        app.handle_action(Action::FilterInput('s'));
+        app.handle_action(Action::FilterInput('t'));
+        assert_eq!(app.sqs_state.queues.filter, "test");
+
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.sqs_state.queues.filter, "tes");
+    }
+
+    #[test]
+    fn test_sqs_start_filter() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::FilterInput);
+        assert_eq!(app.sqs_state.input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_sqs_filter_focus_cycling() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.sqs_state.input_focus = InputFocus::Filter;
+
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(app.sqs_state.input_focus, InputFocus::Pagination);
+
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(app.sqs_state.input_focus, InputFocus::Filter);
+
+        app.handle_action(Action::PrevFilterFocus);
+        assert_eq!(app.sqs_state.input_focus, InputFocus::Pagination);
+    }
+
+    #[test]
+    fn test_sqs_navigation() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.sqs_state.queues.items = (0..10)
+            .map(|i| crate::sqs::Queue {
+                name: format!("queue{}", i),
+                url: String::new(),
+                queue_type: "Standard".to_string(),
+                created_timestamp: String::new(),
+                messages_available: "0".to_string(),
+                messages_in_flight: "0".to_string(),
+                encryption: "Disabled".to_string(),
+                content_based_deduplication: "Disabled".to_string(),
+                last_modified_timestamp: String::new(),
+                visibility_timeout: String::new(),
+                message_retention_period: String::new(),
+                maximum_message_size: String::new(),
+                delivery_delay: String::new(),
+                receive_message_wait_time: String::new(),
+                high_throughput_fifo: "N/A".to_string(),
+                deduplication_scope: "N/A".to_string(),
+                fifo_throughput_limit: "N/A".to_string(),
+            })
+            .collect();
+
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.sqs_state.queues.selected, 1);
+
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.sqs_state.queues.selected, 0);
+    }
+
+    #[test]
+    fn test_sqs_page_navigation() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.sqs_state.queues.items = (0..100)
+            .map(|i| crate::sqs::Queue {
+                name: format!("queue{}", i),
+                url: String::new(),
+                queue_type: "Standard".to_string(),
+                created_timestamp: String::new(),
+                messages_available: "0".to_string(),
+                messages_in_flight: "0".to_string(),
+                encryption: "Disabled".to_string(),
+                content_based_deduplication: "Disabled".to_string(),
+                last_modified_timestamp: String::new(),
+                visibility_timeout: String::new(),
+                message_retention_period: String::new(),
+                maximum_message_size: String::new(),
+                delivery_delay: String::new(),
+                receive_message_wait_time: String::new(),
+                high_throughput_fifo: "N/A".to_string(),
+                deduplication_scope: "N/A".to_string(),
+                fifo_throughput_limit: "N/A".to_string(),
+            })
+            .collect();
+
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.sqs_state.queues.selected, 10);
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.sqs_state.queues.selected, 0);
+    }
+
+    #[test]
+    fn test_sqs_queue_expansion() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.sqs_state.queues.items = vec![crate::sqs::Queue {
+            name: "my-queue".to_string(),
+            url: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string(),
+            queue_type: "Standard".to_string(),
+            created_timestamp: "2023-01-01".to_string(),
+            messages_available: "5".to_string(),
+            messages_in_flight: "2".to_string(),
+            encryption: "Enabled".to_string(),
+            content_based_deduplication: "Disabled".to_string(),
+            last_modified_timestamp: "2023-01-02".to_string(),
+            visibility_timeout: "30".to_string(),
+            message_retention_period: "345600".to_string(),
+            maximum_message_size: "262144".to_string(),
+            delivery_delay: "0".to_string(),
+            receive_message_wait_time: "0".to_string(),
+            high_throughput_fifo: "N/A".to_string(),
+            deduplication_scope: "N/A".to_string(),
+            fifo_throughput_limit: "N/A".to_string(),
+        }];
+        app.sqs_state.queues.selected = 0;
+
+        assert_eq!(app.sqs_state.queues.expanded_item, None);
+
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.sqs_state.queues.expanded_item, Some(0));
+
+        app.handle_action(Action::PrevPane);
+        assert_eq!(app.sqs_state.queues.expanded_item, None);
+    }
+
+    #[test]
+    fn test_sqs_column_toggle() {
+        use crate::sqs::Column as SqsColumn;
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::ColumnSelector;
+
+        // Start with all columns visible
+        app.visible_sqs_columns = SqsColumn::all();
+        let initial_count = app.visible_sqs_columns.len();
+
+        // Select first column (index 0) and toggle it
+        app.column_selector_index = 0;
+        app.handle_action(Action::ToggleColumn);
+
+        // First column should be removed
+        assert_eq!(app.visible_sqs_columns.len(), initial_count - 1);
+        assert!(!app.visible_sqs_columns.contains(&SqsColumn::Name));
+
+        // Toggle it back
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.visible_sqs_columns.len(), initial_count);
+        assert!(app.visible_sqs_columns.contains(&SqsColumn::Name));
+    }
+
+    #[test]
+    fn test_sqs_column_selector_navigation() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        // Should be able to navigate through all columns
+        let max_index = app.all_sqs_columns.len() - 1;
+
+        // Navigate to last column
+        for _ in 0..max_index {
+            app.handle_action(Action::NextItem);
+        }
+        assert_eq!(app.column_selector_index, max_index);
+
+        // Navigate back to first
+        for _ in 0..max_index {
+            app.handle_action(Action::PrevItem);
+        }
+        assert_eq!(app.column_selector_index, 0);
     }
 }

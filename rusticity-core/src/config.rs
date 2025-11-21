@@ -245,6 +245,14 @@ impl AwsConfig {
         aws_sdk_cloudwatch::Client::new(&config)
     }
 
+    pub async fn sqs_client(&self) -> aws_sdk_sqs::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_sqs::Client::new(&config)
+    }
+
     pub async fn cloudwatch_logs_client(&self) -> aws_sdk_cloudwatchlogs::Client {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(self.region.clone()))

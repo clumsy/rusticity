@@ -6,6 +6,7 @@ pub mod ecr;
 pub mod iam;
 pub mod lambda;
 pub mod s3;
+pub mod sqs;
 pub mod types;
 
 pub use alarms::AlarmsClient;
@@ -16,4 +17,5 @@ pub use ecr::EcrClient;
 pub use iam::IamClient;
 pub use lambda::LambdaClient;
 pub use s3::S3Client;
+pub use sqs::SqsClient;
 pub use types::*;

@@ -28,6 +28,22 @@ pub fn format_iso_timestamp(iso_string: &str) -> String {
     }
 }
 
+pub fn format_unix_timestamp(unix_string: &str) -> String {
+    if unix_string.is_empty() {
+        return "-".to_string();
+    }
+
+    if let Ok(timestamp) = unix_string.parse::<i64>() {
+        if let Some(dt) = DateTime::from_timestamp(timestamp, 0) {
+            format_timestamp(&dt)
+        } else {
+            unix_string.to_string()
+        }
+    } else {
+        unix_string.to_string()
+    }
+}
+
 pub trait ColumnTrait {
     fn name(&self) -> &'static str;
 

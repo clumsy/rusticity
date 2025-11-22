@@ -1872,9 +1872,12 @@ pub fn render_last_accessed_section<F>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::Service;
+    use crate::app::Tab;
     use crate::ecr::image::Image as EcrImage;
     use crate::ecr::repo::Repository as EcrRepository;
     use crate::keymap::Action;
+    use crate::lambda;
     use crate::ui::table::Column;
 
     fn test_app() -> App {
@@ -1949,13 +1952,13 @@ mod tests {
     fn test_tabs_display_with_separator() {
         // Test that tabs are formatted with ⋮ separator
         let tabs = [
-            crate::app::Tab {
-                service: crate::app::Service::CloudWatchLogGroups,
+            Tab {
+                service: Service::CloudWatchLogGroups,
                 title: "CloudWatch > Log Groups".to_string(),
                 breadcrumb: "CloudWatch > Log Groups".to_string(),
             },
-            crate::app::Tab {
-                service: crate::app::Service::CloudWatchInsights,
+            Tab {
+                service: Service::CloudWatchInsights,
                 title: "CloudWatch > Logs Insights".to_string(),
                 breadcrumb: "CloudWatch > Logs Insights".to_string(),
             },
@@ -1978,12 +1981,12 @@ mod tests {
     fn test_current_tab_highlighted() {
         let tabs = [
             crate::app::Tab {
-                service: crate::app::Service::CloudWatchLogGroups,
+                service: Service::CloudWatchLogGroups,
                 title: "CloudWatch > Log Groups".to_string(),
                 breadcrumb: "CloudWatch > Log Groups".to_string(),
             },
             crate::app::Tab {
-                service: crate::app::Service::CloudWatchInsights,
+                service: Service::CloudWatchInsights,
                 title: "CloudWatch > Logs Insights".to_string(),
                 breadcrumb: "CloudWatch > Logs Insights".to_string(),
             },
@@ -3557,46 +3560,40 @@ mod tests {
         let app = test_app_no_region();
 
         assert_eq!(app.lambda_state.visible_columns.len(), 6);
-        assert_eq!(
-            app.lambda_state.visible_columns[0],
-            crate::app::LambdaColumn::Name
-        );
-        assert_eq!(
-            app.lambda_state.visible_columns[1],
-            crate::app::LambdaColumn::Runtime
-        );
+        assert_eq!(app.lambda_state.visible_columns[0], lambda::Column::Name);
+        assert_eq!(app.lambda_state.visible_columns[1], lambda::Column::Runtime);
         assert_eq!(
             app.lambda_state.visible_columns[2],
-            crate::app::LambdaColumn::CodeSize
+            lambda::Column::CodeSize
         );
         assert_eq!(
             app.lambda_state.visible_columns[3],
-            crate::app::LambdaColumn::MemoryMb
+            lambda::Column::MemoryMb
         );
         assert_eq!(
             app.lambda_state.visible_columns[4],
-            crate::app::LambdaColumn::TimeoutSeconds
+            lambda::Column::TimeoutSeconds
         );
         assert_eq!(
             app.lambda_state.visible_columns[5],
-            crate::app::LambdaColumn::LastModified
+            lambda::Column::LastModified
         );
     }
 
     #[test]
     fn test_lambda_all_columns_available() {
-        let all_columns = crate::app::LambdaColumn::all();
+        let all_columns = lambda::Column::all();
 
         assert_eq!(all_columns.len(), 9);
-        assert!(all_columns.contains(&crate::app::LambdaColumn::Name));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::Description));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::PackageType));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::Runtime));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::Architecture));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::CodeSize));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::MemoryMb));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::TimeoutSeconds));
-        assert!(all_columns.contains(&crate::app::LambdaColumn::LastModified));
+        assert!(all_columns.contains(&lambda::Column::Name));
+        assert!(all_columns.contains(&lambda::Column::Description));
+        assert!(all_columns.contains(&lambda::Column::PackageType));
+        assert!(all_columns.contains(&lambda::Column::Runtime));
+        assert!(all_columns.contains(&lambda::Column::Architecture));
+        assert!(all_columns.contains(&lambda::Column::CodeSize));
+        assert!(all_columns.contains(&lambda::Column::MemoryMb));
+        assert!(all_columns.contains(&lambda::Column::TimeoutSeconds));
+        assert!(all_columns.contains(&lambda::Column::LastModified));
     }
 
     #[test]
@@ -3604,7 +3601,7 @@ mod tests {
         let mut app = test_app_no_region();
         app.current_service = Service::LambdaFunctions;
         app.mode = Mode::FilterInput;
-        app.lambda_state.table.items = vec![crate::app::LambdaFunction {
+        app.lambda_state.table.items = vec![lambda::Function {
             arn: "arn:aws:lambda:us-east-1:123456789012:function:test".to_string(),
             application: None,
             name: "test-function".to_string(),
@@ -4477,7 +4474,7 @@ mod tests {
     #[test]
     fn test_lambda_application_expanded_status_formatting() {
         // Status in expanded content should show emoji for complete states
-        let app = crate::lambda::Application {
+        let app = lambda::Application {
             name: "test-app".to_string(),
             arn: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-app/abc123".to_string(),
             description: "Test application".to_string(),
@@ -4501,7 +4498,7 @@ mod tests {
         assert_eq!(formatted, "✅ Update complete");
 
         // Test CREATE_COMPLETE
-        let app2 = crate::lambda::Application {
+        let app2 = lambda::Application {
             status: "CreateComplete".to_string(),
             ..app
         };

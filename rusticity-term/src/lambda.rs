@@ -1,6 +1,6 @@
 use crate::common::{format_bytes, ColumnTrait, UTC_TIMESTAMP_WIDTH};
 use crate::ui::lambda::{ApplicationDetailTab, DetailTab};
-use crate::ui::table::Column as TableColumn;
+use crate::ui::table;
 use ratatui::prelude::*;
 
 pub fn format_runtime(runtime: &str) -> String {
@@ -43,6 +43,8 @@ pub fn format_architecture(arch: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::InputFocus;
+    use crate::ui::lambda::FILTER_CONTROLS;
 
     #[test]
     fn test_format_runtime() {
@@ -215,9 +217,6 @@ mod tests {
 
     #[test]
     fn test_input_focus_cycling() {
-        use crate::common::InputFocus;
-        use crate::ui::lambda::FILTER_CONTROLS;
-
         let focus = InputFocus::Filter;
         assert_eq!(focus.next(&FILTER_CONTROLS), InputFocus::Pagination);
 
@@ -440,12 +439,12 @@ impl Column {
         ]
     }
 
-    pub fn to_column(&self) -> Box<dyn TableColumn<Function>> {
+    pub fn to_column(&self) -> Box<dyn table::Column<Function>> {
         struct FunctionColumn {
             variant: Column,
         }
 
-        impl TableColumn<Function> for FunctionColumn {
+        impl table::Column<Function> for FunctionColumn {
             fn name(&self) -> &str {
                 self.variant.name()
             }
@@ -507,12 +506,12 @@ impl ApplicationColumn {
         ]
     }
 
-    pub fn to_column(&self) -> Box<dyn crate::ui::table::Column<Application>> {
+    pub fn to_column(&self) -> Box<dyn table::Column<Application>> {
         struct ApplicationColumnImpl {
             variant: ApplicationColumn,
         }
 
-        impl crate::ui::table::Column<Application> for ApplicationColumnImpl {
+        impl table::Column<Application> for ApplicationColumnImpl {
             fn name(&self) -> &str {
                 self.variant.name()
             }
@@ -527,7 +526,6 @@ impl ApplicationColumn {
             }
 
             fn render(&self, item: &Application) -> (String, Style) {
-                use ratatui::prelude::{Color, Style};
                 match self.variant {
                     ApplicationColumn::Name => (item.name.clone(), Style::default()),
                     ApplicationColumn::Description => (item.description.clone(), Style::default()),
@@ -595,12 +593,12 @@ impl VersionColumn {
         ]
     }
 
-    pub fn to_column(&self) -> Box<dyn crate::ui::table::Column<Version>> {
+    pub fn to_column(&self) -> Box<dyn table::Column<Version>> {
         struct VersionCol {
             variant: VersionColumn,
         }
 
-        impl crate::ui::table::Column<Version> for VersionCol {
+        impl table::Column<Version> for VersionCol {
             fn name(&self) -> &str {
                 self.variant.name()
             }
@@ -623,7 +621,7 @@ impl VersionColumn {
                     VersionColumn::LastModified => item.last_modified.clone(),
                     VersionColumn::Architecture => format_architecture(&item.architecture),
                 };
-                (text, ratatui::style::Style::default())
+                (text, Style::default())
             }
         }
 
@@ -661,12 +659,12 @@ impl AliasColumn {
         ]
     }
 
-    pub fn to_column(&self) -> Box<dyn crate::ui::table::Column<Alias>> {
+    pub fn to_column(&self) -> Box<dyn table::Column<Alias>> {
         struct AliasCol {
             variant: AliasColumn,
         }
 
-        impl crate::ui::table::Column<Alias> for AliasCol {
+        impl table::Column<Alias> for AliasCol {
             fn name(&self) -> &str {
                 self.variant.name()
             }
@@ -685,7 +683,7 @@ impl AliasColumn {
                     AliasColumn::Versions => item.versions.clone(),
                     AliasColumn::Description => item.description.clone(),
                 };
-                (text, ratatui::style::Style::default())
+                (text, Style::default())
             }
         }
 
@@ -766,12 +764,12 @@ impl DeploymentColumn {
         }
     }
 
-    pub fn as_table_column(self) -> Box<dyn TableColumn<Deployment>> {
+    pub fn as_table_column(self) -> Box<dyn table::Column<Deployment>> {
         struct DeploymentColumnImpl {
             variant: DeploymentColumn,
         }
 
-        impl TableColumn<Deployment> for DeploymentColumnImpl {
+        impl table::Column<Deployment> for DeploymentColumnImpl {
             fn name(&self) -> &str {
                 self.variant.name()
             }

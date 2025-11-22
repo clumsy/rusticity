@@ -25,7 +25,7 @@ pub use expanded_view::{format_expansion_text, format_fields};
 pub use pagination::{render_paginated_filter, PaginatedFilterConfig};
 pub use prefs::Preferences;
 pub use query_editor::{render_query_editor, QueryEditorConfig};
-pub use status::{hint, hint_last, SPINNER_FRAMES};
+pub use status::{first_hint, hint, last_hint, SPINNER_FRAMES};
 pub use table::{format_expandable, CURSOR_COLLAPSED, CURSOR_EXPANDED};
 
 use crate::app::{AlarmViewMode, App, Service, ViewMode};
@@ -1276,16 +1276,13 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Help text
-    let help = Paragraph::new(Line::from(vec![
-        Span::styled("^r", crate::ui::red_text()),
-        Span::raw(" retry  "),
-        Span::styled("y", crate::ui::red_text()),
-        Span::raw(" copy  "),
-        Span::styled("↑↓/^u/^d", crate::ui::red_text()),
-        Span::raw(" scroll  "),
-        Span::styled("q/esc", crate::ui::red_text()),
-        Span::raw(" close"),
-    ]))
+    let help_spans = vec![
+        first_hint("^r", "retry"),
+        hint("y", "copy"),
+        hint("↑↓,^u,^d", "scroll"),
+        last_hint("q,⎋", "close"),
+    ].into_iter().flatten().collect::<Vec<_>>();
+    let help = Paragraph::new(Line::from(help_spans))
     .alignment(Alignment::Center);
 
     frame.render_widget(help, chunks[2]);

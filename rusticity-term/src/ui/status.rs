@@ -25,7 +25,7 @@ pub fn hint(key: &'static str, action: &'static str) -> Vec<Span<'static>> {
     ]
 }
 
-pub fn hint_last(key: &'static str, action: &'static str) -> Vec<Span<'static>> {
+pub fn last_hint(key: &'static str, action: &'static str) -> Vec<Span<'static>> {
     vec![
         Span::raw(" "),
         Span::styled(key, red_text()),
@@ -47,7 +47,7 @@ fn common_detail_hotkeys() -> Vec<Span<'static>> {
     spans.extend(hint("^p", "preferences"));
     spans.extend(hint("^r", "refresh"));
     spans.extend(hint("^w", "close"));
-    spans.extend(hint_last("q", "quit"));
+    spans.extend(last_hint("q", "quit"));
     spans
 }
 
@@ -64,7 +64,7 @@ fn common_list_hotkeys() -> Vec<Span<'static>> {
     spans.extend(hint("^p", "preferences"));
     spans.extend(hint("^r", "refresh"));
     spans.extend(hint("^w", "close"));
-    spans.extend(hint_last("q", "quit"));
+    spans.extend(last_hint("q", "quit"));
     spans
 }
 
@@ -92,7 +92,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("⇤⇥", "switch"));
         }
 
-        hints.extend(hint_last("⎋", "close"));
+        hints.extend(last_hint("⎋", "close"));
         hints
     } else if app.mode == Mode::InsightsInput {
         let mut hints = vec![];
@@ -102,7 +102,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("⏎", "execute"));
         hints.extend(hint("⎋", "cancel"));
         hints.extend(hint("^r", "refresh"));
-        hints.extend(hint_last("^w", "close"));
+        hints.extend(last_hint("^w", "close"));
         hints
     } else if app.current_service == Service::CloudWatchInsights {
         let mut hints = vec![];
@@ -113,7 +113,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^o", "console"));
         hints.extend(hint("⎋", "back"));
         hints.extend(hint("^w", "close"));
-        hints.extend(hint_last("q", "quit"));
+        hints.extend(last_hint("q", "quit"));
         hints
     } else if app.mode == Mode::EventFilterInput {
         let mut hints = vec![];
@@ -121,7 +121,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("␣", "change unit"));
         hints.extend(hint("⏎", "apply"));
         hints.extend(hint("⎋", "cancel"));
-        hints.extend(hint_last("^w", "close"));
+        hints.extend(last_hint("^w", "close"));
         hints
     } else if app.mode == Mode::FilterInput {
         let mut hints = vec![];
@@ -129,7 +129,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("⎋", "cancel"));
         hints.extend(hint("␣", "toggle"));
         hints.extend(hint("⇤⇥", "switch"));
-        hints.extend(hint_last("^w", "close"));
+        hints.extend(last_hint("^w", "close"));
         hints
     } else if app.view_mode == ViewMode::Events {
         let mut hints = vec![];
@@ -140,7 +140,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("p", "columns"));
         hints.extend(hint("^w", "close"));
-        hints.extend(hint_last("q", "quit"));
+        hints.extend(last_hint("q", "quit"));
         hints
     } else if app.view_mode == ViewMode::Detail {
         let mut hints = vec![];
@@ -157,7 +157,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("p", "columns"));
         hints.extend(hint("^w", "close"));
-        hints.extend(hint_last("q", "quit"));
+        hints.extend(last_hint("q", "quit"));
         hints
     } else if app.current_service == Service::EcrRepositories {
         if app.ecr_state.current_repository.is_some() {
@@ -169,7 +169,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("^o", "console"));
             hints.extend(hint("^r", "refresh"));
             hints.extend(hint("^w", "close"));
-            hints.extend(hint_last("q", "quit"));
+            hints.extend(last_hint("q", "quit"));
             hints
         } else {
             let mut hints = vec![];
@@ -181,7 +181,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("^o", "console"));
             hints.extend(hint("^r", "refresh"));
             hints.extend(hint("^w", "close"));
-            hints.extend(hint_last("q", "quit"));
+            hints.extend(last_hint("q", "quit"));
             hints
         }
     } else if app.current_service == Service::S3Buckets {
@@ -195,7 +195,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("^o", "console"));
             hints.extend(hint("^r", "refresh"));
             hints.extend(hint("^w", "close"));
-            hints.extend(hint_last("q", "quit"));
+            hints.extend(last_hint("q", "quit"));
             hints
         } else {
             let mut hints = vec![];
@@ -206,7 +206,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("^o", "console"));
             hints.extend(hint("^r", "refresh"));
             hints.extend(hint("^w", "close"));
-            hints.extend(hint_last("q", "quit"));
+            hints.extend(last_hint("q", "quit"));
             hints
         }
     } else if app.current_service == Service::CloudFormationStacks {
@@ -227,7 +227,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("^o", "console"));
             hints.extend(hint("^r", "refresh"));
             hints.extend(hint("^w", "close"));
-            hints.extend(hint_last("q", "quit"));
+            hints.extend(last_hint("q", "quit"));
             hints
         }
     } else if app.current_service == Service::IamUsers {
@@ -257,7 +257,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^p", "preferences"));
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("^w", "close"));
-        hints.extend(hint_last("q", "quit"));
+        hints.extend(last_hint("q", "quit"));
         hints
     } else {
         let mut hints = vec![];
@@ -270,7 +270,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("p", "columns"));
         hints.extend(hint("^w", "close"));
-        hints.extend(hint_last("q", "quit"));
+        hints.extend(last_hint("q", "quit"));
         hints
     };
 

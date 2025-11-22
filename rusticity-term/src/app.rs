@@ -1,6 +1,6 @@
 pub use crate::aws::{Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
-use crate::common::{ColumnTrait, CyclicEnum, InputFocus, PageSize, SortDirection};
+use crate::common::{CyclicEnum, InputFocus, PageSize, SortDirection};
 use crate::cw::insights::{InsightsFocus, InsightsState};
 pub use crate::cw::{Alarm, AlarmColumn};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
@@ -150,12 +150,6 @@ pub struct CloudWatchAlarmsState {
     pub input_focus: InputFocus,
 }
 
-impl ColumnTrait for S3ObjectColumn {
-    fn name(&self) -> &'static str {
-        self.name()
-    }
-}
-
 impl PageSize {
     pub fn value(&self) -> usize {
         match self {
@@ -173,37 +167,6 @@ impl PageSize {
             PageSize::Fifty => PageSize::OneHundred,
             PageSize::OneHundred => PageSize::Ten,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum S3ObjectColumn {
-    Name,
-    Type,
-    LastModified,
-    Size,
-    StorageClass,
-}
-
-impl S3ObjectColumn {
-    pub fn name(&self) -> &'static str {
-        match self {
-            S3ObjectColumn::Name => "Name",
-            S3ObjectColumn::Type => "Type",
-            S3ObjectColumn::LastModified => "Last modified",
-            S3ObjectColumn::Size => "Size",
-            S3ObjectColumn::StorageClass => "Storage class",
-        }
-    }
-
-    pub fn all() -> Vec<S3ObjectColumn> {
-        vec![
-            S3ObjectColumn::Name,
-            S3ObjectColumn::Type,
-            S3ObjectColumn::LastModified,
-            S3ObjectColumn::Size,
-            S3ObjectColumn::StorageClass,
-        ]
     }
 }
 

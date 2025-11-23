@@ -11,6 +11,61 @@ pub struct Profile {
     pub source_profile: Option<String>,
 }
 
+enum ProfileColumn {
+    Name,
+    Account,
+    Region,
+    Role,
+    Source,
+}
+
+impl TableColumn<Profile> for ProfileColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::Name => "Profile",
+            Self::Account => "Account",
+            Self::Region => "Region",
+            Self::Role => "Role/User",
+            Self::Source => "Source",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::Name => 25,
+            Self::Account => 15,
+            Self::Region => 15,
+            Self::Role => 30,
+            Self::Source => 20,
+        }
+    }
+
+    fn render(&self, item: &Profile) -> (String, Style) {
+        let text = match self {
+            Self::Name => item.name.clone(),
+            Self::Account => item.account.clone().unwrap_or_default(),
+            Self::Region => item.region.clone().unwrap_or_default(),
+            Self::Role => {
+                if let Some(ref role) = item.role_arn {
+                    if role.contains(":role/") {
+                        let role_name = role.split('/').next_back().unwrap_or(role);
+                        format!("role/{}", role_name)
+                    } else if role.contains(":user/") {
+                        let user_name = role.split('/').next_back().unwrap_or(role);
+                        format!("user/{}", user_name)
+                    } else {
+                        role.clone()
+                    }
+                } else {
+                    String::new()
+                }
+            }
+            Self::Source => item.source_profile.clone().unwrap_or_default(),
+        };
+        (text, Style::default())
+    }
+}
+
 impl Profile {
     pub fn load_all() -> Vec<Self> {
         let mut profiles = Vec::new();
@@ -114,92 +169,12 @@ pub fn render_profile_picker(
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);
 
-    struct ProfileNameColumn;
-    impl TableColumn<Profile> for ProfileNameColumn {
-        fn name(&self) -> &str {
-            "Profile"
-        }
-        fn width(&self) -> u16 {
-            25
-        }
-        fn render(&self, item: &Profile) -> (String, Style) {
-            (item.name.clone(), Style::default())
-        }
-    }
-
-    struct ProfileAccountColumn;
-    impl TableColumn<Profile> for ProfileAccountColumn {
-        fn name(&self) -> &str {
-            "Account"
-        }
-        fn width(&self) -> u16 {
-            15
-        }
-        fn render(&self, item: &Profile) -> (String, Style) {
-            (item.account.clone().unwrap_or_default(), Style::default())
-        }
-    }
-
-    struct ProfileRegionColumn;
-    impl TableColumn<Profile> for ProfileRegionColumn {
-        fn name(&self) -> &str {
-            "Region"
-        }
-        fn width(&self) -> u16 {
-            15
-        }
-        fn render(&self, item: &Profile) -> (String, Style) {
-            (item.region.clone().unwrap_or_default(), Style::default())
-        }
-    }
-
-    struct ProfileRoleColumn;
-    impl TableColumn<Profile> for ProfileRoleColumn {
-        fn name(&self) -> &str {
-            "Role/User"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &Profile) -> (String, Style) {
-            if let Some(ref role) = item.role_arn {
-                if role.contains(":role/") {
-                    let role_name = role.split('/').next_back().unwrap_or(role);
-                    (format!("role/{}", role_name), Style::default())
-                } else if role.contains(":user/") {
-                    let user_name = role.split('/').next_back().unwrap_or(role);
-                    (format!("user/{}", user_name), Style::default())
-                } else {
-                    (role.clone(), Style::default())
-                }
-            } else {
-                (String::new(), Style::default())
-            }
-        }
-    }
-
-    struct ProfileSourceColumn;
-    impl TableColumn<Profile> for ProfileSourceColumn {
-        fn name(&self) -> &str {
-            "Source"
-        }
-        fn width(&self) -> u16 {
-            20
-        }
-        fn render(&self, item: &Profile) -> (String, Style) {
-            (
-                item.source_profile.clone().unwrap_or_default(),
-                Style::default(),
-            )
-        }
-    }
-
     let columns: Vec<Box<dyn TableColumn<Profile>>> = vec![
-        Box::new(ProfileNameColumn),
-        Box::new(ProfileAccountColumn),
-        Box::new(ProfileRegionColumn),
-        Box::new(ProfileRoleColumn),
-        Box::new(ProfileSourceColumn),
+        Box::new(ProfileColumn::Name),
+        Box::new(ProfileColumn::Account),
+        Box::new(ProfileColumn::Region),
+        Box::new(ProfileColumn::Role),
+        Box::new(ProfileColumn::Source),
     ];
 
     let filtered = app.get_filtered_profiles();

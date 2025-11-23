@@ -5,6 +5,47 @@ use crate::ui::table::{self};
 use ratatui::prelude::{Color, Constraint, Direction, Layout, Span, Style};
 use ratatui::widgets::Clear;
 
+enum SessionColumn {
+    Timestamp,
+    Profile,
+    Region,
+    Account,
+    Tabs,
+}
+
+impl table::Column<Session> for SessionColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::Timestamp => "Timestamp",
+            Self::Profile => "Profile",
+            Self::Region => "Region",
+            Self::Account => "Account",
+            Self::Tabs => "Tabs",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::Timestamp => 25,
+            Self::Profile => 25,
+            Self::Region => 15,
+            Self::Account => 15,
+            Self::Tabs => 8,
+        }
+    }
+
+    fn render(&self, item: &Session) -> (String, Style) {
+        let text = match self {
+            Self::Timestamp => item.timestamp.clone(),
+            Self::Profile => item.profile.clone(),
+            Self::Region => item.region.clone(),
+            Self::Account => item.account_id.clone(),
+            Self::Tabs => item.tabs.len().to_string(),
+        };
+        (text, Style::default())
+    }
+}
+
 pub fn render_session_picker(
     frame: &mut ratatui::Frame,
     app: &crate::app::App,
@@ -28,77 +69,12 @@ pub fn render_session_picker(
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);
 
-    struct SessionTimestampColumn;
-    impl table::Column<Session> for SessionTimestampColumn {
-        fn name(&self) -> &str {
-            "Timestamp"
-        }
-        fn width(&self) -> u16 {
-            25
-        }
-        fn render(&self, item: &Session) -> (String, Style) {
-            (item.timestamp.clone(), Style::default())
-        }
-    }
-
-    struct SessionProfileColumn;
-    impl table::Column<Session> for SessionProfileColumn {
-        fn name(&self) -> &str {
-            "Profile"
-        }
-        fn width(&self) -> u16 {
-            25
-        }
-        fn render(&self, item: &Session) -> (String, Style) {
-            (item.profile.clone(), Style::default())
-        }
-    }
-
-    struct SessionRegionColumn;
-    impl table::Column<Session> for SessionRegionColumn {
-        fn name(&self) -> &str {
-            "Region"
-        }
-        fn width(&self) -> u16 {
-            15
-        }
-        fn render(&self, item: &Session) -> (String, Style) {
-            (item.region.clone(), Style::default())
-        }
-    }
-
-    struct SessionAccountColumn;
-    impl table::Column<Session> for SessionAccountColumn {
-        fn name(&self) -> &str {
-            "Account"
-        }
-        fn width(&self) -> u16 {
-            15
-        }
-        fn render(&self, item: &Session) -> (String, Style) {
-            (item.account_id.clone(), Style::default())
-        }
-    }
-
-    struct SessionTabsColumn;
-    impl table::Column<Session> for SessionTabsColumn {
-        fn name(&self) -> &str {
-            "Tabs"
-        }
-        fn width(&self) -> u16 {
-            8
-        }
-        fn render(&self, item: &Session) -> (String, Style) {
-            (item.tabs.len().to_string(), Style::default())
-        }
-    }
-
     let columns: Vec<Box<dyn table::Column<Session>>> = vec![
-        Box::new(SessionTimestampColumn),
-        Box::new(SessionProfileColumn),
-        Box::new(SessionRegionColumn),
-        Box::new(SessionAccountColumn),
-        Box::new(SessionTabsColumn),
+        Box::new(SessionColumn::Timestamp),
+        Box::new(SessionColumn::Profile),
+        Box::new(SessionColumn::Region),
+        Box::new(SessionColumn::Account),
+        Box::new(SessionColumn::Tabs),
     ];
 
     let filtered = app.get_filtered_sessions();

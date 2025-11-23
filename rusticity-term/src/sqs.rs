@@ -1,4 +1,6 @@
-use crate::common::{format_bytes, format_duration_seconds, format_unix_timestamp, ColumnTrait};
+use crate::common::{
+    format_bytes, format_duration_seconds, format_unix_timestamp, ColumnTrait, UTC_TIMESTAMP_WIDTH,
+};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
 
@@ -98,12 +100,12 @@ impl TableColumn<Queue> for Column {
         ColumnTrait::name(self).len().max(match self {
             Column::Name => 40,
             Column::Type => 10,
-            Column::Created => 20,
+            Column::Created => UTC_TIMESTAMP_WIDTH as usize,
             Column::MessagesAvailable => 20,
             Column::MessagesInFlight => 20,
             Column::Encryption => 12,
             Column::ContentBasedDeduplication => 30,
-            Column::LastUpdated => 20,
+            Column::LastUpdated => UTC_TIMESTAMP_WIDTH as usize,
             Column::VisibilityTimeout => 20,
             Column::MessageRetentionPeriod => 25,
             Column::MaximumMessageSize => 22,
@@ -180,6 +182,14 @@ pub fn console_url_queues(region: &str) -> String {
     )
 }
 
+pub fn console_url_queue_detail(region: &str, queue_url: &str) -> String {
+    let encoded_url = urlencoding::encode(queue_url);
+    format!(
+        "https://{}.console.aws.amazon.com/sqs/v3/home?region={}#/queues/{}",
+        region, region, encoded_url
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +199,15 @@ mod tests {
         assert_eq!(
             console_url_queues("us-east-1"),
             "https://us-east-1.console.aws.amazon.com/sqs/v3/home?region=us-east-1#/queues"
+        );
+    }
+
+    #[test]
+    fn test_console_url_queue_detail() {
+        let url = "https://sqs.us-east-1.amazonaws.com/654654343159/MyTest";
+        assert_eq!(
+            console_url_queue_detail("us-east-1", url),
+            "https://us-east-1.console.aws.amazon.com/sqs/v3/home?region=us-east-1#/queues/https%3A%2F%2Fsqs.us-east-1.amazonaws.com%2F654654343159%2FMyTest"
         );
     }
 

@@ -1,6 +1,6 @@
 use crate::common::SortDirection;
-use crate::ui::active_border;
 use crate::ui::table::{render_table, Column as TableColumn, TableConfig};
+use crate::ui::{active_border, SEARCH_ICON};
 use ratatui::{prelude::*, widgets::*};
 
 pub struct Profile {
@@ -111,7 +111,7 @@ pub fn render_profile_picker(
     ]))
     .block(
         Block::default()
-            .title(" 🔍 ")
+            .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_style(active_border()),
     )

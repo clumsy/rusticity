@@ -1281,9 +1281,11 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
         hint("y", "copy"),
         hint("↑↓,^u,^d", "scroll"),
         last_hint("q,⎋", "close"),
-    ].into_iter().flatten().collect::<Vec<_>>();
-    let help = Paragraph::new(Line::from(help_spans))
-    .alignment(Alignment::Center);
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let help = Paragraph::new(Line::from(help_spans)).alignment(Alignment::Center);
 
     frame.render_widget(help, chunks[2]);
 }

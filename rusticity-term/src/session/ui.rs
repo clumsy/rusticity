@@ -1,5 +1,9 @@
 use super::Session;
 use crate::common::SortDirection;
+use crate::ui::table::{self};
+use crate::ui::SEARCH_ICON;
+use ratatui::prelude::{Color, Constraint, Direction, Layout, Line, Span, Style};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 pub fn render_session_picker(
     frame: &mut ratatui::Frame,
@@ -7,9 +11,6 @@ pub fn render_session_picker(
     area: ratatui::prelude::Rect,
     centered_rect: fn(u16, u16, ratatui::prelude::Rect) -> ratatui::prelude::Rect,
 ) {
-    use crate::ui::table::{render_table, Column as TableColumn, TableConfig};
-    use ratatui::{prelude::*, widgets::*};
-
     let popup_area = centered_rect(80, 70, area);
 
     let chunks = Layout::default()
@@ -24,7 +25,7 @@ pub fn render_session_picker(
     ]))
     .block(
         Block::default()
-            .title(" 🔍 ")
+            .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_style(crate::ui::active_border()),
     )
@@ -34,7 +35,7 @@ pub fn render_session_picker(
     frame.render_widget(filter, chunks[0]);
 
     struct SessionTimestampColumn;
-    impl TableColumn<Session> for SessionTimestampColumn {
+    impl table::Column<Session> for SessionTimestampColumn {
         fn name(&self) -> &str {
             "Timestamp"
         }
@@ -47,7 +48,7 @@ pub fn render_session_picker(
     }
 
     struct SessionProfileColumn;
-    impl TableColumn<Session> for SessionProfileColumn {
+    impl table::Column<Session> for SessionProfileColumn {
         fn name(&self) -> &str {
             "Profile"
         }
@@ -60,7 +61,7 @@ pub fn render_session_picker(
     }
 
     struct SessionRegionColumn;
-    impl TableColumn<Session> for SessionRegionColumn {
+    impl table::Column<Session> for SessionRegionColumn {
         fn name(&self) -> &str {
             "Region"
         }
@@ -73,7 +74,7 @@ pub fn render_session_picker(
     }
 
     struct SessionAccountColumn;
-    impl TableColumn<Session> for SessionAccountColumn {
+    impl table::Column<Session> for SessionAccountColumn {
         fn name(&self) -> &str {
             "Account"
         }
@@ -86,7 +87,7 @@ pub fn render_session_picker(
     }
 
     struct SessionTabsColumn;
-    impl TableColumn<Session> for SessionTabsColumn {
+    impl table::Column<Session> for SessionTabsColumn {
         fn name(&self) -> &str {
             "Tabs"
         }
@@ -98,7 +99,7 @@ pub fn render_session_picker(
         }
     }
 
-    let columns: Vec<Box<dyn TableColumn<Session>>> = vec![
+    let columns: Vec<Box<dyn table::Column<Session>>> = vec![
         Box::new(SessionTimestampColumn),
         Box::new(SessionProfileColumn),
         Box::new(SessionRegionColumn),
@@ -107,7 +108,7 @@ pub fn render_session_picker(
     ];
 
     let filtered = app.get_filtered_sessions();
-    let config = TableConfig {
+    let config = table::TableConfig {
         items: filtered,
         selected_index: app.session_picker_selected,
         expanded_index: None,
@@ -120,5 +121,5 @@ pub fn render_session_picker(
         is_active: true,
     };
 
-    render_table(frame, config);
+    table::render_table(frame, config);
 }

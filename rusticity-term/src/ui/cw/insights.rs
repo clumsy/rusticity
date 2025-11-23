@@ -168,7 +168,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
     };
 
     let block = Block::default()
-        .title(" 🔍 Logs Insights ")
+        .title(" Logs Insights ")
         .borders(Borders::ALL)
         .border_style(border_style);
 

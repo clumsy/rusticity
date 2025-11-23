@@ -1706,7 +1706,11 @@ impl App {
                 self.preference_section = Preferences::Columns;
             }
             Action::NextDetailTab => {
-                if self.current_service == Service::LambdaApplications
+                if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    self.sqs_state.detail_tab = self.sqs_state.detail_tab.next();
+                } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
                     self.lambda_application_state.detail_tab =
@@ -1772,7 +1776,11 @@ impl App {
                 }
             }
             Action::PrevDetailTab => {
-                if self.current_service == Service::LambdaApplications
+                if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    self.sqs_state.detail_tab = self.sqs_state.detail_tab.prev();
+                } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
                     self.lambda_application_state.detail_tab =
@@ -2446,6 +2454,40 @@ impl App {
                             copy_to_clipboard(&arn);
                         }
                     }
+                } else if self.current_service == Service::SqsQueues {
+                    if self.sqs_state.current_queue.is_some() {
+                        // In queue detail view - copy queue ARN
+                        if let Some(queue) = self
+                            .sqs_state
+                            .queues
+                            .items
+                            .iter()
+                            .find(|q| Some(&q.url) == self.sqs_state.current_queue.as_ref())
+                        {
+                            let arn = format!(
+                                "arn:aws:sqs:{}:{}:{}",
+                                crate::ui::sqs::extract_region(&queue.url),
+                                crate::ui::sqs::extract_account_id(&queue.url),
+                                queue.name
+                            );
+                            copy_to_clipboard(&arn);
+                        }
+                    } else {
+                        // In list view - copy selected queue ARN
+                        let filtered_queues = crate::ui::sqs::filtered_queues(
+                            &self.sqs_state.queues.items,
+                            &self.sqs_state.queues.filter,
+                        );
+                        if let Some(queue) = self.sqs_state.queues.get_selected(&filtered_queues) {
+                            let arn = format!(
+                                "arn:aws:sqs:{}:{}:{}",
+                                crate::ui::sqs::extract_region(&queue.url),
+                                crate::ui::sqs::extract_account_id(&queue.url),
+                                queue.name
+                            );
+                            copy_to_clipboard(&arn);
+                        }
+                    }
                 }
             }
             Action::CopyToClipboard => {
@@ -2525,6 +2567,12 @@ impl App {
                         self.ecr_state.images.items.clear();
                         self.ecr_state.images.reset();
                     }
+                }
+                // SQS: go back from queue detail to list
+                else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    self.sqs_state.current_queue = None;
                 }
                 // IAM: go back from user detail to list
                 else if self.current_service == Service::IamUsers
@@ -2925,7 +2973,13 @@ impl App {
                     s3::console_url_buckets(&self.config.region)
                 }
             }
-            Service::SqsQueues => crate::sqs::console_url_queues(&self.config.region),
+            Service::SqsQueues => {
+                if let Some(queue_url) = &self.sqs_state.current_queue {
+                    crate::sqs::console_url_queue_detail(&self.config.region, queue_url)
+                } else {
+                    crate::sqs::console_url_queues(&self.config.region)
+                }
+            }
             Service::EcrRepositories => {
                 if let Some(repo_name) = &self.ecr_state.current_repository {
                     ecr::console_url_private_repository(
@@ -3200,6 +3254,13 @@ impl App {
                     let max_scroll = lines.saturating_sub(1);
                     self.iam_state.policy_scroll =
                         (self.iam_state.policy_scroll + 1).min(max_scroll);
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    let lines = self.sqs_state.policy_document.lines().count();
+                    let max_scroll = lines.saturating_sub(1);
+                    self.sqs_state.policy_scroll =
+                        (self.sqs_state.policy_scroll + 1).min(max_scroll);
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
                     if self.log_groups_state.event_scroll_offset >= max_scroll {
@@ -3563,6 +3624,10 @@ impl App {
                     }
                 } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(1);
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(1);
                 } else if self.view_mode == ViewMode::Events {
                     if self.log_groups_state.event_scroll_offset == 0 {
                         if self.log_groups_state.has_older_events {
@@ -3843,6 +3908,12 @@ impl App {
             let lines = self.iam_state.policy_document.lines().count();
             let max_scroll = lines.saturating_sub(1);
             self.iam_state.policy_scroll = (self.iam_state.policy_scroll + 10).min(max_scroll);
+        } else if self.current_service == Service::SqsQueues
+            && self.sqs_state.current_queue.is_some()
+        {
+            let lines = self.sqs_state.policy_document.lines().count();
+            let max_scroll = lines.saturating_sub(1);
+            self.sqs_state.policy_scroll = (self.sqs_state.policy_scroll + 10).min(max_scroll);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -4121,6 +4192,10 @@ impl App {
             );
         } else if self.view_mode == ViewMode::PolicyView {
             self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
+        } else if self.current_service == Service::SqsQueues
+            && self.sqs_state.current_queue.is_some()
+        {
+            self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(10);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -4465,7 +4540,7 @@ impl App {
                 self.ecr_state.repositories.toggle_expand();
             }
         } else if self.current_service == Service::SqsQueues {
-            self.sqs_state.queues.toggle_expand();
+            self.sqs_state.queues.expand();
         } else if self.current_service == Service::LambdaFunctions {
             if self.lambda_state.current_function.is_some()
                 && self.lambda_state.detail_tab == LambdaDetailTab::Code
@@ -5422,6 +5497,16 @@ impl App {
                         self.ecr_state.current_repository_uri = Some(repo_uri);
                         self.ecr_state.images.reset();
                         self.ecr_state.repositories.loading = true;
+                    }
+                }
+            } else if self.current_service == Service::SqsQueues {
+                if self.sqs_state.current_queue.is_none() {
+                    let filtered_queues = crate::ui::sqs::filtered_queues(
+                        &self.sqs_state.queues.items,
+                        &self.sqs_state.queues.filter,
+                    );
+                    if let Some(queue) = self.sqs_state.queues.get_selected(&filtered_queues) {
+                        self.sqs_state.current_queue = Some(queue.url.clone());
                     }
                 }
             } else if self.current_service == Service::IamUsers {
@@ -12965,9 +13050,19 @@ mod sqs_tests {
 
         assert_eq!(app.sqs_state.queues.expanded_item, None);
 
+        // Right arrow expands
         app.handle_action(Action::NextPane);
         assert_eq!(app.sqs_state.queues.expanded_item, Some(0));
 
+        // Right arrow again keeps it expanded
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.sqs_state.queues.expanded_item, Some(0));
+
+        // Left arrow collapses
+        app.handle_action(Action::PrevPane);
+        assert_eq!(app.sqs_state.queues.expanded_item, None);
+
+        // Left arrow again keeps it collapsed
         app.handle_action(Action::PrevPane);
         assert_eq!(app.sqs_state.queues.expanded_item, None);
     }
@@ -13020,5 +13115,46 @@ mod sqs_tests {
             app.handle_action(Action::PrevItem);
         }
         assert_eq!(app.column_selector_index, 0);
+    }
+
+    #[test]
+    fn test_sqs_queue_selection() {
+        let mut app = test_app();
+        app.current_service = Service::SqsQueues;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.sqs_state.queues.items = vec![crate::sqs::Queue {
+            name: "my-queue".to_string(),
+            url: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string(),
+            queue_type: "Standard".to_string(),
+            created_timestamp: "2023-01-01".to_string(),
+            messages_available: "5".to_string(),
+            messages_in_flight: "2".to_string(),
+            encryption: "Enabled".to_string(),
+            content_based_deduplication: "Disabled".to_string(),
+            last_modified_timestamp: "2023-01-02".to_string(),
+            visibility_timeout: "30".to_string(),
+            message_retention_period: "345600".to_string(),
+            maximum_message_size: "262144".to_string(),
+            delivery_delay: "0".to_string(),
+            receive_message_wait_time: "0".to_string(),
+            high_throughput_fifo: "N/A".to_string(),
+            deduplication_scope: "N/A".to_string(),
+            fifo_throughput_limit: "N/A".to_string(),
+        }];
+        app.sqs_state.queues.selected = 0;
+
+        assert_eq!(app.sqs_state.current_queue, None);
+
+        // Select queue
+        app.handle_action(Action::Select);
+        assert_eq!(
+            app.sqs_state.current_queue,
+            Some("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string())
+        );
+
+        // Go back
+        app.handle_action(Action::GoBack);
+        assert_eq!(app.sqs_state.current_queue, None);
     }
 }

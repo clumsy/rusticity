@@ -1,6 +1,6 @@
 use crate::common::SortDirection;
+use crate::ui::filter_area;
 use crate::ui::table::{render_table, Column as TableColumn, TableConfig};
-use crate::ui::{active_border, SEARCH_ICON};
 use ratatui::{prelude::*, widgets::*};
 
 pub struct Profile {
@@ -105,17 +105,11 @@ pub fn render_profile_picker(
         .split(popup_area);
 
     let cursor = "█";
-    let filter = Paragraph::new(Line::from(vec![
+    let filter_text = vec![
         Span::raw(&app.profile_filter),
         Span::styled(cursor, Style::default().fg(Color::Green)),
-    ]))
-    .block(
-        Block::default()
-            .title(SEARCH_ICON)
-            .borders(Borders::ALL)
-            .border_style(active_border()),
-    )
-    .style(Style::default());
+    ];
+    let filter = filter_area(filter_text, true);
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);

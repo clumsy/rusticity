@@ -7,9 +7,8 @@ use crate::iam::{
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::{
-    active_border, get_cursor, labeled_field, render_json_highlighted,
+    active_border, filter_area, get_cursor, labeled_field, render_json_highlighted,
     render_last_accessed_section, render_permissions_section, render_tags_section, vertical,
-    SEARCH_ICON,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -586,19 +585,8 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[1],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[1]);
 
     let scroll_offset = app.iam_state.groups.scroll_offset;
     let page_groups: Vec<&crate::iam::IamGroup> = filtered_groups
@@ -1116,19 +1104,8 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[0],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[0]);
 
     // Table
     let scroll_offset = app.iam_state.policies.scroll_offset;
@@ -1336,19 +1313,8 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[0],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[0]);
 
     // Table using common render_table
     let scroll_offset = app.iam_state.tags.scroll_offset;
@@ -1498,19 +1464,8 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[0],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[0]);
 
     let scroll_offset = app.iam_state.user_group_memberships.scroll_offset;
     let page_groups: Vec<&crate::iam::UserGroup> = filtered_groups
@@ -1678,19 +1633,8 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[0],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[0]);
 
     // Table using common render_table
     let scroll_offset = app.iam_state.user_tags.scroll_offset;
@@ -1843,20 +1787,8 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
         right_content,
         Style::default().fg(Color::DarkGray),
     ));
-
-    frame.render_widget(
-        Paragraph::new(Line::from(first_line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        chunks[0],
-    );
+    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
+    frame.render_widget(filter, chunks[0]);
 
     // Table using common render_table
     let scroll_offset = app.iam_state.last_accessed_services.scroll_offset;

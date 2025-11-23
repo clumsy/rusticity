@@ -103,6 +103,22 @@ use ratatui::{prelude::*, widgets::*};
 pub const SEARCH_ICON: &str = " 🔍 ";
 pub const PREFERENCES_TITLE: &str = " Preferences ";
 
+// Filter
+pub fn filter_area(filter_text: Vec<Span<'_>>, is_active: bool) -> Paragraph<'_> {
+    Paragraph::new(Line::from(filter_text))
+        .block(
+            Block::default()
+                .title(SEARCH_ICON)
+                .borders(Borders::ALL)
+                .border_style(if is_active {
+                    active_border()
+                } else {
+                    Style::default()
+                }),
+        )
+        .style(Style::default())
+}
+
 // Common style helpers
 pub fn active_border() -> Style {
     Style::default().fg(Color::Green)
@@ -176,17 +192,8 @@ pub fn render_search_filter(
         },
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).block(block_with_style(
-            " 🔍 ",
-            if is_active {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default()
-            },
-        )),
-        area,
-    );
+    let filter = filter_area(spans, is_active);
+    frame.render_widget(filter, area);
 }
 
 fn render_toggle(is_on: bool) -> Vec<Span<'static>> {
@@ -1353,7 +1360,7 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
     ]))
     .block(
         Block::default()
-            .title(" 🔍 ")
+            .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if is_active {
                 active_color
@@ -1410,7 +1417,7 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
     };
     let filter = Paragraph::new(filter_text).style(filter_style).block(
         Block::default()
-            .title(" 🔍 ")
+            .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow)),
     );
@@ -1653,15 +1660,8 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
 
     // Filter input at top
     let cursor = "█";
-    let filter_text = format!("{}{}", app.region_filter, cursor);
-    let filter = Paragraph::new(filter_text)
-        .block(
-            Block::default()
-                .title(" 🔍 ")
-                .borders(Borders::ALL)
-                .border_style(crate::ui::active_border()),
-        )
-        .style(Style::default());
+    let filter_text = vec![Span::from(format!("{}{}", app.region_filter, cursor))];
+    let filter = filter_area(filter_text, true);
 
     // Filtered list below
     let filtered = app.get_filtered_regions();

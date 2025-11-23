@@ -5,7 +5,7 @@ use crate::keymap::Mode;
 use crate::s3::{Bucket as S3Bucket, Object as S3Object};
 use crate::table::TableState;
 use crate::ui::{
-    active_border, get_cursor, red_text, render_inner_tab_spans, render_tabs, SEARCH_ICON,
+    active_border, filter_area, get_cursor, red_text, render_inner_tab_spans, render_tabs,
 };
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -291,17 +291,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         ]
     };
 
-    let filter = Paragraph::new(Line::from(filter_text)).block(
-        Block::default()
-            .title(SEARCH_ICON)
-            .borders(Borders::ALL)
-            .border_style(if app.mode == Mode::FilterInput {
-                active_border()
-            } else {
-                Style::default()
-            }),
-    );
-
+    let filter = filter_area(filter_text, app.mode == Mode::FilterInput);
     frame.render_widget(filter, chunks[1]);
 
     let filtered_buckets: Vec<_> = if app.s3_state.bucket_type == BucketType::GeneralPurpose {
@@ -757,16 +747,7 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(cursor, Style::default().fg(Color::Yellow)),
             ]
         };
-        let filter = Paragraph::new(Line::from(filter_text)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if app.mode == Mode::FilterInput {
-                    active_border()
-                } else {
-                    Style::default()
-                }),
-        );
+        let filter = filter_area(filter_text, app.mode == Mode::FilterInput);
         frame.render_widget(filter, chunks[2]);
     }
 

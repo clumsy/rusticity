@@ -6,10 +6,8 @@ use crate::common::{
 };
 use crate::cw::insights::{DateRangeType, TimeUnit};
 use crate::keymap::Mode;
-use crate::ui::get_cursor;
-use crate::ui::labeled_field;
-use crate::ui::render_inner_tab_spans;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
+use crate::ui::{filter_area, get_cursor, labeled_field, render_inner_tab_spans};
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::{LogEvent, LogGroup, LogStream};
 
@@ -938,20 +936,9 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
             ]
         };
 
-    let filter_border_style = if app.mode == Mode::EventFilterInput
-        && app.log_groups_state.event_input_focus == EventFilterFocus::Filter
-    {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default()
-    };
-
-    let filter = Paragraph::new(Line::from(filter_text)).block(
-        Block::default()
-            .title(" Filter ")
-            .borders(Borders::ALL)
-            .border_style(filter_border_style),
-    );
+    let is_filter_active = app.mode == Mode::EventFilterInput
+        && app.log_groups_state.event_input_focus == EventFilterFocus::Filter;
+    let filter = filter_area(filter_text, is_filter_active);
 
     let date_border_style = if app.mode == Mode::EventFilterInput
         && app.log_groups_state.event_input_focus == EventFilterFocus::DateRange

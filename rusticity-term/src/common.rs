@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use ratatui::{prelude::*, widgets::*};
 
-use crate::ui::styles;
+use crate::ui::{filter_area, styles};
 
 // Width for UTC timestamp format: "YYYY-MM-DD HH:MM:SS (UTC)"
 pub const UTC_TIMESTAMP_WIDTH: u16 = 27;
@@ -380,8 +380,8 @@ pub struct FilterControl {
 
 pub fn render_filter_area(frame: &mut Frame, config: FilterAreaConfig) {
     use crate::keymap::Mode;
-    use crate::ui::{get_cursor, SEARCH_ICON};
-    use ratatui::{prelude::*, widgets::*};
+    use crate::ui::get_cursor;
+    use ratatui::prelude::*;
 
     let cursor = get_cursor(
         config.mode == Mode::FilterInput && config.input_focus == FilterFocusType::Input,
@@ -445,19 +445,8 @@ pub fn render_filter_area(frame: &mut Frame, config: FilterAreaConfig) {
         ));
     }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(line_spans)).block(
-            Block::default()
-                .title(SEARCH_ICON)
-                .borders(Borders::ALL)
-                .border_style(if config.mode == Mode::FilterInput {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        ),
-        config.area,
-    );
+    let filter = filter_area(line_spans, config.mode == Mode::FilterInput);
+    frame.render_widget(filter, config.area);
 }
 
 #[cfg(test)]

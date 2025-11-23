@@ -1,9 +1,9 @@
 use super::Session;
 use crate::common::SortDirection;
+use crate::ui::filter_area;
 use crate::ui::table::{self};
-use crate::ui::SEARCH_ICON;
-use ratatui::prelude::{Color, Constraint, Direction, Layout, Line, Span, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::prelude::{Color, Constraint, Direction, Layout, Span, Style};
+use ratatui::widgets::Clear;
 
 pub fn render_session_picker(
     frame: &mut ratatui::Frame,
@@ -19,17 +19,11 @@ pub fn render_session_picker(
         .split(popup_area);
 
     let cursor = "█";
-    let filter = Paragraph::new(Line::from(vec![
+    let filter_text = vec![
         Span::raw(&app.session_filter),
         Span::styled(cursor, Style::default().fg(Color::Green)),
-    ]))
-    .block(
-        Block::default()
-            .title(SEARCH_ICON)
-            .borders(Borders::ALL)
-            .border_style(crate::ui::active_border()),
-    )
-    .style(Style::default());
+    ];
+    let filter = filter_area(filter_text, true);
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);

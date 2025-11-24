@@ -18,5 +18,16 @@ pub use app::{
     App, DetailTab, EventColumn, EventFilterFocus, LogGroupColumn, Service, StreamSort, ViewMode,
 };
 pub use cw::insights::{DateRangeType, InsightsFocus, InsightsState, QueryLanguage, TimeUnit};
+
+/// Initialize all services (i18n, etc.)
+pub fn init() {
+    lambda::init();
+    ecr::init();
+    s3::init();
+    cw::init();
+    sqs::init();
+    cfn::init();
+}
+
 pub use event::EventHandler;
 pub use session::Session;

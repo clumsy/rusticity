@@ -14,6 +14,11 @@ mod status;
 pub mod styles;
 pub mod table;
 
+use crate::cfn::Column as CfnColumn;
+use crate::cw::alarms::AlarmColumn;
+use crate::ecr::{image, repo};
+use crate::lambda::{DeploymentColumn, ResourceColumn};
+use crate::sqs::Column as SqsColumn;
 use styles::highlight;
 
 pub use cw::insights::{DateRangeType, TimeUnit};
@@ -392,6 +397,15 @@ where
     (ListItem::new(Line::from(spans)), text_len)
 }
 
+fn render_column_toggle_string(col_name: &str, is_visible: bool) -> (ListItem<'static>, usize) {
+    let mut spans = vec![];
+    spans.extend(render_toggle(is_visible));
+    spans.push(Span::raw(" "));
+    spans.push(Span::raw(col_name.to_string()));
+    let text_len = 4 + col_name.len();
+    (ListItem::new(Line::from(spans)), text_len)
+}
+
 // Helper to render a section header
 fn render_section_header(title: &str) -> (ListItem<'static>, usize) {
     let len = title.len();
@@ -698,11 +712,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             let items: Vec<ListItem> = app
                 .all_bucket_columns
                 .iter()
-                .map(|col| {
-                    let is_visible = app.visible_bucket_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
+                .filter_map(|col_id| {
+                    crate::s3::BucketColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.visible_bucket_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
                 .collect();
             (items, " Preferences ", max_len)
@@ -715,11 +731,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(header);
             max_len = max_len.max(header_len);
 
-            for col in &app.all_alarm_columns {
-                let is_visible = app.visible_alarm_columns.contains(col);
-                let (item, len) = render_column_toggle_item(col, is_visible, true);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.all_alarm_columns {
+                let is_visible = app.visible_alarm_columns.contains(col_id);
+                if let Some(col) = AlarmColumn::from_id(col_id) {
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
 
             // View As section
@@ -775,11 +793,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             let items: Vec<ListItem> = app
                 .all_event_columns
                 .iter()
-                .map(|col| {
-                    let is_visible = app.visible_event_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
+                .filter_map(|col_id| {
+                    EventColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.visible_event_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
                 .collect();
             (items, " Select visible columns (Space to toggle) ", max_len)
@@ -788,11 +808,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             let items: Vec<ListItem> = app
                 .all_stream_columns
                 .iter()
-                .map(|col| {
-                    let is_visible = app.visible_stream_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
+                .filter_map(|col_id| {
+                    StreamColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.visible_stream_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
                 .collect();
             (items, " Preferences ", max_len)
@@ -801,11 +823,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             let items: Vec<ListItem> = app
                 .all_columns
                 .iter()
-                .map(|col| {
-                    let is_visible = app.visible_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
+                .filter_map(|col_id| {
+                    LogGroupColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.visible_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
                 .collect();
             (items, " Preferences ", max_len)
@@ -815,22 +839,26 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 // ECR images columns
                 app.all_ecr_image_columns
                     .iter()
-                    .map(|col| {
-                        let is_visible = app.visible_ecr_image_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, false);
-                        max_len = max_len.max(len);
-                        item
+                    .filter_map(|col_id| {
+                        image::Column::from_id(col_id).map(|col| {
+                            let is_visible = app.visible_ecr_image_columns.contains(col_id);
+                            let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                            max_len = max_len.max(len);
+                            item
+                        })
                     })
                     .collect()
             } else {
                 // ECR repository columns
                 app.all_ecr_columns
                     .iter()
-                    .map(|col| {
-                        let is_visible = app.visible_ecr_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, false);
-                        max_len = max_len.max(len);
-                        item
+                    .filter_map(|col_id| {
+                        repo::Column::from_id(col_id).map(|col| {
+                            let is_visible = app.visible_ecr_columns.contains(col_id);
+                            let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                            max_len = max_len.max(len);
+                            item
+                        })
                     })
                     .collect()
             };
@@ -840,11 +868,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             let items: Vec<ListItem> = app
                 .all_sqs_columns
                 .iter()
-                .map(|col| {
-                    let is_visible = app.visible_sqs_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
+                .filter_map(|col_id| {
+                    SqsColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.visible_sqs_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
                 .collect();
             (items, " Preferences ", max_len)
@@ -863,30 +893,32 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 // Show layer columns for Code tab
                 for col in &app.lambda_state.all_layer_columns {
                     let is_visible = app.lambda_state.visible_layer_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
+                    let (item, len) = render_column_toggle_string(col, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
                 }
             } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
                 for col in &app.lambda_state.all_version_columns {
                     let is_visible = app.lambda_state.visible_version_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
+                    let (item, len) = render_column_toggle_string(col, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
                 }
             } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Aliases {
                 for col in &app.lambda_state.all_alias_columns {
                     let is_visible = app.lambda_state.visible_alias_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
+                    let (item, len) = render_column_toggle_string(col, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
                 }
             } else {
-                for col in &app.lambda_state.all_columns {
-                    let is_visible = app.lambda_state.visible_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
+                for col_id in &app.lambda_state.all_columns {
+                    if let Some(col) = crate::lambda::Column::from_id(col_id) {
+                        let is_visible = app.lambda_state.visible_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        all_items.push(item);
+                        max_len = max_len.max(len);
+                    }
                 }
             }
 
@@ -922,11 +954,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 use crate::ui::lambda::ApplicationDetailTab;
                 if app.lambda_application_state.detail_tab == ApplicationDetailTab::Overview {
                     // Resources columns
-                    for col in &app.all_resource_columns {
-                        let is_visible = app.visible_resource_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, true);
-                        all_items.push(item);
-                        max_len = max_len.max(len);
+                    for col_id in &app.all_resource_columns {
+                        let is_visible = app.visible_resource_columns.contains(col_id);
+                        if let Some(col) = ResourceColumn::from_id(col_id) {
+                            let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                            all_items.push(item);
+                            max_len = max_len.max(len);
+                        }
                     }
 
                     all_items.push(ListItem::new(""));
@@ -942,11 +976,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                     max_len = max_len.max(page_len);
                 } else {
                     // Deployments columns
-                    for col in &app.all_deployment_columns {
-                        let is_visible = app.visible_deployment_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, true);
-                        all_items.push(item);
-                        max_len = max_len.max(len);
+                    for col_id in &app.all_deployment_columns {
+                        let is_visible = app.visible_deployment_columns.contains(col_id);
+                        if let Some(col) = DeploymentColumn::from_id(col_id) {
+                            let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                            all_items.push(item);
+                            max_len = max_len.max(len);
+                        }
                     }
 
                     all_items.push(ListItem::new(""));
@@ -963,11 +999,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 }
             } else {
                 // Application list columns
-                for col in &app.all_lambda_application_columns {
-                    let is_visible = app.visible_lambda_application_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
+                for col_id in &app.all_lambda_application_columns {
+                    if let Some(col) = crate::lambda::ApplicationColumn::from_id(col_id) {
+                        let is_visible = app.visible_lambda_application_columns.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        all_items.push(item);
+                        max_len = max_len.max(len);
+                    }
                 }
 
                 all_items.push(ListItem::new(""));
@@ -992,11 +1030,13 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(header);
             max_len = max_len.max(header_len);
 
-            for col in &app.all_cfn_columns {
-                let is_visible = app.visible_cfn_columns.contains(col);
-                let (item, len) = render_column_toggle_item(col, is_visible, true);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.all_cfn_columns {
+                let is_visible = app.visible_cfn_columns.contains(col_id);
+                if let Some(col) = CfnColumn::from_id(col_id) {
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
 
             all_items.push(ListItem::new(""));
@@ -1054,13 +1094,9 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
                 for col in &app.all_iam_columns {
                     let is_visible = app.visible_iam_columns.contains(col);
-                    let mut spans = vec![];
-                    spans.extend(render_toggle(is_visible));
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::raw(col.clone()));
-                    let text_len = 4 + col.len();
-                    all_items.push(ListItem::new(Line::from(spans)));
-                    max_len = max_len.max(text_len);
+                    let (item, len) = render_column_toggle_string(col, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
                 }
 
                 all_items.push(ListItem::new(""));
@@ -2229,26 +2265,34 @@ mod tests {
         let app = test_app();
 
         // S3 bucket columns should be different from CloudWatch log group columns
-        let bucket_col_names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
-        let log_col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
+        let bucket_col_names: Vec<String> = app
+            .all_bucket_columns
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
+        let log_col_names: Vec<String> = app
+            .all_columns
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name()))
+            .collect();
 
         // Verify they're different
         assert_ne!(bucket_col_names, log_col_names);
 
         // Verify S3 columns don't contain CloudWatch-specific terms
-        assert!(!bucket_col_names.contains(&"Log group"));
-        assert!(!bucket_col_names.contains(&"Stored bytes"));
+        assert!(!bucket_col_names.contains(&"Log group".to_string()));
+        assert!(!bucket_col_names.contains(&"Stored bytes".to_string()));
 
         // Verify S3 columns contain S3-specific terms
-        assert!(bucket_col_names.contains(&"Creation date"));
+        assert!(bucket_col_names.contains(&"Creation date".to_string()));
 
         // Region should NOT be in bucket columns (shown only when expanded)
-        assert!(!bucket_col_names.contains(&"AWS Region"));
+        assert!(!bucket_col_names.contains(&"AWS Region".to_string()));
     }
 
     #[test]
     fn test_s3_bucket_column_toggle() {
-        use crate::app::{S3BucketColumn, Service};
+        use crate::app::Service;
 
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
@@ -2257,20 +2301,20 @@ mod tests {
         assert_eq!(app.visible_bucket_columns.len(), 3);
 
         // Simulate toggling off the Region column (index 1)
-        let col = app.all_bucket_columns[1];
-        if let Some(pos) = app.visible_bucket_columns.iter().position(|&c| c == col) {
+        let col = &app.all_bucket_columns[1];
+        if let Some(pos) = app.visible_bucket_columns.iter().position(|c| c == col) {
             app.visible_bucket_columns.remove(pos);
         }
 
         assert_eq!(app.visible_bucket_columns.len(), 2);
-        assert!(!app.visible_bucket_columns.contains(&S3BucketColumn::Region));
+        assert!(!app.visible_bucket_columns.contains(&"region".to_string()));
 
         // Toggle it back on
-        app.visible_bucket_columns.push(col);
+        app.visible_bucket_columns.push(col.clone());
         assert_eq!(app.visible_bucket_columns.len(), 3);
         assert!(app
             .visible_bucket_columns
-            .contains(&S3BucketColumn::CreationDate));
+            .contains(&"creation_date".to_string()));
     }
 
     #[test]
@@ -2332,7 +2376,11 @@ mod tests {
         assert_eq!(app.visible_bucket_columns.len(), 3);
 
         // Verify all column names
-        let names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
+        let names: Vec<String> = app
+            .all_bucket_columns
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
         assert_eq!(names, vec!["Name", "Region", "Creation date"]);
     }
 
@@ -3211,12 +3259,20 @@ mod tests {
         // S3 Buckets should show bucket columns
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
-        let bucket_col_names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
+        let bucket_col_names: Vec<String> = app
+            .all_bucket_columns
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
         assert_eq!(bucket_col_names, vec!["Name", "Region", "Creation date"]);
 
         // CloudWatch Log Groups should show log group columns
         app.current_service = Service::CloudWatchLogGroups;
-        let log_col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
+        let log_col_names: Vec<String> = app
+            .all_columns
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name()))
+            .collect();
         assert_eq!(
             log_col_names,
             vec![
@@ -3232,10 +3288,9 @@ mod tests {
         // CloudWatch Alarms should show alarm columns
         app.current_service = Service::CloudWatchAlarms;
         assert!(!app.all_alarm_columns.is_empty());
-        assert!(
-            app.all_alarm_columns[0].name().contains("Name")
-                || app.all_alarm_columns[0].name().contains("Alarm")
-        );
+        if let Some(col) = AlarmColumn::from_id(&app.all_alarm_columns[0]) {
+            assert!(col.name().contains("Name") || col.name().contains("Alarm"));
+        }
     }
 
     #[test]
@@ -3249,13 +3304,17 @@ mod tests {
         assert_eq!(app.all_columns.len(), 6);
 
         // Verify each column by name
-        let col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
-        assert!(col_names.contains(&"Log group"));
-        assert!(col_names.contains(&"Log class"));
-        assert!(col_names.contains(&"Retention"));
-        assert!(col_names.contains(&"Stored bytes"));
-        assert!(col_names.contains(&"Creation time"));
-        assert!(col_names.contains(&"ARN"));
+        let col_names: Vec<String> = app
+            .all_columns
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name()))
+            .collect();
+        assert!(col_names.iter().any(|n| n == "Log group"));
+        assert!(col_names.iter().any(|n| n == "Log class"));
+        assert!(col_names.iter().any(|n| n == "Retention"));
+        assert!(col_names.iter().any(|n| n == "Stored bytes"));
+        assert!(col_names.iter().any(|n| n == "Creation time"));
+        assert!(col_names.iter().any(|n| n == "ARN"));
     }
 
     #[test]
@@ -3559,24 +3618,12 @@ mod tests {
         let app = test_app_no_region();
 
         assert_eq!(app.lambda_state.visible_columns.len(), 6);
-        assert_eq!(app.lambda_state.visible_columns[0], lambda::Column::Name);
-        assert_eq!(app.lambda_state.visible_columns[1], lambda::Column::Runtime);
-        assert_eq!(
-            app.lambda_state.visible_columns[2],
-            lambda::Column::CodeSize
-        );
-        assert_eq!(
-            app.lambda_state.visible_columns[3],
-            lambda::Column::MemoryMb
-        );
-        assert_eq!(
-            app.lambda_state.visible_columns[4],
-            lambda::Column::TimeoutSeconds
-        );
-        assert_eq!(
-            app.lambda_state.visible_columns[5],
-            lambda::Column::LastModified
-        );
+        assert_eq!(app.lambda_state.visible_columns[0], "name");
+        assert_eq!(app.lambda_state.visible_columns[1], "runtime");
+        assert_eq!(app.lambda_state.visible_columns[2], "code_size");
+        assert_eq!(app.lambda_state.visible_columns[3], "memory_mb");
+        assert_eq!(app.lambda_state.visible_columns[4], "timeout_seconds");
+        assert_eq!(app.lambda_state.visible_columns[5], "last_modified");
     }
 
     #[test]
@@ -3584,15 +3631,15 @@ mod tests {
         let all_columns = lambda::Column::all();
 
         assert_eq!(all_columns.len(), 9);
-        assert!(all_columns.contains(&lambda::Column::Name));
-        assert!(all_columns.contains(&lambda::Column::Description));
-        assert!(all_columns.contains(&lambda::Column::PackageType));
-        assert!(all_columns.contains(&lambda::Column::Runtime));
-        assert!(all_columns.contains(&lambda::Column::Architecture));
-        assert!(all_columns.contains(&lambda::Column::CodeSize));
-        assert!(all_columns.contains(&lambda::Column::MemoryMb));
-        assert!(all_columns.contains(&lambda::Column::TimeoutSeconds));
-        assert!(all_columns.contains(&lambda::Column::LastModified));
+        assert!(all_columns.contains(&"name".to_string()));
+        assert!(all_columns.contains(&"description".to_string()));
+        assert!(all_columns.contains(&"package_type".to_string()));
+        assert!(all_columns.contains(&"runtime".to_string()));
+        assert!(all_columns.contains(&"architecture".to_string()));
+        assert!(all_columns.contains(&"code_size".to_string()));
+        assert!(all_columns.contains(&"memory_mb".to_string()));
+        assert!(all_columns.contains(&"timeout_seconds".to_string()));
+        assert!(all_columns.contains(&"last_modified".to_string()));
     }
 
     #[test]

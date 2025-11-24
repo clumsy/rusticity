@@ -1,4 +1,5 @@
 use crate::common::UTC_TIMESTAMP_WIDTH;
+use crate::ui::table::Column;
 use serde::{Deserialize, Serialize};
 
 pub fn format_arn(account_id: &str, resource_type: &str, resource_name: &str) -> String {
@@ -146,6 +147,49 @@ pub enum UserColumn {
     SigningCerts,
 }
 
+impl UserColumn {
+    pub fn all() -> Vec<String> {
+        vec![
+            Self::UserName,
+            Self::Path,
+            Self::Groups,
+            Self::LastActivity,
+            Self::Mfa,
+            Self::PasswordAge,
+            Self::ConsoleLastSignIn,
+            Self::AccessKeyId,
+            Self::ActiveKeyAge,
+            Self::AccessKeyLastUsed,
+            Self::Arn,
+            Self::CreationTime,
+            Self::ConsoleAccess,
+            Self::SigningCerts,
+        ]
+        .iter()
+        .map(|c| <Self as Column<&IamUser>>::name(c).to_string())
+        .collect()
+    }
+
+    pub fn visible() -> Vec<String> {
+        [
+            Self::UserName,
+            Self::Path,
+            Self::Groups,
+            Self::LastActivity,
+            Self::Mfa,
+            Self::PasswordAge,
+            Self::ConsoleLastSignIn,
+            Self::AccessKeyId,
+            Self::ActiveKeyAge,
+            Self::AccessKeyLastUsed,
+            Self::Arn,
+        ]
+        .iter()
+        .map(|c| <Self as Column<&IamUser>>::name(c).to_string())
+        .collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum GroupColumn {
     GroupName,
@@ -175,207 +219,344 @@ pub enum GroupUserColumn {
     CreationTime,
 }
 
-impl UserColumn {
-    pub fn to_column(self) -> Box<dyn for<'a> crate::ui::table::Column<&'a IamUser>> {
-        use crate::ui::table::Column as TableColumn;
-        use ratatui::style::Style;
+#[derive(Debug, Clone, Copy)]
+pub enum PolicyColumn {
+    PolicyName,
+    Type,
+    AttachedVia,
+    AttachedEntities,
+    Description,
+    CreationTime,
+    EditedTime,
+}
 
-        struct UserCol(UserColumn);
-        impl<'a> TableColumn<&'a IamUser> for UserCol {
-            fn name(&self) -> &str {
-                match self.0 {
-                    UserColumn::UserName => "User name",
-                    UserColumn::Path => "Path",
-                    UserColumn::Groups => "Groups",
-                    UserColumn::LastActivity => "Last activity",
-                    UserColumn::Mfa => "MFA",
-                    UserColumn::PasswordAge => "Password age",
-                    UserColumn::ConsoleLastSignIn => "Console last sign-in",
-                    UserColumn::AccessKeyId => "Access key ID",
-                    UserColumn::ActiveKeyAge => "Active key age",
-                    UserColumn::AccessKeyLastUsed => "Access key last used",
-                    UserColumn::Arn => "ARN",
-                    UserColumn::CreationTime => "Creation time",
-                    UserColumn::ConsoleAccess => "Console access",
-                    UserColumn::SigningCerts => "Signing certs",
-                }
-            }
-            fn width(&self) -> u16 {
-                let custom = match self.0 {
-                    UserColumn::UserName => 20,
-                    UserColumn::Path => 15,
-                    UserColumn::Groups => 20,
-                    UserColumn::LastActivity => 20,
-                    UserColumn::Mfa => 10,
-                    UserColumn::PasswordAge => 15,
-                    UserColumn::ConsoleLastSignIn => 25,
-                    UserColumn::AccessKeyId => 25,
-                    UserColumn::ActiveKeyAge => 18,
-                    UserColumn::AccessKeyLastUsed => UTC_TIMESTAMP_WIDTH as usize,
-                    UserColumn::Arn => 50,
-                    UserColumn::CreationTime => 30,
-                    UserColumn::ConsoleAccess => 15,
-                    UserColumn::SigningCerts => 15,
-                };
-                self.name().len().max(custom) as u16
-            }
-            fn render(&self, item: &&'a IamUser) -> (String, Style) {
-                let value = match self.0 {
-                    UserColumn::UserName => {
-                        return (item.user_name.clone(), Style::default());
-                    }
-                    UserColumn::Path => &item.path,
-                    UserColumn::Groups => &item.groups,
-                    UserColumn::LastActivity => &item.last_activity,
-                    UserColumn::Mfa => &item.mfa,
-                    UserColumn::PasswordAge => &item.password_age,
-                    UserColumn::ConsoleLastSignIn => &item.console_last_sign_in,
-                    UserColumn::AccessKeyId => &item.access_key_id,
-                    UserColumn::ActiveKeyAge => &item.active_key_age,
-                    UserColumn::AccessKeyLastUsed => &item.access_key_last_used,
-                    UserColumn::Arn => &item.arn,
-                    UserColumn::CreationTime => &item.creation_time,
-                    UserColumn::ConsoleAccess => &item.console_access,
-                    UserColumn::SigningCerts => &item.signing_certs,
-                };
-                (value.clone(), Style::default())
-            }
+#[derive(Debug, Clone, Copy)]
+pub enum TagColumn {
+    Key,
+    Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UserGroupColumn {
+    GroupName,
+    AttachedPolicies,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LastAccessedServiceColumn {
+    Service,
+    PoliciesGranting,
+    LastAccessed,
+}
+
+impl<'a> Column<&'a IamUser> for UserColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::UserName => "User name",
+            Self::Path => "Path",
+            Self::Groups => "Groups",
+            Self::LastActivity => "Last activity",
+            Self::Mfa => "MFA",
+            Self::PasswordAge => "Password age",
+            Self::ConsoleLastSignIn => "Console last sign-in",
+            Self::AccessKeyId => "Access key ID",
+            Self::ActiveKeyAge => "Active key age",
+            Self::AccessKeyLastUsed => "Access key last used",
+            Self::Arn => "ARN",
+            Self::CreationTime => "Creation time",
+            Self::ConsoleAccess => "Console access",
+            Self::SigningCerts => "Signing certs",
         }
-        Box::new(UserCol(self))
+    }
+
+    fn width(&self) -> u16 {
+        let custom = match self {
+            Self::UserName => 20,
+            Self::Path => 15,
+            Self::Groups => 20,
+            Self::LastActivity => 20,
+            Self::Mfa => 10,
+            Self::PasswordAge => 15,
+            Self::ConsoleLastSignIn => 25,
+            Self::AccessKeyId => 25,
+            Self::ActiveKeyAge => 18,
+            Self::AccessKeyLastUsed => UTC_TIMESTAMP_WIDTH as usize,
+            Self::Arn => 50,
+            Self::CreationTime => 30,
+            Self::ConsoleAccess => 15,
+            Self::SigningCerts => 15,
+        };
+        self.name().len().max(custom) as u16
+    }
+
+    fn render(&self, item: &&'a IamUser) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::UserName => item.user_name.clone(),
+            Self::Path => item.path.clone(),
+            Self::Groups => item.groups.clone(),
+            Self::LastActivity => item.last_activity.clone(),
+            Self::Mfa => item.mfa.clone(),
+            Self::PasswordAge => item.password_age.clone(),
+            Self::ConsoleLastSignIn => item.console_last_sign_in.clone(),
+            Self::AccessKeyId => item.access_key_id.clone(),
+            Self::ActiveKeyAge => item.active_key_age.clone(),
+            Self::AccessKeyLastUsed => item.access_key_last_used.clone(),
+            Self::Arn => item.arn.clone(),
+            Self::CreationTime => item.creation_time.clone(),
+            Self::ConsoleAccess => item.console_access.clone(),
+            Self::SigningCerts => item.signing_certs.clone(),
+        };
+        (text, ratatui::style::Style::default())
     }
 }
 
-impl GroupColumn {
-    pub fn to_column(self) -> Box<dyn crate::ui::table::Column<IamGroup>> {
-        use crate::ui::table::Column as TableColumn;
-        use ratatui::style::Style;
-
-        struct GroupCol(GroupColumn);
-        impl TableColumn<IamGroup> for GroupCol {
-            fn name(&self) -> &str {
-                match self.0 {
-                    GroupColumn::GroupName => "Group name",
-                    GroupColumn::Path => "Path",
-                    GroupColumn::Users => "Users",
-                    GroupColumn::Permissions => "Permissions",
-                    GroupColumn::CreationTime => "Creation time",
-                }
-            }
-            fn width(&self) -> u16 {
-                let custom = match self.0 {
-                    GroupColumn::GroupName => 20,
-                    GroupColumn::Path => 15,
-                    GroupColumn::Users => 10,
-                    GroupColumn::Permissions => 20,
-                    GroupColumn::CreationTime => 30,
-                };
-                self.name().len().max(custom) as u16
-            }
-            fn render(&self, item: &IamGroup) -> (String, Style) {
-                use ratatui::style::Color;
-                match self.0 {
-                    GroupColumn::GroupName => (item.group_name.clone(), Style::default()),
-                    GroupColumn::Permissions if item.permissions == "Defined" => (
-                        format!("✅ {}", item.permissions),
-                        Style::default().fg(Color::Green),
-                    ),
-                    GroupColumn::Path => (item.path.clone(), Style::default()),
-                    GroupColumn::Users => (item.users.clone(), Style::default()),
-                    GroupColumn::Permissions => (item.permissions.clone(), Style::default()),
-                    GroupColumn::CreationTime => (item.creation_time.clone(), Style::default()),
-                }
-            }
+impl Column<IamGroup> for GroupColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::GroupName => "Group name",
+            Self::Path => "Path",
+            Self::Users => "Users",
+            Self::Permissions => "Permissions",
+            Self::CreationTime => "Creation time",
         }
-        Box::new(GroupCol(self))
+    }
+
+    fn width(&self) -> u16 {
+        let custom = match self {
+            Self::GroupName => 20,
+            Self::Path => 15,
+            Self::Users => 10,
+            Self::Permissions => 20,
+            Self::CreationTime => 30,
+        };
+        self.name().len().max(custom) as u16
+    }
+
+    fn render(&self, item: &IamGroup) -> (String, ratatui::style::Style) {
+        use ratatui::style::{Color, Style};
+        match self {
+            Self::GroupName => (item.group_name.clone(), Style::default()),
+            Self::Permissions if item.permissions == "Defined" => (
+                format!("✅ {}", item.permissions),
+                Style::default().fg(Color::Green),
+            ),
+            Self::Path => (item.path.clone(), Style::default()),
+            Self::Users => (item.users.clone(), Style::default()),
+            Self::Permissions => (item.permissions.clone(), Style::default()),
+            Self::CreationTime => (item.creation_time.clone(), Style::default()),
+        }
     }
 }
 
-impl RoleColumn {
-    pub fn to_column(self) -> Box<dyn crate::ui::table::Column<IamRole>> {
-        use crate::ui::table::Column as TableColumn;
-        use ratatui::style::Style;
-
-        struct RoleCol(RoleColumn);
-        impl TableColumn<IamRole> for RoleCol {
-            fn name(&self) -> &str {
-                match self.0 {
-                    RoleColumn::RoleName => "Role name",
-                    RoleColumn::Path => "Path",
-                    RoleColumn::TrustedEntities => "Trusted entities",
-                    RoleColumn::LastActivity => "Last activity",
-                    RoleColumn::Arn => "ARN",
-                    RoleColumn::CreationTime => "Creation time",
-                    RoleColumn::Description => "Description",
-                    RoleColumn::MaxSessionDuration => "Max CLI/API session",
-                }
-            }
-            fn width(&self) -> u16 {
-                let custom = match self.0 {
-                    RoleColumn::RoleName => 30,
-                    RoleColumn::Path => 15,
-                    RoleColumn::TrustedEntities => 30,
-                    RoleColumn::LastActivity => 20,
-                    RoleColumn::Arn => 50,
-                    RoleColumn::CreationTime => 30,
-                    RoleColumn::Description => 40,
-                    RoleColumn::MaxSessionDuration => 22,
-                };
-                self.name().len().max(custom) as u16
-            }
-            fn render(&self, item: &IamRole) -> (String, Style) {
-                let value = match self.0 {
-                    RoleColumn::RoleName => {
-                        return (item.role_name.clone(), Style::default());
-                    }
-                    RoleColumn::Path => &item.path,
-                    RoleColumn::TrustedEntities => &item.trusted_entities,
-                    RoleColumn::LastActivity => &item.last_activity,
-                    RoleColumn::Arn => &item.arn,
-                    RoleColumn::CreationTime => &item.creation_time,
-                    RoleColumn::Description => &item.description,
-                    RoleColumn::MaxSessionDuration => &item.max_session_duration,
-                };
-                (value.clone(), Style::default())
-            }
+impl Column<IamRole> for RoleColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::RoleName => "Role name",
+            Self::Path => "Path",
+            Self::TrustedEntities => "Trusted entities",
+            Self::LastActivity => "Last activity",
+            Self::Arn => "ARN",
+            Self::CreationTime => "Creation time",
+            Self::Description => "Description",
+            Self::MaxSessionDuration => "Max CLI/API session",
         }
-        Box::new(RoleCol(self))
+    }
+
+    fn width(&self) -> u16 {
+        let custom = match self {
+            Self::RoleName => 30,
+            Self::Path => 15,
+            Self::TrustedEntities => 30,
+            Self::LastActivity => 20,
+            Self::Arn => 50,
+            Self::CreationTime => 30,
+            Self::Description => 40,
+            Self::MaxSessionDuration => 22,
+        };
+        self.name().len().max(custom) as u16
+    }
+
+    fn render(&self, item: &IamRole) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::RoleName => item.role_name.clone(),
+            Self::Path => item.path.clone(),
+            Self::TrustedEntities => item.trusted_entities.clone(),
+            Self::LastActivity => item.last_activity.clone(),
+            Self::Arn => item.arn.clone(),
+            Self::CreationTime => item.creation_time.clone(),
+            Self::Description => item.description.clone(),
+            Self::MaxSessionDuration => item.max_session_duration.clone(),
+        };
+        (text, ratatui::style::Style::default())
     }
 }
 
-impl GroupUserColumn {
-    pub fn to_column(self) -> Box<dyn crate::ui::table::Column<GroupUser>> {
-        use crate::ui::table::Column as TableColumn;
-        use ratatui::style::Style;
-
-        struct GroupUserCol(GroupUserColumn);
-        impl TableColumn<GroupUser> for GroupUserCol {
-            fn name(&self) -> &str {
-                match self.0 {
-                    GroupUserColumn::UserName => "User name",
-                    GroupUserColumn::Groups => "Groups",
-                    GroupUserColumn::LastActivity => "Last activity",
-                    GroupUserColumn::CreationTime => "Creation time",
-                }
-            }
-            fn width(&self) -> u16 {
-                let custom = match self.0 {
-                    GroupUserColumn::UserName => 20,
-                    GroupUserColumn::Groups => 20,
-                    GroupUserColumn::LastActivity => 20,
-                    GroupUserColumn::CreationTime => 30,
-                };
-                self.name().len().max(custom) as u16
-            }
-            fn render(&self, item: &GroupUser) -> (String, Style) {
-                match self.0 {
-                    GroupUserColumn::UserName => (item.user_name.clone(), Style::default()),
-                    GroupUserColumn::Groups => (item.groups.clone(), Style::default()),
-                    GroupUserColumn::LastActivity => (item.last_activity.clone(), Style::default()),
-                    GroupUserColumn::CreationTime => (item.creation_time.clone(), Style::default()),
-                }
-            }
+impl Column<GroupUser> for GroupUserColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::UserName => "User name",
+            Self::Groups => "Groups",
+            Self::LastActivity => "Last activity",
+            Self::CreationTime => "Creation time",
         }
-        Box::new(GroupUserCol(self))
+    }
+
+    fn width(&self) -> u16 {
+        let custom = match self {
+            Self::UserName => 20,
+            Self::Groups => 20,
+            Self::LastActivity => 20,
+            Self::CreationTime => 30,
+        };
+        self.name().len().max(custom) as u16
+    }
+
+    fn render(&self, item: &GroupUser) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::UserName => item.user_name.clone(),
+            Self::Groups => item.groups.clone(),
+            Self::LastActivity => item.last_activity.clone(),
+            Self::CreationTime => item.creation_time.clone(),
+        };
+        (text, ratatui::style::Style::default())
+    }
+}
+
+impl Column<Policy> for PolicyColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::PolicyName => "Policy name",
+            Self::Type => "Type",
+            Self::AttachedVia => "Attached via",
+            Self::AttachedEntities => "Attached entities",
+            Self::Description => "Description",
+            Self::CreationTime => "Creation time",
+            Self::EditedTime => "Edited time",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::PolicyName => 30,
+            Self::Type => 15,
+            Self::AttachedVia => 20,
+            Self::AttachedEntities => 20,
+            Self::Description => 40,
+            Self::CreationTime => 30,
+            Self::EditedTime => 30,
+        }
+    }
+
+    fn render(&self, item: &Policy) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::PolicyName => item.policy_name.clone(),
+            Self::Type => item.policy_type.clone(),
+            Self::AttachedVia => item.attached_via.clone(),
+            Self::AttachedEntities => item.attached_entities.clone(),
+            Self::Description => item.description.clone(),
+            Self::CreationTime => item.creation_time.clone(),
+            Self::EditedTime => item.edited_time.clone(),
+        };
+        (text, ratatui::style::Style::default())
+    }
+}
+
+impl Column<RoleTag> for TagColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::Key => "Key",
+            Self::Value => "Value",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::Key => 30,
+            Self::Value => 70,
+        }
+    }
+
+    fn render(&self, item: &RoleTag) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::Key => item.key.clone(),
+            Self::Value => item.value.clone(),
+        };
+        (text, ratatui::style::Style::default())
+    }
+}
+
+impl Column<UserTag> for TagColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::Key => "Key",
+            Self::Value => "Value",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::Key => 30,
+            Self::Value => 70,
+        }
+    }
+
+    fn render(&self, item: &UserTag) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::Key => item.key.clone(),
+            Self::Value => item.value.clone(),
+        };
+        (text, ratatui::style::Style::default())
+    }
+}
+
+impl Column<UserGroup> for UserGroupColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::GroupName => "Group name",
+            Self::AttachedPolicies => "Attached policies",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::GroupName => 40,
+            Self::AttachedPolicies => 60,
+        }
+    }
+
+    fn render(&self, item: &UserGroup) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::GroupName => item.group_name.clone(),
+            Self::AttachedPolicies => item.attached_policies.clone(),
+        };
+        (text, ratatui::style::Style::default())
+    }
+}
+
+impl Column<LastAccessedService> for LastAccessedServiceColumn {
+    fn name(&self) -> &str {
+        match self {
+            Self::Service => "Service",
+            Self::PoliciesGranting => "Policies granting permissions",
+            Self::LastAccessed => "Last accessed",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::Service => 30,
+            Self::PoliciesGranting => 40,
+            Self::LastAccessed => 30,
+        }
+    }
+
+    fn render(&self, item: &LastAccessedService) -> (String, ratatui::style::Style) {
+        let text = match self {
+            Self::Service => item.service.clone(),
+            Self::PoliciesGranting => item.policies_granting.clone(),
+            Self::LastAccessed => item.last_accessed.clone(),
+        };
+        (text, ratatui::style::Style::default())
     }
 }
 

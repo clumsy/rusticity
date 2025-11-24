@@ -7,8 +7,9 @@ use crate::common::{
 };
 use crate::keymap::Mode;
 use crate::lambda::{
-    format_architecture, format_runtime, Application as LambdaApplication, Deployment,
-    Function as LambdaFunction, Layer, Resource,
+    format_architecture, format_runtime, Alias, AliasColumn, Application as LambdaApplication,
+    Column as LambdaColumn, Deployment, Function as LambdaFunction, Layer, LayerColumn, Resource,
+    Version, VersionColumn,
 };
 use crate::table::TableState;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
@@ -23,16 +24,16 @@ pub struct State {
     pub current_version: Option<String>,
     pub current_alias: Option<String>,
     pub detail_tab: DetailTab,
-    pub visible_columns: Vec<crate::lambda::Column>,
-    pub all_columns: Vec<crate::lambda::Column>,
-    pub version_table: TableState<crate::lambda::Version>,
-    pub visible_version_columns: Vec<crate::lambda::VersionColumn>,
-    pub all_version_columns: Vec<crate::lambda::VersionColumn>,
-    pub alias_table: TableState<crate::lambda::Alias>,
-    pub visible_alias_columns: Vec<crate::lambda::AliasColumn>,
-    pub all_alias_columns: Vec<crate::lambda::AliasColumn>,
-    pub visible_layer_columns: Vec<crate::lambda::LayerColumn>,
-    pub all_layer_columns: Vec<crate::lambda::LayerColumn>,
+    pub visible_columns: Vec<String>,
+    pub all_columns: Vec<String>,
+    pub version_table: TableState<Version>,
+    pub visible_version_columns: Vec<String>,
+    pub all_version_columns: Vec<String>,
+    pub alias_table: TableState<Alias>,
+    pub visible_alias_columns: Vec<String>,
+    pub all_alias_columns: Vec<String>,
+    pub visible_layer_columns: Vec<String>,
+    pub all_layer_columns: Vec<String>,
     pub input_focus: InputFocus,
     pub version_input_focus: InputFocus,
     pub alias_input_focus: InputFocus,
@@ -54,23 +55,34 @@ impl State {
             current_version: None,
             current_alias: None,
             detail_tab: DetailTab::Code,
-            visible_columns: vec![
-                crate::lambda::Column::Name,
-                crate::lambda::Column::Runtime,
-                crate::lambda::Column::CodeSize,
-                crate::lambda::Column::MemoryMb,
-                crate::lambda::Column::TimeoutSeconds,
-                crate::lambda::Column::LastModified,
-            ],
-            all_columns: crate::lambda::Column::all(),
+            visible_columns: LambdaColumn::visible(),
+            all_columns: LambdaColumn::all(),
             version_table: TableState::new(),
-            visible_version_columns: crate::lambda::VersionColumn::all(),
-            all_version_columns: crate::lambda::VersionColumn::all(),
+            visible_version_columns: VersionColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
+            all_version_columns: VersionColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
             alias_table: TableState::new(),
-            visible_alias_columns: crate::lambda::AliasColumn::all(),
-            all_alias_columns: crate::lambda::AliasColumn::all(),
-            visible_layer_columns: crate::lambda::LayerColumn::all(),
-            all_layer_columns: crate::lambda::LayerColumn::all(),
+            visible_alias_columns: AliasColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
+            all_alias_columns: AliasColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
+            visible_layer_columns: LayerColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
+            all_layer_columns: LayerColumn::all()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect(),
             input_focus: InputFocus::Filter,
             version_input_focus: InputFocus::Filter,
             alias_input_focus: InputFocus::Filter,
@@ -249,12 +261,12 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
 
     let title = format!(" Lambda functions ({}) ", filtered.len());
 
-    let columns: Vec<Box<dyn TableColumn<LambdaFunction>>> = app
-        .lambda_state
-        .visible_columns
-        .iter()
-        .map(|col| col.to_column())
-        .collect();
+    let mut columns: Vec<Box<dyn TableColumn<LambdaFunction>>> = vec![];
+    for col_id in &app.lambda_state.visible_columns {
+        if let Some(column) = LambdaColumn::from_id(col_id) {
+            columns.push(Box::new(column));
+        }
+    }
 
     let expanded_index = if let Some(expanded) = app.lambda_state.table.expanded_item {
         if expanded >= start_idx && expanded < end_idx {
@@ -600,12 +612,20 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let title = format!(" Versions ({}) ", filtered.len());
 
-        let columns: Vec<Box<dyn TableColumn<crate::lambda::Version>>> = app
-            .lambda_state
-            .visible_version_columns
-            .iter()
-            .map(|col| col.to_column())
-            .collect();
+        let mut columns: Vec<Box<dyn TableColumn<Version>>> = vec![];
+        for col_name in &app.lambda_state.visible_version_columns {
+            let column = match col_name.as_str() {
+                "Version" => Some(VersionColumn::Version),
+                "Aliases" => Some(VersionColumn::Aliases),
+                "Description" => Some(VersionColumn::Description),
+                "Last modified" => Some(VersionColumn::LastModified),
+                "Architecture" => Some(VersionColumn::Architecture),
+                _ => None,
+            };
+            if let Some(c) = column {
+                columns.push(c.to_column());
+            }
+        }
 
         let expanded_index = if let Some(expanded) = app.lambda_state.version_table.expanded_item {
             if expanded >= start_idx && expanded < end_idx {
@@ -707,12 +727,18 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let title = format!(" Aliases ({}) ", filtered.len());
 
-        let columns: Vec<Box<dyn TableColumn<crate::lambda::Alias>>> = app
-            .lambda_state
-            .visible_alias_columns
-            .iter()
-            .map(|col| col.to_column())
-            .collect();
+        let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
+        for col_name in &app.lambda_state.visible_alias_columns {
+            let column = match col_name.as_str() {
+                "Name" => Some(AliasColumn::Name),
+                "Versions" => Some(AliasColumn::Versions),
+                "Description" => Some(AliasColumn::Description),
+                _ => None,
+            };
+            if let Some(c) = column {
+                columns.push(c.to_column());
+            }
+        }
 
         let expanded_index = if let Some(expanded) = app.lambda_state.alias_table.expanded_item {
             if expanded >= start_idx && expanded < end_idx {
@@ -1172,12 +1198,18 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                     let title = format!(" Aliases ({}) ", filtered.len());
 
-                    let columns: Vec<Box<dyn TableColumn<crate::lambda::Alias>>> = app
-                        .lambda_state
-                        .visible_alias_columns
-                        .iter()
-                        .map(|col| col.to_column())
-                        .collect();
+                    let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
+                    for col_name in &app.lambda_state.visible_alias_columns {
+                        let column = match col_name.as_str() {
+                            "Name" => Some(AliasColumn::Name),
+                            "Versions" => Some(AliasColumn::Versions),
+                            "Description" => Some(AliasColumn::Description),
+                            _ => None,
+                        };
+                        if let Some(c) = column {
+                            columns.push(c.to_column());
+                        }
+                    }
 
                     let expanded_index =
                         if let Some(expanded) = app.lambda_state.alias_table.expanded_item {
@@ -1255,8 +1287,10 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Applications ({}) ", filtered.len());
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaApplication>>> = vec![];
-    for col in &app.visible_lambda_application_columns {
-        columns.push(col.to_column());
+    for col_id in &app.visible_lambda_application_columns {
+        if let Some(column) = crate::lambda::ApplicationColumn::from_id(col_id) {
+            columns.push(Box::new(column));
+        }
     }
 
     let expanded_index = if let Some(expanded) = app.lambda_application_state.table.expanded_item {
@@ -1390,9 +1424,9 @@ pub async fn load_lambda_applications(app: &mut App) -> anyhow::Result<()> {
 
 pub async fn load_lambda_versions(app: &mut App, function_name: &str) -> anyhow::Result<()> {
     let versions = app.lambda_client.list_versions(function_name).await?;
-    let mut versions: Vec<crate::lambda::Version> = versions
+    let mut versions: Vec<Version> = versions
         .into_iter()
-        .map(|v| crate::lambda::Version {
+        .map(|v| Version {
             version: v.version,
             aliases: v.aliases,
             description: v.description,
@@ -1414,9 +1448,9 @@ pub async fn load_lambda_versions(app: &mut App, function_name: &str) -> anyhow:
 
 pub async fn load_lambda_aliases(app: &mut App, function_name: &str) -> anyhow::Result<()> {
     let aliases = app.lambda_client.list_aliases(function_name).await?;
-    let mut aliases: Vec<crate::lambda::Alias> = aliases
+    let mut aliases: Vec<Alias> = aliases
         .into_iter()
-        .map(|a| crate::lambda::Alias {
+        .map(|a| Alias {
             name: a.name,
             versions: a.versions,
             description: a.description,

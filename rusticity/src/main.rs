@@ -7,6 +7,7 @@ use tokio::time::{interval, Duration};
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
+    rusticity_term::init();
 
     let mut terminal = setup_terminal()?;
 

@@ -1,6 +1,6 @@
 pub use crate::aws::{Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
-use crate::common::{CyclicEnum, InputFocus, PageSize, SortDirection};
+use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
 use crate::cw::insights::{InsightsFocus, InsightsState};
 pub use crate::cw::{Alarm, AlarmColumn};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
@@ -75,32 +75,32 @@ pub struct App {
     pub profile: String,
     pub region: String,
     pub region_selector_index: usize,
-    pub visible_columns: Vec<LogGroupColumn>,
-    pub all_columns: Vec<LogGroupColumn>,
+    pub visible_columns: Vec<ColumnId>,
+    pub all_columns: Vec<ColumnId>,
     pub column_selector_index: usize,
     pub preference_section: Preferences,
-    pub visible_stream_columns: Vec<StreamColumn>,
-    pub all_stream_columns: Vec<StreamColumn>,
-    pub visible_event_columns: Vec<EventColumn>,
-    pub all_event_columns: Vec<EventColumn>,
-    pub visible_alarm_columns: Vec<AlarmColumn>,
-    pub all_alarm_columns: Vec<AlarmColumn>,
-    pub visible_bucket_columns: Vec<S3BucketColumn>,
-    pub all_bucket_columns: Vec<S3BucketColumn>,
-    pub visible_sqs_columns: Vec<SqsColumn>,
-    pub all_sqs_columns: Vec<SqsColumn>,
-    pub visible_ecr_columns: Vec<EcrColumn>,
-    pub all_ecr_columns: Vec<EcrColumn>,
-    pub visible_ecr_image_columns: Vec<EcrImageColumn>,
-    pub all_ecr_image_columns: Vec<EcrImageColumn>,
-    pub visible_lambda_application_columns: Vec<LambdaApplicationColumn>,
-    pub all_lambda_application_columns: Vec<LambdaApplicationColumn>,
-    pub visible_deployment_columns: Vec<DeploymentColumn>,
-    pub all_deployment_columns: Vec<DeploymentColumn>,
-    pub visible_resource_columns: Vec<ResourceColumn>,
-    pub all_resource_columns: Vec<ResourceColumn>,
-    pub visible_cfn_columns: Vec<CfnColumn>,
-    pub all_cfn_columns: Vec<CfnColumn>,
+    pub visible_stream_columns: Vec<ColumnId>,
+    pub all_stream_columns: Vec<ColumnId>,
+    pub visible_event_columns: Vec<ColumnId>,
+    pub all_event_columns: Vec<ColumnId>,
+    pub visible_alarm_columns: Vec<ColumnId>,
+    pub all_alarm_columns: Vec<ColumnId>,
+    pub visible_bucket_columns: Vec<ColumnId>,
+    pub all_bucket_columns: Vec<ColumnId>,
+    pub visible_sqs_columns: Vec<ColumnId>,
+    pub all_sqs_columns: Vec<ColumnId>,
+    pub visible_ecr_columns: Vec<ColumnId>,
+    pub all_ecr_columns: Vec<ColumnId>,
+    pub visible_ecr_image_columns: Vec<ColumnId>,
+    pub all_ecr_image_columns: Vec<ColumnId>,
+    pub visible_lambda_application_columns: Vec<ColumnId>,
+    pub all_lambda_application_columns: Vec<ColumnId>,
+    pub visible_deployment_columns: Vec<ColumnId>,
+    pub all_deployment_columns: Vec<ColumnId>,
+    pub visible_resource_columns: Vec<ColumnId>,
+    pub all_resource_columns: Vec<ColumnId>,
+    pub visible_cfn_columns: Vec<ColumnId>,
+    pub all_cfn_columns: Vec<ColumnId>,
     pub visible_iam_columns: Vec<String>,
     pub all_iam_columns: Vec<String>,
     pub visible_role_columns: Vec<String>,
@@ -387,21 +387,20 @@ impl App {
             all_stream_columns: StreamColumn::all(),
             visible_event_columns: EventColumn::default_visible(),
             all_event_columns: EventColumn::all(),
-            visible_alarm_columns: vec![
+            visible_alarm_columns: [
                 AlarmColumn::Name,
                 AlarmColumn::State,
                 AlarmColumn::LastStateUpdate,
                 AlarmColumn::Conditions,
                 AlarmColumn::Actions,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_alarm_columns: AlarmColumn::all(),
-            visible_bucket_columns: vec![
-                S3BucketColumn::Name,
-                S3BucketColumn::Region,
-                S3BucketColumn::CreationDate,
-            ],
+            visible_bucket_columns: S3BucketColumn::all(),
             all_bucket_columns: S3BucketColumn::all(),
-            visible_sqs_columns: vec![
+            visible_sqs_columns: [
                 SqsColumn::Name,
                 SqsColumn::Type,
                 SqsColumn::Created,
@@ -409,29 +408,30 @@ impl App {
                 SqsColumn::MessagesInFlight,
                 SqsColumn::Encryption,
                 SqsColumn::ContentBasedDeduplication,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_sqs_columns: SqsColumn::all(),
             visible_ecr_columns: EcrColumn::all(),
             all_ecr_columns: EcrColumn::all(),
             visible_ecr_image_columns: EcrImageColumn::all(),
             all_ecr_image_columns: EcrImageColumn::all(),
-            visible_lambda_application_columns: vec![
-                LambdaApplicationColumn::Name,
-                LambdaApplicationColumn::Description,
-                LambdaApplicationColumn::Status,
-                LambdaApplicationColumn::LastModified,
-            ],
+            visible_lambda_application_columns: LambdaApplicationColumn::visible(),
             all_lambda_application_columns: LambdaApplicationColumn::all(),
             visible_deployment_columns: DeploymentColumn::all(),
             all_deployment_columns: DeploymentColumn::all(),
             visible_resource_columns: ResourceColumn::all(),
             all_resource_columns: ResourceColumn::all(),
-            visible_cfn_columns: vec![
+            visible_cfn_columns: [
                 CfnColumn::Name,
                 CfnColumn::Status,
                 CfnColumn::CreatedTime,
                 CfnColumn::Description,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_cfn_columns: CfnColumn::all(),
             visible_iam_columns: vec![
                 "User name".to_string(),
@@ -568,21 +568,20 @@ impl App {
             all_stream_columns: StreamColumn::all(),
             visible_event_columns: EventColumn::default_visible(),
             all_event_columns: EventColumn::all(),
-            visible_alarm_columns: vec![
+            visible_alarm_columns: [
                 AlarmColumn::Name,
                 AlarmColumn::State,
                 AlarmColumn::LastStateUpdate,
                 AlarmColumn::Conditions,
                 AlarmColumn::Actions,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_alarm_columns: AlarmColumn::all(),
-            visible_bucket_columns: vec![
-                S3BucketColumn::Name,
-                S3BucketColumn::Region,
-                S3BucketColumn::CreationDate,
-            ],
+            visible_bucket_columns: S3BucketColumn::all(),
             all_bucket_columns: S3BucketColumn::all(),
-            visible_sqs_columns: vec![
+            visible_sqs_columns: [
                 SqsColumn::Name,
                 SqsColumn::Type,
                 SqsColumn::Created,
@@ -590,29 +589,30 @@ impl App {
                 SqsColumn::MessagesInFlight,
                 SqsColumn::Encryption,
                 SqsColumn::ContentBasedDeduplication,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_sqs_columns: SqsColumn::all(),
             visible_ecr_columns: EcrColumn::all(),
             all_ecr_columns: EcrColumn::all(),
             visible_ecr_image_columns: EcrImageColumn::all(),
             all_ecr_image_columns: EcrImageColumn::all(),
-            visible_lambda_application_columns: vec![
-                LambdaApplicationColumn::Name,
-                LambdaApplicationColumn::Description,
-                LambdaApplicationColumn::Status,
-                LambdaApplicationColumn::LastModified,
-            ],
+            visible_lambda_application_columns: LambdaApplicationColumn::visible(),
             all_lambda_application_columns: LambdaApplicationColumn::all(),
             visible_deployment_columns: DeploymentColumn::all(),
             all_deployment_columns: DeploymentColumn::all(),
             visible_resource_columns: ResourceColumn::all(),
             all_resource_columns: ResourceColumn::all(),
-            visible_cfn_columns: vec![
+            visible_cfn_columns: [
                 CfnColumn::Name,
                 CfnColumn::Status,
                 CfnColumn::CreatedTime,
                 CfnColumn::Description,
-            ],
+            ]
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect(),
             all_cfn_columns: CfnColumn::all(),
             visible_iam_columns: vec![
                 "User name".to_string(),
@@ -1219,13 +1219,12 @@ impl App {
                 if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_none()
                 {
-                    if let Some(&col) = self.all_bucket_columns.get(self.column_selector_index) {
-                        if let Some(pos) =
-                            self.visible_bucket_columns.iter().position(|&c| c == col)
+                    if let Some(col) = self.all_bucket_columns.get(self.column_selector_index) {
+                        if let Some(pos) = self.visible_bucket_columns.iter().position(|c| c == col)
                         {
                             self.visible_bucket_columns.remove(pos);
                         } else {
-                            self.visible_bucket_columns.push(col);
+                            self.visible_bucket_columns.push(col.clone());
                         }
                     }
                 } else if self.current_service == Service::CloudWatchAlarms {
@@ -1235,13 +1234,13 @@ impl App {
                     let idx = self.column_selector_index;
                     if (1..=16).contains(&idx) {
                         // Column toggle
-                        if let Some(&col) = self.all_alarm_columns.get(idx - 1) {
+                        if let Some(col) = self.all_alarm_columns.get(idx - 1) {
                             if let Some(pos) =
-                                self.visible_alarm_columns.iter().position(|&c| c == col)
+                                self.visible_alarm_columns.iter().position(|c| c == col)
                             {
                                 self.visible_alarm_columns.remove(pos);
                             } else {
-                                self.visible_alarm_columns.push(col);
+                                self.visible_alarm_columns.push(col.clone());
                             }
                         }
                     } else if idx == 19 {
@@ -1263,35 +1262,33 @@ impl App {
                     if self.ecr_state.current_repository.is_some() {
                         // Images view - columns + page size
                         let idx = self.column_selector_index;
-                        if let Some(&col) = self.all_ecr_image_columns.get(idx) {
-                            if let Some(pos) = self
-                                .visible_ecr_image_columns
-                                .iter()
-                                .position(|&c| c == col)
+                        if let Some(col) = self.all_ecr_image_columns.get(idx) {
+                            if let Some(pos) =
+                                self.visible_ecr_image_columns.iter().position(|c| c == col)
                             {
                                 self.visible_ecr_image_columns.remove(pos);
                             } else {
-                                self.visible_ecr_image_columns.push(col);
+                                self.visible_ecr_image_columns.push(col.clone());
                             }
                         }
                     } else {
                         // Repositories view - just columns
-                        if let Some(&col) = self.all_ecr_columns.get(self.column_selector_index) {
+                        if let Some(col) = self.all_ecr_columns.get(self.column_selector_index) {
                             if let Some(pos) =
-                                self.visible_ecr_columns.iter().position(|&c| c == col)
+                                self.visible_ecr_columns.iter().position(|c| c == col)
                             {
                                 self.visible_ecr_columns.remove(pos);
                             } else {
-                                self.visible_ecr_columns.push(col);
+                                self.visible_ecr_columns.push(col.clone());
                             }
                         }
                     }
                 } else if self.current_service == Service::SqsQueues {
-                    if let Some(&col) = self.all_sqs_columns.get(self.column_selector_index) {
-                        if let Some(pos) = self.visible_sqs_columns.iter().position(|&c| c == col) {
+                    if let Some(col) = self.all_sqs_columns.get(self.column_selector_index) {
+                        if let Some(pos) = self.visible_sqs_columns.iter().position(|c| c == col) {
                             self.visible_sqs_columns.remove(pos);
                         } else {
-                            self.visible_sqs_columns.push(col);
+                            self.visible_sqs_columns.push(col.clone());
                         }
                     }
                 } else if self.current_service == Service::LambdaFunctions {
@@ -1302,16 +1299,16 @@ impl App {
                     {
                         // Version columns
                         if idx > 0 && idx <= self.lambda_state.all_version_columns.len() {
-                            if let Some(&col) = self.lambda_state.all_version_columns.get(idx - 1) {
+                            if let Some(col) = self.lambda_state.all_version_columns.get(idx - 1) {
                                 if let Some(pos) = self
                                     .lambda_state
                                     .visible_version_columns
                                     .iter()
-                                    .position(|&c| c == col)
+                                    .position(|c| *c == *col)
                                 {
                                     self.lambda_state.visible_version_columns.remove(pos);
                                 } else {
-                                    self.lambda_state.visible_version_columns.push(col);
+                                    self.lambda_state.visible_version_columns.push(col.clone());
                                 }
                             }
                         } else if idx == self.lambda_state.all_version_columns.len() + 3 {
@@ -1331,16 +1328,16 @@ impl App {
                     {
                         // Alias columns
                         if idx > 0 && idx <= self.lambda_state.all_alias_columns.len() {
-                            if let Some(&col) = self.lambda_state.all_alias_columns.get(idx - 1) {
+                            if let Some(col) = self.lambda_state.all_alias_columns.get(idx - 1) {
                                 if let Some(pos) = self
                                     .lambda_state
                                     .visible_alias_columns
                                     .iter()
-                                    .position(|&c| c == col)
+                                    .position(|c| *c == *col)
                                 {
                                     self.lambda_state.visible_alias_columns.remove(pos);
                                 } else {
-                                    self.lambda_state.visible_alias_columns.push(col);
+                                    self.lambda_state.visible_alias_columns.push(col.clone());
                                 }
                             }
                         } else if idx == self.lambda_state.all_alias_columns.len() + 3 {
@@ -1355,16 +1352,16 @@ impl App {
                     } else {
                         // Function columns
                         if idx > 0 && idx <= self.lambda_state.all_columns.len() {
-                            if let Some(&col) = self.lambda_state.all_columns.get(idx - 1) {
+                            if let Some(col) = self.lambda_state.all_columns.get(idx - 1) {
                                 if let Some(pos) = self
                                     .lambda_state
                                     .visible_columns
                                     .iter()
-                                    .position(|&c| c == col)
+                                    .position(|c| *c == *col)
                                 {
                                     self.lambda_state.visible_columns.remove(pos);
                                 } else {
-                                    self.lambda_state.visible_columns.push(col);
+                                    self.lambda_state.visible_columns.push(col.clone());
                                 }
                             }
                         } else if idx == self.lambda_state.all_columns.len() + 3 {
@@ -1386,13 +1383,13 @@ impl App {
                             // Resources columns
                             let idx = self.column_selector_index;
                             if idx > 0 && idx <= self.all_resource_columns.len() {
-                                if let Some(&col) = self.all_resource_columns.get(idx - 1) {
+                                if let Some(col) = self.all_resource_columns.get(idx - 1) {
                                     if let Some(pos) =
-                                        self.visible_resource_columns.iter().position(|&c| c == col)
+                                        self.visible_resource_columns.iter().position(|c| c == col)
                                     {
                                         self.visible_resource_columns.remove(pos);
                                     } else {
-                                        self.visible_resource_columns.push(col);
+                                        self.visible_resource_columns.push(col.clone());
                                     }
                                 }
                             } else if idx == self.all_resource_columns.len() + 3 {
@@ -1407,15 +1404,15 @@ impl App {
                             // Deployments columns
                             let idx = self.column_selector_index;
                             if idx > 0 && idx <= self.all_deployment_columns.len() {
-                                if let Some(&col) = self.all_deployment_columns.get(idx - 1) {
+                                if let Some(col) = self.all_deployment_columns.get(idx - 1) {
                                     if let Some(pos) = self
                                         .visible_deployment_columns
                                         .iter()
-                                        .position(|&c| c == col)
+                                        .position(|c| c == col)
                                     {
                                         self.visible_deployment_columns.remove(pos);
                                     } else {
-                                        self.visible_deployment_columns.push(col);
+                                        self.visible_deployment_columns.push(col.clone());
                                     }
                                 }
                             } else if idx == self.all_deployment_columns.len() + 3 {
@@ -1432,15 +1429,15 @@ impl App {
                         // In list view - handle application columns
                         let idx = self.column_selector_index;
                         if idx > 0 && idx <= self.all_lambda_application_columns.len() {
-                            if let Some(&col) = self.all_lambda_application_columns.get(idx - 1) {
+                            if let Some(col) = self.all_lambda_application_columns.get(idx - 1) {
                                 if let Some(pos) = self
                                     .visible_lambda_application_columns
                                     .iter()
-                                    .position(|&c| c == col)
+                                    .position(|c| *c == *col)
                                 {
                                     self.visible_lambda_application_columns.remove(pos);
                                 } else {
-                                    self.visible_lambda_application_columns.push(col);
+                                    self.visible_lambda_application_columns.push(col.clone());
                                 }
                             }
                         } else if idx == self.all_lambda_application_columns.len() + 3 {
@@ -1452,34 +1449,33 @@ impl App {
                         }
                     }
                 } else if self.view_mode == ViewMode::Events {
-                    if let Some(&col) = self.all_event_columns.get(self.column_selector_index) {
-                        if let Some(pos) = self.visible_event_columns.iter().position(|&c| c == col)
+                    if let Some(col) = self.all_event_columns.get(self.column_selector_index) {
+                        if let Some(pos) = self.visible_event_columns.iter().position(|c| c == col)
                         {
                             self.visible_event_columns.remove(pos);
                         } else {
-                            self.visible_event_columns.push(col);
+                            self.visible_event_columns.push(col.clone());
                         }
                     }
                 } else if self.view_mode == ViewMode::Detail {
-                    if let Some(&col) = self.all_stream_columns.get(self.column_selector_index) {
-                        if let Some(pos) =
-                            self.visible_stream_columns.iter().position(|&c| c == col)
+                    if let Some(col) = self.all_stream_columns.get(self.column_selector_index) {
+                        if let Some(pos) = self.visible_stream_columns.iter().position(|c| c == col)
                         {
                             self.visible_stream_columns.remove(pos);
                         } else {
-                            self.visible_stream_columns.push(col);
+                            self.visible_stream_columns.push(col.clone());
                         }
                     }
                 } else if self.current_service == Service::CloudFormationStacks {
                     let idx = self.column_selector_index;
                     if idx > 0 && idx <= self.all_cfn_columns.len() {
-                        if let Some(&col) = self.all_cfn_columns.get(idx - 1) {
+                        if let Some(col) = self.all_cfn_columns.get(idx - 1) {
                             if let Some(pos) =
-                                self.visible_cfn_columns.iter().position(|&c| c == col)
+                                self.visible_cfn_columns.iter().position(|c| c == col)
                             {
                                 self.visible_cfn_columns.remove(pos);
                             } else {
-                                self.visible_cfn_columns.push(col);
+                                self.visible_cfn_columns.push(col.clone());
                             }
                         }
                     } else if idx == self.all_cfn_columns.len() + 3 {
@@ -1592,11 +1588,11 @@ impl App {
                     } else if idx == self.all_group_columns.len() + 5 {
                         self.iam_state.groups.page_size = PageSize::Fifty;
                     }
-                } else if let Some(&col) = self.all_columns.get(self.column_selector_index) {
-                    if let Some(pos) = self.visible_columns.iter().position(|&c| c == col) {
+                } else if let Some(col) = self.all_columns.get(self.column_selector_index) {
+                    if let Some(pos) = self.visible_columns.iter().position(|c| c == col) {
                         self.visible_columns.remove(pos);
                     } else {
-                        self.visible_columns.push(col);
+                        self.visible_columns.push(col.clone());
                     }
                 }
             }
@@ -1693,11 +1689,11 @@ impl App {
                     } else {
                         self.column_selector_index = 0;
                     }
-                } else if let Some(&col) = self.all_columns.get(self.column_selector_index) {
-                    if let Some(pos) = self.visible_columns.iter().position(|&c| c == col) {
+                } else if let Some(col) = self.all_columns.get(self.column_selector_index) {
+                    if let Some(pos) = self.visible_columns.iter().position(|c| c == col) {
                         self.visible_columns.remove(pos);
                     } else {
-                        self.visible_columns.push(col);
+                        self.visible_columns.push(col.clone());
                     }
                 }
             }
@@ -6760,8 +6756,12 @@ mod tests {
         assert!(!app.visible_alarm_columns.is_empty());
 
         // Default visible columns
-        assert!(app.visible_alarm_columns.contains(&AlarmColumn::Name));
-        assert!(app.visible_alarm_columns.contains(&AlarmColumn::State));
+        assert!(app
+            .visible_alarm_columns
+            .contains(&AlarmColumn::Name.id().to_string()));
+        assert!(app
+            .visible_alarm_columns
+            .contains(&AlarmColumn::State.id().to_string()));
     }
 
     #[test]
@@ -8684,12 +8684,15 @@ mod tests {
         }];
 
         // Set visible columns
-        app.visible_cfn_columns = vec![
+        app.visible_cfn_columns = [
             CfnColumn::Name,
             CfnColumn::Status,
             CfnColumn::CreatedTime,
             CfnColumn::Description,
-        ];
+        ]
+        .iter()
+        .map(|c| c.id().to_string())
+        .collect();
 
         app.cfn_state.table.expanded_item = Some(0);
 
@@ -10285,12 +10288,12 @@ mod region_latency_tests {
 
         // First column should be removed
         assert_eq!(app.visible_ecr_image_columns.len(), initial_count - 1);
-        assert!(!app.visible_ecr_image_columns.contains(&ImageColumn::Tag));
+        assert!(!app.visible_ecr_image_columns.contains(&"tag".to_string()));
 
         // Toggle it back
         app.handle_action(Action::ToggleColumn);
         assert_eq!(app.visible_ecr_image_columns.len(), initial_count);
-        assert!(app.visible_ecr_image_columns.contains(&ImageColumn::Tag));
+        assert!(app.visible_ecr_image_columns.contains(&"tag".to_string()));
     }
 
     #[test]
@@ -10312,12 +10315,12 @@ mod region_latency_tests {
 
         // First column should be removed
         assert_eq!(app.visible_ecr_columns.len(), initial_count - 1);
-        assert!(!app.visible_ecr_columns.contains(&Column::Name));
+        assert!(!app.visible_ecr_columns.contains(&"name".to_string()));
 
         // Toggle it back
         app.handle_action(Action::ToggleColumn);
         assert_eq!(app.visible_ecr_columns.len(), initial_count);
-        assert!(app.visible_ecr_columns.contains(&Column::Name));
+        assert!(app.visible_ecr_columns.contains(&"name".to_string()));
     }
 
     #[test]
@@ -11526,10 +11529,18 @@ mod region_latency_tests {
     fn test_cloudformation_default_columns() {
         let app = test_app();
         assert_eq!(app.visible_cfn_columns.len(), 4);
-        assert!(app.visible_cfn_columns.contains(&CfnColumn::Name));
-        assert!(app.visible_cfn_columns.contains(&CfnColumn::Status));
-        assert!(app.visible_cfn_columns.contains(&CfnColumn::CreatedTime));
-        assert!(app.visible_cfn_columns.contains(&CfnColumn::Description));
+        assert!(app
+            .visible_cfn_columns
+            .contains(&CfnColumn::Name.id().to_string()));
+        assert!(app
+            .visible_cfn_columns
+            .contains(&CfnColumn::Status.id().to_string()));
+        assert!(app
+            .visible_cfn_columns
+            .contains(&CfnColumn::CreatedTime.id().to_string()));
+        assert!(app
+            .visible_cfn_columns
+            .contains(&CfnColumn::Description.id().to_string()));
     }
 
     #[test]
@@ -13085,12 +13096,16 @@ mod sqs_tests {
 
         // First column should be removed
         assert_eq!(app.visible_sqs_columns.len(), initial_count - 1);
-        assert!(!app.visible_sqs_columns.contains(&SqsColumn::Name));
+        assert!(!app
+            .visible_sqs_columns
+            .contains(&SqsColumn::Name.id().to_string()));
 
         // Toggle it back
         app.handle_action(Action::ToggleColumn);
         assert_eq!(app.visible_sqs_columns.len(), initial_count);
-        assert!(app.visible_sqs_columns.contains(&SqsColumn::Name));
+        assert!(app
+            .visible_sqs_columns
+            .contains(&SqsColumn::Name.id().to_string()));
     }
 
     #[test]

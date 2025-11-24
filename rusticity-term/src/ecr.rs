@@ -1,6 +1,11 @@
 pub mod image;
 pub mod repo;
 
+pub fn init() {
+    repo::init();
+    image::init();
+}
+
 pub fn console_url_repositories(region: &str) -> String {
     format!(
         "https://{}.console.aws.amazon.com/ecr/private-registry/repositories?region={}",

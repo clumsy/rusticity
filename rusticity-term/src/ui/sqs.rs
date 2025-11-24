@@ -1,5 +1,5 @@
 use crate::common::InputFocus;
-use crate::sqs::Queue;
+use crate::sqs::{Column as SqsColumn, Queue};
 use crate::table::TableState;
 
 pub const FILTER_CONTROLS: &[InputFocus] = &[InputFocus::Filter, InputFocus::Pagination];
@@ -336,7 +336,10 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
     let columns: Vec<Box<dyn crate::ui::table::Column<Queue>>> = app
         .visible_sqs_columns
         .iter()
-        .map(|col| Box::new(*col) as Box<dyn crate::ui::table::Column<Queue>>)
+        .filter_map(|col_id| {
+            SqsColumn::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<Queue>>)
+        })
         .collect();
 
     let expanded_index = app.sqs_state.queues.expanded_item.and_then(|idx| {

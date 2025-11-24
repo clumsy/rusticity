@@ -3,6 +3,8 @@ use ratatui::{prelude::*, widgets::*};
 
 use crate::ui::{filter_area, styles};
 
+pub type ColumnId = String;
+
 // Width for UTC timestamp format: "YYYY-MM-DD HH:MM:SS (UTC)"
 pub const UTC_TIMESTAMP_WIDTH: u16 = 27;
 

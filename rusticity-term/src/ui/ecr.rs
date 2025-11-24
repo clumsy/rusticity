@@ -1,8 +1,8 @@
 use crate::app::App;
 use crate::common::CyclicEnum;
 use crate::common::{render_pagination_text, InputFocus, SortDirection};
-use crate::ecr::image::Image as EcrImage;
-use crate::ecr::repo::Repository as EcrRepository;
+use crate::ecr::image::{self, Image as EcrImage};
+use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::render_inner_tab_spans;
@@ -178,7 +178,10 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
     let columns: Vec<Box<dyn crate::ui::table::Column<EcrRepository>>> = app
         .visible_ecr_columns
         .iter()
-        .map(|col| Box::new(*col) as Box<dyn crate::ui::table::Column<EcrRepository>>)
+        .filter_map(|col_id| {
+            repo::Column::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<EcrRepository>>)
+        })
         .collect();
 
     let expanded_index = app.ecr_state.repositories.expanded_item.and_then(|idx| {
@@ -285,7 +288,10 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
     let columns: Vec<Box<dyn crate::ui::table::Column<EcrImage>>> = app
         .visible_ecr_image_columns
         .iter()
-        .map(|col| Box::new(*col) as Box<dyn crate::ui::table::Column<EcrImage>>)
+        .filter_map(|col_id| {
+            image::Column::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<EcrImage>>)
+        })
         .collect();
 
     let config = crate::ui::table::TableConfig {

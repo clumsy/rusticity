@@ -1,5 +1,10 @@
 use crate::common::UTC_TIMESTAMP_WIDTH;
 
+pub fn init() {
+    // CloudWatch Logs columns (LogGroupColumn, StreamColumn, EventColumn) are defined in app.rs
+    // and session modules, not here. No i18n needed for this module yet.
+}
+
 pub fn console_url_list(region: &str) -> String {
     format!(
         "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#logsV2:log-groups",

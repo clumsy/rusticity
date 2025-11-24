@@ -14,6 +14,12 @@ mod status;
 pub mod styles;
 pub mod table;
 
+use crate::cfn::Column as CfnColumn;
+use crate::cw::alarms::AlarmColumn;
+use crate::ecr::{image, repo};
+use crate::lambda::{DeploymentColumn, ResourceColumn};
+use crate::sqs::Column as SqsColumn;
+use crate::ui::table::Column as TableColumn;
 use styles::highlight;
 
 pub use cw::insights::{DateRangeType, TimeUnit};
@@ -366,29 +372,12 @@ pub fn format_duration(seconds: u64) -> String {
     }
 }
 
-// Dummy type for wrap lines option to work with ColumnTrait
-struct WrapLinesOption;
-
-impl crate::common::ColumnTrait for WrapLinesOption {
-    fn name(&self) -> &'static str {
-        "Wrap lines"
-    }
-}
-
-// Helper to render a column toggle item
-fn render_column_toggle_item<T>(
-    col: &T,
-    is_visible: bool,
-    _indent: bool,
-) -> (ListItem<'static>, usize)
-where
-    T: crate::common::ColumnTrait,
-{
-    let spans = vec![];
-    let mut spans = spans;
+fn render_column_toggle_string(col_name: &str, is_visible: bool) -> (ListItem<'static>, usize) {
+    let mut spans = vec![];
     spans.extend(render_toggle(is_visible));
-    spans.push(Span::raw(format!(" {}", col.name())));
-    let text_len = 2 + 1 + col.name().len();
+    spans.push(Span::raw(" "));
+    spans.push(Span::raw(col_name.to_string()));
+    let text_len = 4 + col_name.len();
     (ListItem::new(Line::from(spans)), text_len)
 }
 
@@ -692,459 +681,484 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
-    let (items, title, max_text_len) =
-        if app.current_service == Service::S3Buckets && app.s3_state.current_bucket.is_none() {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .all_bucket_columns
-                .iter()
-                .map(|col| {
-                    let is_visible = app.visible_bucket_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
+    let (items, title, max_text_len) = if app.current_service == Service::S3Buckets
+        && app.s3_state.current_bucket.is_none()
+    {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = app
+            .s3_bucket_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                crate::s3::BucketColumn::from_id(col_id).map(|col| {
+                    let is_visible = app.s3_bucket_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
                     max_len = max_len.max(len);
                     item
                 })
-                .collect();
-            (items, " Preferences ", max_len)
-        } else if app.current_service == Service::CloudWatchAlarms {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
+            })
+            .collect();
+        (items, " Preferences ", max_len)
+    } else if app.current_service == Service::CloudWatchAlarms {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
 
-            // Columns section
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
+        // Columns section
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
 
-            for col in &app.all_alarm_columns {
-                let is_visible = app.visible_alarm_columns.contains(col);
-                let (item, len) = render_column_toggle_item(col, is_visible, true);
+        for col_id in &app.cw_alarm_column_ids {
+            let is_visible = app.cw_alarm_visible_column_ids.contains(col_id);
+            if let Some(col) = AlarmColumn::from_id(col_id) {
+                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
                 all_items.push(item);
                 max_len = max_len.max(len);
             }
+        }
 
-            // View As section
-            all_items.push(ListItem::new(""));
-            let (header, header_len) = render_section_header("View as");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
+        // View As section
+        all_items.push(ListItem::new(""));
+        let (header, header_len) = render_section_header("View as");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
 
-            let (item, len) = render_radio_item(
-                "Table",
-                app.alarms_state.view_as == AlarmViewMode::Table,
-                true,
-            );
-            all_items.push(item);
-            max_len = max_len.max(len);
+        let (item, len) = render_radio_item(
+            "Table",
+            app.alarms_state.view_as == AlarmViewMode::Table,
+            true,
+        );
+        all_items.push(item);
+        max_len = max_len.max(len);
 
-            let (item, len) = render_radio_item(
-                "Cards",
-                app.alarms_state.view_as == AlarmViewMode::Cards,
-                true,
-            );
-            all_items.push(item);
-            max_len = max_len.max(len);
+        let (item, len) = render_radio_item(
+            "Cards",
+            app.alarms_state.view_as == AlarmViewMode::Cards,
+            true,
+        );
+        all_items.push(item);
+        max_len = max_len.max(len);
 
-            // Page Size section
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.alarms_state.table.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
+        // Page Size section
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) = render_page_size_section(
+            app.alarms_state.table.page_size,
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+                (PageSize::OneHundred, "100"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
 
-            // Wrap Lines section
-            all_items.push(ListItem::new(""));
-            let (header, header_len) = render_section_header("Wrap lines");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
+        // Wrap Lines section
+        all_items.push(ListItem::new(""));
+        let (header, header_len) = render_section_header("Wrap lines");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
 
-            let (item, len) =
-                render_column_toggle_item(&WrapLinesOption, app.alarms_state.wrap_lines, true);
-            all_items.push(item);
-            max_len = max_len.max(len);
+        let (item, len) = render_column_toggle_string("Wrap lines", app.alarms_state.wrap_lines);
+        all_items.push(item);
+        max_len = max_len.max(len);
 
-            (all_items, " Preferences ", max_len)
-        } else if app.view_mode == ViewMode::Events {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .all_event_columns
-                .iter()
-                .map(|col| {
-                    let is_visible = app.visible_event_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
+        (all_items, " Preferences ", max_len)
+    } else if app.view_mode == ViewMode::Events {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = app
+            .cw_log_event_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                EventColumn::from_id(col_id).map(|col| {
+                    let is_visible = app.cw_log_event_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
                     max_len = max_len.max(len);
                     item
                 })
-                .collect();
-            (items, " Select visible columns (Space to toggle) ", max_len)
-        } else if app.view_mode == ViewMode::Detail {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .all_stream_columns
-                .iter()
-                .map(|col| {
-                    let is_visible = app.visible_stream_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
+            })
+            .collect();
+        (items, " Select visible columns (Space to toggle) ", max_len)
+    } else if app.view_mode == ViewMode::Detail {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = app
+            .cw_log_stream_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                StreamColumn::from_id(col_id).map(|col| {
+                    let is_visible = app.cw_log_stream_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
                     max_len = max_len.max(len);
                     item
                 })
-                .collect();
-            (items, " Preferences ", max_len)
-        } else if app.current_service == Service::CloudWatchLogGroups {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .all_columns
-                .iter()
-                .map(|col| {
-                    let is_visible = app.visible_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
+            })
+            .collect();
+        (items, " Preferences ", max_len)
+    } else if app.current_service == Service::CloudWatchLogGroups {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = app
+            .cw_log_group_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                LogGroupColumn::from_id(col_id).map(|col| {
+                    let is_visible = app.cw_log_group_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
                     max_len = max_len.max(len);
                     item
                 })
-                .collect();
-            (items, " Preferences ", max_len)
-        } else if app.current_service == Service::EcrRepositories {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = if app.ecr_state.current_repository.is_some() {
-                // ECR images columns
-                app.all_ecr_image_columns
-                    .iter()
-                    .map(|col| {
-                        let is_visible = app.visible_ecr_image_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, false);
+            })
+            .collect();
+        (items, " Preferences ", max_len)
+    } else if app.current_service == Service::EcrRepositories {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = if app.ecr_state.current_repository.is_some() {
+            // ECR images columns
+            app.ecr_image_column_ids
+                .iter()
+                .filter_map(|col_id| {
+                    image::Column::from_id(col_id).map(|col| {
+                        let is_visible = app.ecr_image_visible_column_ids.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
                         max_len = max_len.max(len);
                         item
                     })
-                    .collect()
-            } else {
-                // ECR repository columns
-                app.all_ecr_columns
-                    .iter()
-                    .map(|col| {
-                        let is_visible = app.visible_ecr_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, false);
-                        max_len = max_len.max(len);
-                        item
-                    })
-                    .collect()
-            };
-            (items, " Preferences ", max_len)
-        } else if app.current_service == Service::SqsQueues {
-            let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .all_sqs_columns
-                .iter()
-                .map(|col| {
-                    let is_visible = app.visible_sqs_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, false);
-                    max_len = max_len.max(len);
-                    item
                 })
-                .collect();
-            (items, " Preferences ", max_len)
-        } else if app.current_service == Service::LambdaFunctions {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            // Show appropriate columns based on current tab
-            if app.lambda_state.current_function.is_some()
-                && app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Code
-            {
-                // Show layer columns for Code tab
-                for col in &app.lambda_state.all_layer_columns {
-                    let is_visible = app.lambda_state.visible_layer_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
-                for col in &app.lambda_state.all_version_columns {
-                    let is_visible = app.lambda_state.visible_version_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Aliases {
-                for col in &app.lambda_state.all_alias_columns {
-                    let is_visible = app.lambda_state.visible_alias_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            } else {
-                for col in &app.lambda_state.all_columns {
-                    let is_visible = app.lambda_state.visible_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-
-            let (page_items, page_len) = render_page_size_section(
-                if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
-                    app.lambda_state.version_table.page_size
-                } else {
-                    app.lambda_state.table.page_size
-                },
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-
-            (all_items, " Preferences ", max_len)
-        } else if app.current_service == Service::LambdaApplications {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            // Show different columns based on current view
-            if app.lambda_application_state.current_application.is_some() {
-                use crate::ui::lambda::ApplicationDetailTab;
-                if app.lambda_application_state.detail_tab == ApplicationDetailTab::Overview {
-                    // Resources columns
-                    for col in &app.all_resource_columns {
-                        let is_visible = app.visible_resource_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, true);
-                        all_items.push(item);
-                        max_len = max_len.max(len);
-                    }
-
-                    all_items.push(ListItem::new(""));
-                    let (page_items, page_len) = render_page_size_section(
-                        app.lambda_application_state.resources.page_size,
-                        &[
-                            (PageSize::Ten, "10"),
-                            (PageSize::TwentyFive, "25"),
-                            (PageSize::Fifty, "50"),
-                        ],
-                    );
-                    all_items.extend(page_items);
-                    max_len = max_len.max(page_len);
-                } else {
-                    // Deployments columns
-                    for col in &app.all_deployment_columns {
-                        let is_visible = app.visible_deployment_columns.contains(col);
-                        let (item, len) = render_column_toggle_item(col, is_visible, true);
-                        all_items.push(item);
-                        max_len = max_len.max(len);
-                    }
-
-                    all_items.push(ListItem::new(""));
-                    let (page_items, page_len) = render_page_size_section(
-                        app.lambda_application_state.deployments.page_size,
-                        &[
-                            (PageSize::Ten, "10"),
-                            (PageSize::TwentyFive, "25"),
-                            (PageSize::Fifty, "50"),
-                        ],
-                    );
-                    all_items.extend(page_items);
-                    max_len = max_len.max(page_len);
-                }
-            } else {
-                // Application list columns
-                for col in &app.all_lambda_application_columns {
-                    let is_visible = app.visible_lambda_application_columns.contains(col);
-                    let (item, len) = render_column_toggle_item(col, is_visible, true);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-
-                all_items.push(ListItem::new(""));
-                let (page_items, page_len) = render_page_size_section(
-                    app.lambda_application_state.table.page_size,
-                    &[
-                        (PageSize::Ten, "10"),
-                        (PageSize::TwentyFive, "25"),
-                        (PageSize::Fifty, "50"),
-                    ],
-                );
-                all_items.extend(page_items);
-                max_len = max_len.max(page_len);
-            }
-
-            (all_items, " Preferences ", max_len)
-        } else if app.current_service == Service::CloudFormationStacks {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in &app.all_cfn_columns {
-                let is_visible = app.visible_cfn_columns.contains(col);
-                let (item, len) = render_column_toggle_item(col, is_visible, true);
-                all_items.push(item);
-                max_len = max_len.max(len);
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.table.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-
-            (all_items, " Preferences ", max_len)
-        } else if app.current_service == Service::IamUsers {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            // Show policy columns only for Permissions tab in user detail view
-            if app.iam_state.current_user.is_some()
-                && app.iam_state.user_tab == crate::ui::iam::UserTab::Permissions
-            {
-                let (header, header_len) = render_section_header("Columns");
-                all_items.push(header);
-                max_len = max_len.max(header_len);
-
-                for col in &app.all_policy_columns {
-                    let is_visible = app.visible_policy_columns.contains(col);
-                    let mut spans = vec![];
-                    spans.extend(render_toggle(is_visible));
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::raw(col.clone()));
-                    let text_len = 4 + col.len();
-                    all_items.push(ListItem::new(Line::from(spans)));
-                    max_len = max_len.max(text_len);
-                }
-
-                all_items.push(ListItem::new(""));
-                let (page_items, page_len) = render_page_size_section(
-                    app.iam_state.policies.page_size,
-                    &[
-                        (PageSize::Ten, "10"),
-                        (PageSize::TwentyFive, "25"),
-                        (PageSize::Fifty, "50"),
-                    ],
-                );
-                all_items.extend(page_items);
-                max_len = max_len.max(page_len);
-            } else if app.iam_state.current_user.is_none() {
-                let (header, header_len) = render_section_header("Columns");
-                all_items.push(header);
-                max_len = max_len.max(header_len);
-
-                for col in &app.all_iam_columns {
-                    let is_visible = app.visible_iam_columns.contains(col);
-                    let mut spans = vec![];
-                    spans.extend(render_toggle(is_visible));
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::raw(col.clone()));
-                    let text_len = 4 + col.len();
-                    all_items.push(ListItem::new(Line::from(spans)));
-                    max_len = max_len.max(text_len);
-                }
-
-                all_items.push(ListItem::new(""));
-                let (page_items, page_len) = render_page_size_section(
-                    app.iam_state.users.page_size,
-                    &[
-                        (PageSize::Ten, "10"),
-                        (PageSize::TwentyFive, "25"),
-                        (PageSize::Fifty, "50"),
-                    ],
-                );
-                all_items.extend(page_items);
-                max_len = max_len.max(page_len);
-            }
-
-            (all_items, " Preferences ", max_len)
-        } else if app.current_service == Service::IamRoles {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in &app.all_role_columns {
-                let is_visible = app.visible_role_columns.contains(col);
-                let mut spans = vec![];
-                spans.extend(render_toggle(is_visible));
-                spans.push(Span::raw(" "));
-                spans.push(Span::raw(col.clone()));
-                let text_len = 4 + col.len();
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(text_len);
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.iam_state.roles.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                ],
-            );
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-
-            (all_items, " Preferences ", max_len)
-        } else if app.current_service == Service::IamUserGroups {
-            let mut all_items: Vec<ListItem> = Vec::new();
-            let mut max_len = 0;
-
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in &app.all_group_columns {
-                let is_visible = app.visible_group_columns.contains(col);
-                let mut spans = vec![];
-                spans.extend(render_toggle(is_visible));
-                spans.push(Span::raw(" "));
-                spans.push(Span::raw(col.clone()));
-                let text_len = 4 + col.len();
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(text_len);
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.iam_state.groups.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                ],
-            );
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-
-            (all_items, " Preferences ", max_len)
+                .collect()
         } else {
-            // Fallback for unknown services
-            (vec![], " Preferences ", 0)
+            // ECR repository columns
+            app.ecr_repo_column_ids
+                .iter()
+                .filter_map(|col_id| {
+                    repo::Column::from_id(col_id).map(|col| {
+                        let is_visible = app.ecr_repo_visible_column_ids.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
+                })
+                .collect()
         };
+        (items, " Preferences ", max_len)
+    } else if app.current_service == Service::SqsQueues {
+        let mut max_len = 0;
+        let items: Vec<ListItem> = app
+            .sqs_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                SqsColumn::from_id(col_id).map(|col| {
+                    let is_visible = app.sqs_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    max_len = max_len.max(len);
+                    item
+                })
+            })
+            .collect();
+        (items, " Preferences ", max_len)
+    } else if app.current_service == Service::LambdaFunctions {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        // Show appropriate columns based on current tab
+        if app.lambda_state.current_function.is_some()
+            && app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Code
+        {
+            // Show layer columns for Code tab
+            for col in &app.lambda_state.layer_column_ids {
+                let is_visible = app.lambda_state.layer_visible_column_ids.contains(col);
+                let (item, len) = render_column_toggle_string(col, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
+            for col in &app.lambda_state.version_column_ids {
+                let is_visible = app.lambda_state.version_visible_column_ids.contains(col);
+                let (item, len) = render_column_toggle_string(col, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Aliases {
+            for col in &app.lambda_state.alias_column_ids {
+                let is_visible = app.lambda_state.alias_visible_column_ids.contains(col);
+                let (item, len) = render_column_toggle_string(col, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        } else {
+            for col_id in &app.lambda_state.function_column_ids {
+                if let Some(col) = crate::lambda::FunctionColumn::from_id(col_id) {
+                    let is_visible = app
+                        .lambda_state
+                        .function_visible_column_ids
+                        .contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+
+        let (page_items, page_len) = render_page_size_section(
+            if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
+                app.lambda_state.version_table.page_size
+            } else {
+                app.lambda_state.table.page_size
+            },
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+                (PageSize::OneHundred, "100"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::LambdaApplications {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        // Show different columns based on current view
+        if app.lambda_application_state.current_application.is_some() {
+            use crate::ui::lambda::ApplicationDetailTab;
+            if app.lambda_application_state.detail_tab == ApplicationDetailTab::Overview {
+                // Resources columns
+                for col_id in &app.lambda_resource_column_ids {
+                    let is_visible = app.lambda_resource_visible_column_ids.contains(col_id);
+                    if let Some(col) = ResourceColumn::from_id(col_id) {
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        all_items.push(item);
+                        max_len = max_len.max(len);
+                    }
+                }
+
+                all_items.push(ListItem::new(""));
+                let (page_items, page_len) = render_page_size_section(
+                    app.lambda_application_state.resources.page_size,
+                    &[
+                        (PageSize::Ten, "10"),
+                        (PageSize::TwentyFive, "25"),
+                        (PageSize::Fifty, "50"),
+                    ],
+                );
+                all_items.extend(page_items);
+                max_len = max_len.max(page_len);
+            } else {
+                // Deployments columns
+                for col_id in &app.lambda_deployment_column_ids {
+                    let is_visible = app.lambda_deployment_visible_column_ids.contains(col_id);
+                    if let Some(col) = DeploymentColumn::from_id(col_id) {
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        all_items.push(item);
+                        max_len = max_len.max(len);
+                    }
+                }
+
+                all_items.push(ListItem::new(""));
+                let (page_items, page_len) = render_page_size_section(
+                    app.lambda_application_state.deployments.page_size,
+                    &[
+                        (PageSize::Ten, "10"),
+                        (PageSize::TwentyFive, "25"),
+                        (PageSize::Fifty, "50"),
+                    ],
+                );
+                all_items.extend(page_items);
+                max_len = max_len.max(page_len);
+            }
+        } else {
+            // Application list columns
+            for col_id in &app.lambda_application_column_ids {
+                if let Some(col) = crate::lambda::ApplicationColumn::from_id(col_id) {
+                    let is_visible = app.lambda_application_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.lambda_application_state.table.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::CloudFormationStacks {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col_id in &app.cfn_column_ids {
+            let is_visible = app.cfn_visible_column_ids.contains(col_id);
+            if let Some(col) = CfnColumn::from_id(col_id) {
+                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) = render_page_size_section(
+            app.cfn_state.table.page_size,
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+                (PageSize::OneHundred, "100"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::IamUsers {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        // Show policy columns only for Permissions tab in user detail view
+        if app.iam_state.current_user.is_some()
+            && app.iam_state.user_tab == crate::ui::iam::UserTab::Permissions
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col in &app.iam_policy_column_ids {
+                let is_visible = app.iam_policy_visible_column_ids.contains(col);
+                let mut spans = vec![];
+                spans.extend(render_toggle(is_visible));
+                spans.push(Span::raw(" "));
+                spans.push(Span::raw(col.clone()));
+                let text_len = 4 + col.len();
+                all_items.push(ListItem::new(Line::from(spans)));
+                max_len = max_len.max(text_len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.iam_state.policies.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.iam_state.current_user.is_none() {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col in &app.iam_user_column_ids {
+                let is_visible = app.iam_user_visible_column_ids.contains(col);
+                let (item, len) = render_column_toggle_string(col, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.iam_state.users.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::IamRoles {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col in &app.iam_role_column_ids {
+            let is_visible = app.iam_role_visible_column_ids.contains(col);
+            let mut spans = vec![];
+            spans.extend(render_toggle(is_visible));
+            spans.push(Span::raw(" "));
+            spans.push(Span::raw(col.clone()));
+            let text_len = 4 + col.len();
+            all_items.push(ListItem::new(Line::from(spans)));
+            max_len = max_len.max(text_len);
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) = render_page_size_section(
+            app.iam_state.roles.page_size,
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::IamUserGroups {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col in &app.iam_group_column_ids {
+            let is_visible = app.iam_group_visible_column_ids.contains(col);
+            let mut spans = vec![];
+            spans.extend(render_toggle(is_visible));
+            spans.push(Span::raw(" "));
+            spans.push(Span::raw(col.clone()));
+            let text_len = 4 + col.len();
+            all_items.push(ListItem::new(Line::from(spans)));
+            max_len = max_len.max(text_len);
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) = render_page_size_section(
+            app.iam_state.groups.page_size,
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
+    } else {
+        // Fallback for unknown services
+        (vec![], " Preferences ", 0)
+    };
 
     // Calculate popup size based on content
     let item_count = items.len();
@@ -2027,35 +2041,9 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        struct AppStatusColumn;
-        impl crate::ui::table::Column<crate::lambda::Application> for AppStatusColumn {
-            fn name(&self) -> &str {
-                "Status"
-            }
-            fn width(&self) -> u16 {
-                20
-            }
-            fn render(&self, item: &crate::lambda::Application) -> (String, Style) {
-                let status_upper = item.status.to_uppercase();
-                if status_upper.contains("UPDATE_COMPLETE") {
-                    (
-                        "✅ Update complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else if status_upper.contains("CREATE_COMPLETE") {
-                    (
-                        "✅ Create complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else {
-                    (item.status.clone(), Style::default())
-                }
-            }
-        }
-
-        let col = AppStatusColumn;
+        let col = crate::lambda::ApplicationColumn::Status;
         let (text, style) = col.render(&app);
-        assert_eq!(text, "✅ Update complete");
+        assert_eq!(text, "✅ UPDATE_COMPLETE");
         assert_eq!(style.fg, Some(Color::Green));
     }
 
@@ -2070,35 +2058,9 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        struct AppStatusColumn;
-        impl crate::ui::table::Column<crate::lambda::Application> for AppStatusColumn {
-            fn name(&self) -> &str {
-                "Status"
-            }
-            fn width(&self) -> u16 {
-                20
-            }
-            fn render(&self, item: &crate::lambda::Application) -> (String, Style) {
-                let status_upper = item.status.to_uppercase();
-                if status_upper.contains("UPDATE_COMPLETE") {
-                    (
-                        "✅ Update complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else if status_upper.contains("CREATE_COMPLETE") {
-                    (
-                        "✅ Create complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else {
-                    (item.status.clone(), Style::default())
-                }
-            }
-        }
-
-        let col = AppStatusColumn;
+        let col = crate::lambda::ApplicationColumn::Status;
         let (text, style) = col.render(&app);
-        assert_eq!(text, "✅ Create complete");
+        assert_eq!(text, "✅ CREATE_COMPLETE");
         assert_eq!(style.fg, Some(Color::Green));
     }
 
@@ -2113,36 +2075,61 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        struct AppStatusColumn;
-        impl crate::ui::table::Column<crate::lambda::Application> for AppStatusColumn {
-            fn name(&self) -> &str {
-                "Status"
-            }
-            fn width(&self) -> u16 {
-                20
-            }
-            fn render(&self, item: &crate::lambda::Application) -> (String, Style) {
-                let status_upper = item.status.to_uppercase();
-                if status_upper.contains("UPDATE_COMPLETE") {
-                    (
-                        "✅ Update complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else if status_upper.contains("CREATE_COMPLETE") {
-                    (
-                        "✅ Create complete".to_string(),
-                        Style::default().fg(Color::Green),
-                    )
-                } else {
-                    (item.status.clone(), Style::default())
-                }
-            }
-        }
-
-        let col = AppStatusColumn;
+        let col = crate::lambda::ApplicationColumn::Status;
         let (text, style) = col.render(&app);
-        assert_eq!(text, "UPDATE_IN_PROGRESS");
-        assert_eq!(style.fg, None);
+        assert_eq!(text, "ℹ️  UPDATE_IN_PROGRESS");
+        assert_eq!(style.fg, Some(ratatui::style::Color::LightBlue));
+    }
+
+    #[test]
+    fn test_lambda_application_status_complete() {
+        let app = crate::lambda::Application {
+            name: "test-stack".to_string(),
+            arn: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
+                .to_string(),
+            description: "Test stack".to_string(),
+            status: "UPDATE_COMPLETE".to_string(),
+            last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
+        };
+
+        let col = crate::lambda::ApplicationColumn::Status;
+        let (text, style) = col.render(&app);
+        assert_eq!(text, "✅ UPDATE_COMPLETE");
+        assert_eq!(style.fg, Some(ratatui::style::Color::Green));
+    }
+
+    #[test]
+    fn test_lambda_application_status_failed() {
+        let app = crate::lambda::Application {
+            name: "test-stack".to_string(),
+            arn: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
+                .to_string(),
+            description: "Test stack".to_string(),
+            status: "UPDATE_FAILED".to_string(),
+            last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
+        };
+
+        let col = crate::lambda::ApplicationColumn::Status;
+        let (text, style) = col.render(&app);
+        assert_eq!(text, "❌ UPDATE_FAILED");
+        assert_eq!(style.fg, Some(ratatui::style::Color::Red));
+    }
+
+    #[test]
+    fn test_lambda_application_status_rollback() {
+        let app = crate::lambda::Application {
+            name: "test-stack".to_string(),
+            arn: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
+                .to_string(),
+            description: "Test stack".to_string(),
+            status: "UPDATE_ROLLBACK_IN_PROGRESS".to_string(),
+            last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
+        };
+
+        let col = crate::lambda::ApplicationColumn::Status;
+        let (text, style) = col.render(&app);
+        assert_eq!(text, "❌ UPDATE_ROLLBACK_IN_PROGRESS");
+        assert_eq!(style.fg, Some(ratatui::style::Color::Red));
     }
 
     #[test]
@@ -2215,8 +2202,8 @@ mod tests {
         let app = test_app();
 
         // Should have 3 bucket columns (Name, Region, CreationDate)
-        assert_eq!(app.all_bucket_columns.len(), 3);
-        assert_eq!(app.visible_bucket_columns.len(), 3);
+        assert_eq!(app.s3_bucket_column_ids.len(), 3);
+        assert_eq!(app.s3_bucket_visible_column_ids.len(), 3);
 
         // Verify column names
         assert_eq!(S3BucketColumn::Name.name(), "Name");
@@ -2229,48 +2216,58 @@ mod tests {
         let app = test_app();
 
         // S3 bucket columns should be different from CloudWatch log group columns
-        let bucket_col_names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
-        let log_col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
+        let bucket_col_names: Vec<String> = app
+            .s3_bucket_column_ids
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
+        let log_col_names: Vec<String> = app
+            .cw_log_group_column_ids
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name().to_string()))
+            .collect();
 
         // Verify they're different
         assert_ne!(bucket_col_names, log_col_names);
 
         // Verify S3 columns don't contain CloudWatch-specific terms
-        assert!(!bucket_col_names.contains(&"Log group"));
-        assert!(!bucket_col_names.contains(&"Stored bytes"));
+        assert!(!bucket_col_names.contains(&"Log group".to_string()));
+        assert!(!bucket_col_names.contains(&"Stored bytes".to_string()));
 
         // Verify S3 columns contain S3-specific terms
-        assert!(bucket_col_names.contains(&"Creation date"));
+        assert!(bucket_col_names.contains(&"Creation date".to_string()));
 
         // Region should NOT be in bucket columns (shown only when expanded)
-        assert!(!bucket_col_names.contains(&"AWS Region"));
+        assert!(!bucket_col_names.contains(&"AWS Region".to_string()));
     }
 
     #[test]
     fn test_s3_bucket_column_toggle() {
-        use crate::app::{S3BucketColumn, Service};
+        use crate::app::Service;
 
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
 
         // Initially 3 columns visible
-        assert_eq!(app.visible_bucket_columns.len(), 3);
+        assert_eq!(app.s3_bucket_visible_column_ids.len(), 3);
 
         // Simulate toggling off the Region column (index 1)
-        let col = app.all_bucket_columns[1];
-        if let Some(pos) = app.visible_bucket_columns.iter().position(|&c| c == col) {
-            app.visible_bucket_columns.remove(pos);
+        let col = app.s3_bucket_column_ids[1];
+        if let Some(pos) = app
+            .s3_bucket_visible_column_ids
+            .iter()
+            .position(|c| *c == col)
+        {
+            app.s3_bucket_visible_column_ids.remove(pos);
         }
 
-        assert_eq!(app.visible_bucket_columns.len(), 2);
-        assert!(!app.visible_bucket_columns.contains(&S3BucketColumn::Region));
+        assert_eq!(app.s3_bucket_visible_column_ids.len(), 2);
+        assert!(!app.s3_bucket_visible_column_ids.contains(&"region"));
 
         // Toggle it back on
-        app.visible_bucket_columns.push(col);
-        assert_eq!(app.visible_bucket_columns.len(), 3);
-        assert!(app
-            .visible_bucket_columns
-            .contains(&S3BucketColumn::CreationDate));
+        app.s3_bucket_visible_column_ids.push(col);
+        assert_eq!(app.s3_bucket_visible_column_ids.len(), 3);
+        assert!(app.s3_bucket_visible_column_ids.contains(&"region"));
     }
 
     #[test]
@@ -2326,13 +2323,17 @@ mod tests {
         let app = test_app();
 
         // Should have 3 bucket columns (Name, Region, CreationDate)
-        assert_eq!(app.all_bucket_columns.len(), 3);
+        assert_eq!(app.s3_bucket_column_ids.len(), 3);
 
         // All should be visible by default
-        assert_eq!(app.visible_bucket_columns.len(), 3);
+        assert_eq!(app.s3_bucket_visible_column_ids.len(), 3);
 
         // Verify all column names
-        let names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
+        let names: Vec<String> = app
+            .s3_bucket_column_ids
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
         assert_eq!(names, vec!["Name", "Region", "Creation date"]);
     }
 
@@ -3040,7 +3041,7 @@ mod tests {
 
         // Log events only have 2 columns: Timestamp and Message
         // No horizontal scrolling needed - message truncates
-        assert_eq!(app.visible_event_columns.len(), 2);
+        assert_eq!(app.cw_log_event_visible_column_ids.len(), 2);
 
         // Horizontal scroll offset should not be used for events
         assert_eq!(app.log_groups_state.event_horizontal_scroll, 0);
@@ -3211,12 +3212,20 @@ mod tests {
         // S3 Buckets should show bucket columns
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
-        let bucket_col_names: Vec<&str> = app.all_bucket_columns.iter().map(|c| c.name()).collect();
+        let bucket_col_names: Vec<String> = app
+            .s3_bucket_column_ids
+            .iter()
+            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .collect();
         assert_eq!(bucket_col_names, vec!["Name", "Region", "Creation date"]);
 
         // CloudWatch Log Groups should show log group columns
         app.current_service = Service::CloudWatchLogGroups;
-        let log_col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
+        let log_col_names: Vec<String> = app
+            .cw_log_group_column_ids
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name().to_string()))
+            .collect();
         assert_eq!(
             log_col_names,
             vec![
@@ -3231,11 +3240,10 @@ mod tests {
 
         // CloudWatch Alarms should show alarm columns
         app.current_service = Service::CloudWatchAlarms;
-        assert!(!app.all_alarm_columns.is_empty());
-        assert!(
-            app.all_alarm_columns[0].name().contains("Name")
-                || app.all_alarm_columns[0].name().contains("Alarm")
-        );
+        assert!(!app.cw_alarm_column_ids.is_empty());
+        if let Some(col) = AlarmColumn::from_id(app.cw_alarm_column_ids[0]) {
+            assert!(col.name().contains("Name") || col.name().contains("Alarm"));
+        }
     }
 
     #[test]
@@ -3246,16 +3254,20 @@ mod tests {
         app.current_service = Service::CloudWatchLogGroups;
 
         // Verify all 6 columns exist
-        assert_eq!(app.all_columns.len(), 6);
+        assert_eq!(app.cw_log_group_column_ids.len(), 6);
 
         // Verify each column by name
-        let col_names: Vec<&str> = app.all_columns.iter().map(|c| c.name()).collect();
-        assert!(col_names.contains(&"Log group"));
-        assert!(col_names.contains(&"Log class"));
-        assert!(col_names.contains(&"Retention"));
-        assert!(col_names.contains(&"Stored bytes"));
-        assert!(col_names.contains(&"Creation time"));
-        assert!(col_names.contains(&"ARN"));
+        let col_names: Vec<String> = app
+            .cw_log_group_column_ids
+            .iter()
+            .filter_map(|id| LogGroupColumn::from_id(id).map(|c| c.name().to_string()))
+            .collect();
+        assert!(col_names.iter().any(|n| n == "Log group"));
+        assert!(col_names.iter().any(|n| n == "Log class"));
+        assert!(col_names.iter().any(|n| n == "Retention"));
+        assert!(col_names.iter().any(|n| n == "Stored bytes"));
+        assert!(col_names.iter().any(|n| n == "Creation time"));
+        assert!(col_names.iter().any(|n| n == "ARN"));
     }
 
     #[test]
@@ -3266,8 +3278,8 @@ mod tests {
         app.view_mode = ViewMode::Detail;
 
         // Verify stream columns exist
-        assert!(!app.all_stream_columns.is_empty());
-        assert_eq!(app.all_stream_columns.len(), 7);
+        assert!(!app.cw_log_stream_column_ids.is_empty());
+        assert_eq!(app.cw_log_stream_column_ids.len(), 7);
     }
 
     #[test]
@@ -3278,8 +3290,8 @@ mod tests {
         app.view_mode = ViewMode::Events;
 
         // Verify event columns exist
-        assert!(!app.all_event_columns.is_empty());
-        assert_eq!(app.all_event_columns.len(), 5);
+        assert!(!app.cw_log_event_column_ids.is_empty());
+        assert_eq!(app.cw_log_event_column_ids.len(), 5);
     }
 
     #[test]
@@ -3290,8 +3302,8 @@ mod tests {
         app.current_service = Service::CloudWatchAlarms;
 
         // Verify alarm columns exist
-        assert!(!app.all_alarm_columns.is_empty());
-        assert_eq!(app.all_alarm_columns.len(), 16);
+        assert!(!app.cw_alarm_column_ids.is_empty());
+        assert_eq!(app.cw_alarm_column_ids.len(), 16);
     }
 
     #[test]
@@ -3558,41 +3570,47 @@ mod tests {
     fn test_lambda_default_columns() {
         let app = test_app_no_region();
 
-        assert_eq!(app.lambda_state.visible_columns.len(), 6);
-        assert_eq!(app.lambda_state.visible_columns[0], lambda::Column::Name);
-        assert_eq!(app.lambda_state.visible_columns[1], lambda::Column::Runtime);
+        assert_eq!(app.lambda_state.function_visible_column_ids.len(), 6);
         assert_eq!(
-            app.lambda_state.visible_columns[2],
-            lambda::Column::CodeSize
+            app.lambda_state.function_visible_column_ids[0],
+            "column.lambda.function.name"
         );
         assert_eq!(
-            app.lambda_state.visible_columns[3],
-            lambda::Column::MemoryMb
+            app.lambda_state.function_visible_column_ids[1],
+            "column.lambda.function.runtime"
         );
         assert_eq!(
-            app.lambda_state.visible_columns[4],
-            lambda::Column::TimeoutSeconds
+            app.lambda_state.function_visible_column_ids[2],
+            "column.lambda.function.code_size"
         );
         assert_eq!(
-            app.lambda_state.visible_columns[5],
-            lambda::Column::LastModified
+            app.lambda_state.function_visible_column_ids[3],
+            "column.lambda.function.memory_mb"
+        );
+        assert_eq!(
+            app.lambda_state.function_visible_column_ids[4],
+            "column.lambda.function.timeout_seconds"
+        );
+        assert_eq!(
+            app.lambda_state.function_visible_column_ids[5],
+            "column.lambda.function.last_modified"
         );
     }
 
     #[test]
     fn test_lambda_all_columns_available() {
-        let all_columns = lambda::Column::all();
+        let all_columns = lambda::FunctionColumn::ids();
 
         assert_eq!(all_columns.len(), 9);
-        assert!(all_columns.contains(&lambda::Column::Name));
-        assert!(all_columns.contains(&lambda::Column::Description));
-        assert!(all_columns.contains(&lambda::Column::PackageType));
-        assert!(all_columns.contains(&lambda::Column::Runtime));
-        assert!(all_columns.contains(&lambda::Column::Architecture));
-        assert!(all_columns.contains(&lambda::Column::CodeSize));
-        assert!(all_columns.contains(&lambda::Column::MemoryMb));
-        assert!(all_columns.contains(&lambda::Column::TimeoutSeconds));
-        assert!(all_columns.contains(&lambda::Column::LastModified));
+        assert!(all_columns.contains(&"column.lambda.function.name"));
+        assert!(all_columns.contains(&"column.lambda.function.description"));
+        assert!(all_columns.contains(&"column.lambda.function.package_type"));
+        assert!(all_columns.contains(&"column.lambda.function.runtime"));
+        assert!(all_columns.contains(&"column.lambda.function.architecture"));
+        assert!(all_columns.contains(&"column.lambda.function.code_size"));
+        assert!(all_columns.contains(&"column.lambda.function.memory_mb"));
+        assert!(all_columns.contains(&"column.lambda.function.timeout_seconds"));
+        assert!(all_columns.contains(&"column.lambda.function.last_modified"));
     }
 
     #[test]
@@ -5128,19 +5146,31 @@ mod tests {
     #[test]
     fn test_iam_users_default_columns() {
         let app = test_app();
-        assert_eq!(app.visible_iam_columns.len(), 11);
-        assert!(app.visible_iam_columns.contains(&"User name".to_string()));
-        assert!(app.visible_iam_columns.contains(&"Path".to_string()));
-        assert!(app.visible_iam_columns.contains(&"ARN".to_string()));
+        assert_eq!(app.iam_user_visible_column_ids.len(), 11);
+        assert!(app
+            .iam_user_visible_column_ids
+            .contains(&"column.iam.user.user_name"));
+        assert!(app
+            .iam_user_visible_column_ids
+            .contains(&"column.iam.user.path"));
+        assert!(app
+            .iam_user_visible_column_ids
+            .contains(&"column.iam.user.arn"));
     }
 
     #[test]
     fn test_iam_users_all_columns() {
         let app = test_app();
-        assert_eq!(app.all_iam_columns.len(), 14);
-        assert!(app.all_iam_columns.contains(&"Creation time".to_string()));
-        assert!(app.all_iam_columns.contains(&"Console access".to_string()));
-        assert!(app.all_iam_columns.contains(&"Signing certs".to_string()));
+        assert_eq!(app.iam_user_column_ids.len(), 14);
+        assert!(app
+            .iam_user_column_ids
+            .contains(&"column.iam.user.creation_time"));
+        assert!(app
+            .iam_user_column_ids
+            .contains(&"column.iam.user.console_access"));
+        assert!(app
+            .iam_user_column_ids
+            .contains(&"column.iam.user.signing_certs"));
     }
 
     #[test]

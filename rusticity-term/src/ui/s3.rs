@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::common::CyclicEnum;
 use crate::common::{format_bytes, format_iso_timestamp, UTC_TIMESTAMP_WIDTH};
 use crate::keymap::Mode;
-use crate::s3::{Bucket as S3Bucket, Object as S3Object};
+use crate::s3::{Bucket as S3Bucket, BucketColumn, Object as S3Object};
 use crate::table::TableState;
 use crate::ui::{
     active_border, filter_area, get_cursor, red_text, render_inner_tab_spans, render_tabs,
@@ -323,12 +323,13 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" {} ({}) ", bucket_type_name, count);
 
     let header_cells: Vec<Cell> = app
-        .visible_bucket_columns
+        .s3_bucket_visible_column_ids
         .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            let name = crate::ui::table::format_header_cell(col.name(), i);
-            Cell::from(name).style(Style::default().add_modifier(Modifier::BOLD))
+        .filter_map(|col_id| {
+            BucketColumn::from_id(col_id).map(|col| {
+                let name = crate::ui::table::format_header_cell(&col.name(), 0);
+                Cell::from(name).style(Style::default().add_modifier(Modifier::BOLD))
+            })
         })
         .collect();
     let header = Row::new(header_cells)
@@ -415,9 +416,9 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 
             // Calculate row index for this bucket
             fn count_expanded_children(
-                objects: &[crate::s3::Object],
+                objects: &[S3Object],
                 expanded_prefixes: &std::collections::HashSet<String>,
-                prefix_preview: &std::collections::HashMap<String, Vec<crate::s3::Object>>,
+                prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
             ) -> usize {
                 let mut count = objects.len();
                 for obj in objects {
@@ -453,23 +454,25 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             let cells: Vec<Cell> = app
-                .visible_bucket_columns
+                .s3_bucket_visible_column_ids
                 .iter()
                 .enumerate()
-                .map(|(i, col)| {
-                    let content = match col {
-                        crate::s3::BucketColumn::Name => {
-                            format!("{}🪣 {}", expand_indicator, bucket.name)
-                        }
-                        crate::s3::BucketColumn::Region => bucket.region.clone(),
-                        crate::s3::BucketColumn::CreationDate => formatted_date.clone(),
-                    };
-                    let cell_content = if i > 0 {
-                        format!("⋮ {}", content)
-                    } else {
-                        content
-                    };
-                    Cell::from(cell_content)
+                .filter_map(|(i, col_id)| {
+                    BucketColumn::from_id(col_id).map(|col| {
+                        let content = match col {
+                            BucketColumn::Name => {
+                                format!("{}🪣 {}", expand_indicator, bucket.name)
+                            }
+                            BucketColumn::Region => bucket.region.clone(),
+                            BucketColumn::CreationDate => formatted_date.clone(),
+                        };
+                        let cell_content = if i > 0 {
+                            format!("⋮ {}", content)
+                        } else {
+                            content
+                        };
+                        Cell::from(cell_content)
+                    })
                 })
                 .collect();
 
@@ -493,7 +496,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 
                     for (line_idx, error_line) in error_lines.iter().enumerate() {
                         let error_cells: Vec<Cell> = app
-                            .visible_bucket_columns
+                            .s3_bucket_visible_column_ids
                             .iter()
                             .enumerate()
                             .map(|(i, _col)| {
@@ -515,7 +518,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
                 } else if let Some(preview) = app.s3_state.bucket_preview.get(&bucket.name) {
                     // Recursive function to render objects at any depth
                     fn render_objects_recursive<'a>(
-                        objects: &'a [crate::s3::Object],
+                        objects: &'a [S3Object],
                         app: &'a App,
                         child_row_idx: &mut usize,
                         result: &mut Vec<Row<'a>>,
@@ -555,25 +558,25 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
                             let formatted_date = format_iso_timestamp(&obj.last_modified);
 
                             let child_cells: Vec<Cell> = app
-                                .visible_bucket_columns
+                                .s3_bucket_visible_column_ids
                                 .iter()
                                 .enumerate()
-                                .map(|(i, col)| {
-                                    let content = match col {
-                                        crate::s3::BucketColumn::Name => format!(
-                                            "{}{}{} {} {}",
-                                            prefix, tree_char, expand_char, icon, display_key
-                                        ),
-                                        crate::s3::BucketColumn::Region => String::new(),
-                                        crate::s3::BucketColumn::CreationDate => {
-                                            formatted_date.clone()
+                                .filter_map(|(i, col_id)| {
+                                    BucketColumn::from_id(col_id).map(|col| {
+                                        let content = match col {
+                                            BucketColumn::Name => format!(
+                                                "{}{}{} {} {}",
+                                                prefix, tree_char, expand_char, icon, display_key
+                                            ),
+                                            BucketColumn::Region => String::new(),
+                                            BucketColumn::CreationDate => formatted_date.clone(),
+                                        };
+                                        if i > 0 {
+                                            Cell::from(format!("⋮ {}", content))
+                                        } else {
+                                            Cell::from(content)
                                         }
-                                    };
-                                    if i > 0 {
-                                        Cell::from(format!("⋮ {}", content))
-                                    } else {
-                                        Cell::from(content)
-                                    }
+                                    })
                                 })
                                 .collect();
                             result.push(Row::new(child_cells).style(child_style));
@@ -617,12 +620,14 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let widths: Vec<Constraint> = app
-        .visible_bucket_columns
+        .s3_bucket_visible_column_ids
         .iter()
-        .map(|col| match col {
-            crate::s3::BucketColumn::Name => Constraint::Length(max_name_width as u16),
-            crate::s3::BucketColumn::Region => Constraint::Length(15),
-            crate::s3::BucketColumn::CreationDate => Constraint::Length(max_date_width as u16),
+        .filter_map(|col_id| {
+            BucketColumn::from_id(col_id).map(|col| match col {
+                BucketColumn::Name => Constraint::Length(max_name_width as u16),
+                BucketColumn::Region => Constraint::Length(15),
+                BucketColumn::CreationDate => Constraint::Length(max_date_width as u16),
+            })
         })
         .collect();
 

@@ -1,7 +1,27 @@
-use crate::common::{ColumnTrait, UTC_TIMESTAMP_WIDTH};
+use crate::common::t;
+use crate::common::{ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::cfn::DetailTab;
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
+use std::collections::HashMap;
+
+pub fn init(i18n: &mut HashMap<String, String>) {
+    for col in [
+        Column::Name,
+        Column::StackId,
+        Column::Status,
+        Column::CreatedTime,
+        Column::UpdatedTime,
+        Column::DeletedTime,
+        Column::DriftStatus,
+        Column::LastDriftCheckTime,
+        Column::StatusReason,
+        Column::Description,
+    ] {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+}
 
 pub fn console_url_stacks(region: &str) -> String {
     format!(
@@ -74,7 +94,22 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn name(&self) -> &'static str {
+    pub fn id(&self) -> &'static str {
+        match self {
+            Column::Name => "name",
+            Column::StackId => "stack_id",
+            Column::Status => "status",
+            Column::CreatedTime => "created_time",
+            Column::UpdatedTime => "updated_time",
+            Column::DeletedTime => "deleted_time",
+            Column::DriftStatus => "drift_status",
+            Column::LastDriftCheckTime => "last_drift_check_time",
+            Column::StatusReason => "status_reason",
+            Column::Description => "description",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Stack Name",
             Column::StackId => "Stack ID",
@@ -89,8 +124,34 @@ impl Column {
         }
     }
 
-    pub fn all() -> Vec<Column> {
-        vec![
+    pub fn name(&self) -> String {
+        let key = format!("column.cfn.stack.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "name" => Some(Column::Name),
+            "stack_id" => Some(Column::StackId),
+            "status" => Some(Column::Status),
+            "created_time" => Some(Column::CreatedTime),
+            "updated_time" => Some(Column::UpdatedTime),
+            "deleted_time" => Some(Column::DeletedTime),
+            "drift_status" => Some(Column::DriftStatus),
+            "last_drift_check_time" => Some(Column::LastDriftCheckTime),
+            "status_reason" => Some(Column::StatusReason),
+            "description" => Some(Column::Description),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> [Column; 10] {
+        [
             Column::Name,
             Column::StackId,
             Column::Status,
@@ -104,6 +165,10 @@ impl Column {
         ]
     }
 
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+
     pub fn to_column(&self) -> Box<dyn TableColumn<&Stack>> {
         struct StackColumn {
             variant: Column,
@@ -111,11 +176,12 @@ impl Column {
 
         impl TableColumn<&Stack> for StackColumn {
             fn name(&self) -> &str {
-                self.variant.name()
+                Box::leak(self.variant.name().into_boxed_str())
             }
 
             fn width(&self) -> u16 {
-                self.variant.name().len().max(match self.variant {
+                let translated = t(&format!("column.cfn.stack.{}", self.variant.id()));
+                translated.len().max(match self.variant {
                     Column::Name => 30,
                     Column::StackId => 20,
                     Column::Status => 35,
@@ -150,12 +216,6 @@ impl Column {
         }
 
         Box::new(StackColumn { variant: *self })
-    }
-}
-
-impl ColumnTrait for Column {
-    fn name(&self) -> &'static str {
-        self.name()
     }
 }
 
@@ -314,16 +374,10 @@ mod tests {
 
     #[test]
     fn test_column_all() {
-        let columns = Column::all();
+        let columns = Column::ids();
         assert_eq!(columns.len(), 10);
-        assert_eq!(columns[0], Column::Name);
-        assert_eq!(columns[9], Column::Description);
-    }
-
-    #[test]
-    fn test_column_trait() {
-        let column = Column::Name;
-        assert_eq!(ColumnTrait::name(&column), "Stack Name");
+        assert_eq!(columns[0], Column::Name.id());
+        assert_eq!(columns[9], Column::Description.id());
     }
 
     #[test]

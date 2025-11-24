@@ -1,5 +1,11 @@
 pub mod image;
 pub mod repo;
+use std::collections::HashMap;
+
+pub fn init(i18n: &mut HashMap<String, String>) {
+    repo::init(i18n);
+    image::init(i18n);
+}
 
 pub fn console_url_repositories(region: &str) -> String {
     format!(

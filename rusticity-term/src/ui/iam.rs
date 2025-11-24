@@ -6,6 +6,7 @@ use crate::iam::{
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
+use crate::ui::table::Column;
 use crate::ui::{
     active_border, filter_area, get_cursor, labeled_field, render_json_highlighted,
     render_last_accessed_section, render_permissions_section, render_tags_section, vertical,
@@ -245,29 +246,13 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     use crate::iam::UserColumn;
-    let mut columns: Vec<Box<dyn crate::ui::table::Column<&crate::iam::IamUser>>> = vec![];
-    for col in &app.visible_iam_columns {
-        let column = match col.as_str() {
-            "User name" => Some(UserColumn::UserName),
-            "Path" => Some(UserColumn::Path),
-            "Groups" => Some(UserColumn::Groups),
-            "Last activity" => Some(UserColumn::LastActivity),
-            "MFA" => Some(UserColumn::Mfa),
-            "Password age" => Some(UserColumn::PasswordAge),
-            "Console last sign-in" => Some(UserColumn::ConsoleLastSignIn),
-            "Access key ID" => Some(UserColumn::AccessKeyId),
-            "Active key age" => Some(UserColumn::ActiveKeyAge),
-            "Access key last used" => Some(UserColumn::AccessKeyLastUsed),
-            "ARN" => Some(UserColumn::Arn),
-            "Creation time" => Some(UserColumn::CreationTime),
-            "Console access" => Some(UserColumn::ConsoleAccess),
-            "Signing certs" => Some(UserColumn::SigningCerts),
-            _ => None,
-        };
-        if let Some(c) = column {
-            columns.push(c.to_column());
-        }
-    }
+    let columns: Vec<Box<dyn Column<&IamUser>>> = app
+        .iam_user_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            UserColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<&IamUser>>)
+        })
+        .collect();
 
     let expanded_index = app.iam_state.users.expanded_item.and_then(|idx| {
         if idx >= scroll_offset && idx < scroll_offset + page_size {
@@ -463,11 +448,11 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     use crate::iam::GroupUserColumn;
-    let columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::GroupUser>>> = vec![
-        GroupUserColumn::UserName.to_column(),
-        GroupUserColumn::Groups.to_column(),
-        GroupUserColumn::LastActivity.to_column(),
-        GroupUserColumn::CreationTime.to_column(),
+    let columns: Vec<Box<dyn Column<GroupUser>>> = vec![
+        Box::new(GroupUserColumn::UserName),
+        Box::new(GroupUserColumn::Groups),
+        Box::new(GroupUserColumn::LastActivity),
+        Box::new(GroupUserColumn::CreationTime),
     ];
 
     let expanded_index = app.iam_state.group_users.expanded_item.and_then(|idx| {
@@ -596,8 +581,8 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     use crate::iam::GroupColumn;
-    let mut columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::IamGroup>>> = vec![];
-    for col_name in &app.visible_group_columns {
+    let mut columns: Vec<Box<dyn Column<IamGroup>>> = vec![];
+    for col_name in &app.iam_group_visible_column_ids {
         let column = match col_name.as_str() {
             "Group name" => Some(GroupColumn::GroupName),
             "Path" => Some(GroupColumn::Path),
@@ -607,7 +592,7 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
             _ => None,
         };
         if let Some(c) = column {
-            columns.push(c.to_column());
+            columns.push(Box::new(c));
         }
     }
 
@@ -688,8 +673,8 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     use crate::iam::RoleColumn;
-    let mut columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::IamRole>>> = vec![];
-    for col in &app.visible_role_columns {
+    let mut columns: Vec<Box<dyn Column<IamRole>>> = vec![];
+    for col in &app.iam_role_visible_column_ids {
         let column = match col.as_str() {
             "Role name" => Some(RoleColumn::RoleName),
             "Path" => Some(RoleColumn::Path),
@@ -702,7 +687,7 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
             _ => None,
         };
         if let Some(c) = column {
-            columns.push(c.to_column());
+            columns.push(Box::new(c));
         }
     }
 
@@ -1116,107 +1101,17 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     // Define columns
-    struct PolicyNameColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for PolicyNameColumn {
-        fn name(&self) -> &str {
-            "Policy name"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.policy_name.clone(), Style::default())
-        }
-    }
-
-    struct TypeColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for TypeColumn {
-        fn name(&self) -> &str {
-            "Type"
-        }
-        fn width(&self) -> u16 {
-            15
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.policy_type.clone(), Style::default())
-        }
-    }
-
-    struct AttachedViaColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for AttachedViaColumn {
-        fn name(&self) -> &str {
-            "Attached via"
-        }
-        fn width(&self) -> u16 {
-            20
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.attached_via.clone(), Style::default())
-        }
-    }
-
-    struct AttachedEntitiesColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for AttachedEntitiesColumn {
-        fn name(&self) -> &str {
-            "Attached entities"
-        }
-        fn width(&self) -> u16 {
-            20
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.attached_entities.clone(), Style::default())
-        }
-    }
-
-    struct DescriptionColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for DescriptionColumn {
-        fn name(&self) -> &str {
-            "Description"
-        }
-        fn width(&self) -> u16 {
-            40
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.description.clone(), Style::default())
-        }
-    }
-
-    struct CreationTimeColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for CreationTimeColumn {
-        fn name(&self) -> &str {
-            "Creation time"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.creation_time.clone(), Style::default())
-        }
-    }
-
-    struct EditedTimeColumn;
-    impl crate::ui::table::Column<crate::iam::Policy> for EditedTimeColumn {
-        fn name(&self) -> &str {
-            "Edited time"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::Policy) -> (String, Style) {
-            (item.edited_time.clone(), Style::default())
-        }
-    }
-
-    let mut columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::Policy>>> = vec![];
-    for col in &app.visible_policy_columns {
+    use crate::iam::PolicyColumn;
+    let mut columns: Vec<Box<dyn Column<Policy>>> = vec![];
+    for col in &app.iam_policy_visible_column_ids {
         match col.as_str() {
-            "Policy name" => columns.push(Box::new(PolicyNameColumn)),
-            "Type" => columns.push(Box::new(TypeColumn)),
-            "Attached via" => columns.push(Box::new(AttachedViaColumn)),
-            "Attached entities" => columns.push(Box::new(AttachedEntitiesColumn)),
-            "Description" => columns.push(Box::new(DescriptionColumn)),
-            "Creation time" => columns.push(Box::new(CreationTimeColumn)),
-            "Edited time" => columns.push(Box::new(EditedTimeColumn)),
+            "Policy name" => columns.push(Box::new(PolicyColumn::PolicyName)),
+            "Type" => columns.push(Box::new(PolicyColumn::Type)),
+            "Attached via" => columns.push(Box::new(PolicyColumn::AttachedVia)),
+            "Attached entities" => columns.push(Box::new(PolicyColumn::AttachedEntities)),
+            "Description" => columns.push(Box::new(PolicyColumn::Description)),
+            "Creation time" => columns.push(Box::new(PolicyColumn::CreationTime)),
+            "Edited time" => columns.push(Box::new(PolicyColumn::EditedTime)),
             _ => {}
         }
     }
@@ -1324,34 +1219,9 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    struct KeyColumn;
-    impl crate::ui::table::Column<crate::iam::RoleTag> for KeyColumn {
-        fn name(&self) -> &str {
-            "Key"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::RoleTag) -> (String, Style) {
-            (item.key.clone(), Style::default())
-        }
-    }
-
-    struct ValueColumn;
-    impl crate::ui::table::Column<crate::iam::RoleTag> for ValueColumn {
-        fn name(&self) -> &str {
-            "Value"
-        }
-        fn width(&self) -> u16 {
-            70
-        }
-        fn render(&self, item: &crate::iam::RoleTag) -> (String, Style) {
-            (item.value.clone(), Style::default())
-        }
-    }
-
-    let columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::RoleTag>>> =
-        vec![Box::new(KeyColumn), Box::new(ValueColumn)];
+    use crate::iam::TagColumn;
+    let columns: Vec<Box<dyn Column<RoleTag>>> =
+        vec![Box::new(TagColumn::Key), Box::new(TagColumn::Value)];
 
     let expanded_index = app.iam_state.tags.expanded_item.and_then(|idx| {
         if idx >= scroll_offset && idx < scroll_offset + page_size {
@@ -1474,34 +1344,11 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    struct GroupNameColumn;
-    impl crate::ui::table::Column<crate::iam::UserGroup> for GroupNameColumn {
-        fn name(&self) -> &str {
-            "Group name"
-        }
-        fn width(&self) -> u16 {
-            40
-        }
-        fn render(&self, item: &crate::iam::UserGroup) -> (String, Style) {
-            (item.group_name.clone(), Style::default())
-        }
-    }
-
-    struct AttachedPoliciesColumn;
-    impl crate::ui::table::Column<crate::iam::UserGroup> for AttachedPoliciesColumn {
-        fn name(&self) -> &str {
-            "Attached policies"
-        }
-        fn width(&self) -> u16 {
-            60
-        }
-        fn render(&self, item: &crate::iam::UserGroup) -> (String, Style) {
-            (item.attached_policies.clone(), Style::default())
-        }
-    }
-
-    let columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::UserGroup>>> =
-        vec![Box::new(GroupNameColumn), Box::new(AttachedPoliciesColumn)];
+    use crate::iam::UserGroupColumn;
+    let columns: Vec<Box<dyn Column<UserGroup>>> = vec![
+        Box::new(UserGroupColumn::GroupName),
+        Box::new(UserGroupColumn::AttachedPolicies),
+    ];
 
     let expanded_index = app
         .iam_state
@@ -1644,34 +1491,9 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    struct KeyColumn;
-    impl crate::ui::table::Column<crate::iam::UserTag> for KeyColumn {
-        fn name(&self) -> &str {
-            "Key"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::UserTag) -> (String, Style) {
-            (item.key.clone(), Style::default())
-        }
-    }
-
-    struct ValueColumn;
-    impl crate::ui::table::Column<crate::iam::UserTag> for ValueColumn {
-        fn name(&self) -> &str {
-            "Value"
-        }
-        fn width(&self) -> u16 {
-            70
-        }
-        fn render(&self, item: &crate::iam::UserTag) -> (String, Style) {
-            (item.value.clone(), Style::default())
-        }
-    }
-
-    let columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::UserTag>>> =
-        vec![Box::new(KeyColumn), Box::new(ValueColumn)];
+    use crate::iam::TagColumn;
+    let columns: Vec<Box<dyn Column<UserTag>>> =
+        vec![Box::new(TagColumn::Key), Box::new(TagColumn::Value)];
 
     let expanded_index = app.iam_state.user_tags.expanded_item.and_then(|idx| {
         if idx >= scroll_offset && idx < scroll_offset + page_size {
@@ -1798,49 +1620,11 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    struct ServiceColumn;
-    impl crate::ui::table::Column<crate::iam::LastAccessedService> for ServiceColumn {
-        fn name(&self) -> &str {
-            "Service"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::LastAccessedService) -> (String, Style) {
-            (item.service.clone(), Style::default())
-        }
-    }
-
-    struct PoliciesColumn;
-    impl crate::ui::table::Column<crate::iam::LastAccessedService> for PoliciesColumn {
-        fn name(&self) -> &str {
-            "Policies granting permissions"
-        }
-        fn width(&self) -> u16 {
-            40
-        }
-        fn render(&self, item: &crate::iam::LastAccessedService) -> (String, Style) {
-            (item.policies_granting.clone(), Style::default())
-        }
-    }
-
-    struct LastAccessedColumn;
-    impl crate::ui::table::Column<crate::iam::LastAccessedService> for LastAccessedColumn {
-        fn name(&self) -> &str {
-            "Last accessed"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &crate::iam::LastAccessedService) -> (String, Style) {
-            (item.last_accessed.clone(), Style::default())
-        }
-    }
-
-    let columns: Vec<Box<dyn crate::ui::table::Column<crate::iam::LastAccessedService>>> = vec![
-        Box::new(ServiceColumn),
-        Box::new(PoliciesColumn),
-        Box::new(LastAccessedColumn),
+    use crate::iam::LastAccessedServiceColumn;
+    let columns: Vec<Box<dyn Column<LastAccessedService>>> = vec![
+        Box::new(LastAccessedServiceColumn::Service),
+        Box::new(LastAccessedServiceColumn::PoliciesGranting),
+        Box::new(LastAccessedServiceColumn::LastAccessed),
     ];
 
     let expanded_index = app

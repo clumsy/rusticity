@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::InputFocus;
+use crate::common::{ColumnId, InputFocus};
 use crate::cw::{Alarm, AlarmColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{render_table, Column, TableConfig};
@@ -16,8 +16,8 @@ pub struct State {
     pub alarm_tab: AlarmTab,
     pub sort_column: String,
     pub sort_direction: crate::common::SortDirection,
-    pub visible_columns: Vec<AlarmColumn>,
-    pub all_columns: Vec<AlarmColumn>,
+    pub visible_columns: Vec<ColumnId>,
+    pub all_columns: Vec<ColumnId>,
     pub expanded_alarm: Option<usize>,
     pub input_focus: InputFocus,
 }
@@ -38,13 +38,16 @@ impl State {
             alarm_tab: AlarmTab::AllAlarms,
             sort_column: "Name".to_string(),
             sort_direction: crate::common::SortDirection::Asc,
-            visible_columns: vec![
+            visible_columns: [
                 AlarmColumn::Name,
                 AlarmColumn::State,
                 AlarmColumn::LastStateUpdate,
                 AlarmColumn::Conditions,
-            ],
-            all_columns: AlarmColumn::all(),
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            all_columns: AlarmColumn::ids(),
             expanded_alarm: None,
             input_focus: InputFocus::Filter,
         }
@@ -72,7 +75,7 @@ struct AlarmTableColumn {
 
 impl Column<Alarm> for AlarmTableColumn {
     fn name(&self) -> &str {
-        self.column_type.name()
+        Box::leak(self.column_type.name().into_boxed_str())
     }
 
     fn width(&self) -> u16 {
@@ -209,9 +212,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Alarms ({}) ", count);
 
     let columns: Vec<Box<dyn Column<Alarm>>> = app
-        .visible_alarm_columns
+        .cw_alarm_visible_column_ids
         .iter()
-        .map(|col| Box::new(AlarmTableColumn { column_type: *col }) as Box<dyn Column<Alarm>>)
+        .filter_map(|col_id| {
+            AlarmColumn::from_id(col_id).map(|col| {
+                Box::new(AlarmTableColumn { column_type: col }) as Box<dyn Column<Alarm>>
+            })
+        })
         .collect();
 
     let config = TableConfig {

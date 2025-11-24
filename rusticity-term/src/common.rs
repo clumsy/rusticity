@@ -1,7 +1,24 @@
 use chrono::{DateTime, Utc};
 use ratatui::{prelude::*, widgets::*};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::ui::{filter_area, styles};
+
+pub type ColumnId = &'static str;
+
+static I18N: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+pub fn set_i18n(map: HashMap<String, String>) {
+    I18N.set(map).ok();
+}
+
+pub fn t(key: &str) -> String {
+    I18N.get()
+        .and_then(|map| map.get(key))
+        .cloned()
+        .unwrap_or_else(|| key.to_string())
+}
 
 // Width for UTC timestamp format: "YYYY-MM-DD HH:MM:SS (UTC)"
 pub const UTC_TIMESTAMP_WIDTH: u16 = 27;
@@ -44,117 +61,12 @@ pub fn format_unix_timestamp(unix_string: &str) -> String {
     }
 }
 
-pub trait ColumnTrait {
-    fn name(&self) -> &'static str;
-
-    // Future: column type for formatting
-    fn column_type(&self) -> ColumnType {
-        ColumnType::String
-    }
-
-    // Future: translation key for i18n
-    fn translation_key(&self) -> Option<&'static str> {
-        None
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColumnType {
     String,
     Number,
     DateTime,
     Boolean,
-}
-
-#[macro_export]
-macro_rules! column {
-    (name=$name:expr, width=$width:expr, type=$item_type:ty, render_styled=$render:expr) => {{
-        struct __Column;
-        impl $crate::ui::table::Column<$item_type> for __Column {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn width(&self) -> u16 {
-                ($width).max($name.len() as u16)
-            }
-            fn render(&self, item: &$item_type) -> (String, Style) {
-                $render(item)
-            }
-        }
-        __Column
-    }};
-    (name=$name:expr, type=$item_type:ty, render_styled=$render:expr) => {{
-        column!(name=$name, width=0, type=$item_type, render_styled=$render)
-    }};
-    (name=$name:expr, width=$width:expr, type=$item_type:ty, render_expanded=$render:expr) => {{
-        struct __Column;
-        impl $crate::ui::table::Column<$item_type> for __Column {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn width(&self) -> u16 {
-                ($width).max($name.len() as u16)
-            }
-            fn render(&self, item: &$item_type) -> (String, Style) {
-                ($render(item), Style::default())
-            }
-        }
-        __Column
-    }};
-    (name=$name:expr, type=$item_type:ty, render_expanded=$render:expr) => {{
-        column!(name=$name, width=0, type=$item_type, render_expanded=$render)
-    }};
-    (name=$name:expr, width=$width:expr, type=$item_type:ty, render=$render:expr) => {{
-        struct __Column;
-        impl $crate::ui::table::Column<$item_type> for __Column {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn width(&self) -> u16 {
-                ($width).max($name.len() as u16)
-            }
-            fn render(&self, item: &$item_type) -> (String, Style) {
-                ($render(item), Style::default())
-            }
-        }
-        __Column
-    }};
-    (name=$name:expr, type=$item_type:ty, render=$render:expr) => {{
-        column!(name=$name, width=0, type=$item_type, render=$render)
-    }};
-    (name=$name:expr, width=$width:expr, type=$item_type:ty, field=$field:ident) => {{
-        struct __Column;
-        impl $crate::ui::table::Column<$item_type> for __Column {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn width(&self) -> u16 {
-                ($width).max($name.len() as u16)
-            }
-            fn render(&self, item: &$item_type) -> (String, Style) {
-                (item.$field.clone(), Style::default())
-            }
-        }
-        __Column
-    }};
-    (name=$name:expr, type=$item_type:ty, field=$field:ident) => {{
-        column!(name=$name, width=0, type=$item_type, field=$field)
-    }};
-    ($name:expr, $width:expr, $item_type:ty, $field:ident) => {{
-        struct __Column;
-        impl $crate::ui::table::Column<$item_type> for __Column {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn width(&self) -> u16 {
-                ($width).max($name.len() as u16)
-            }
-            fn render(&self, item: &$item_type) -> (String, Style) {
-                (item.$field.clone(), Style::default())
-            }
-        }
-        __Column
-    }};
 }
 
 pub fn format_bytes(bytes: i64) -> String {

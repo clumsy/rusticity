@@ -1,6 +1,23 @@
-use crate::common::{format_iso_timestamp, ColumnTrait, UTC_TIMESTAMP_WIDTH};
+use crate::common::t;
+use crate::common::{format_iso_timestamp, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
+use std::collections::HashMap;
+
+pub fn init(i18n: &mut HashMap<String, String>) {
+    for col in [
+        Column::Tag,
+        Column::ArtifactType,
+        Column::PushedAt,
+        Column::SizeMb,
+        Column::Uri,
+        Column::Digest,
+        Column::LastPullTime,
+    ] {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Image {
@@ -25,21 +42,19 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn all() -> Vec<Column> {
-        vec![
-            Column::Tag,
-            Column::ArtifactType,
-            Column::PushedAt,
-            Column::SizeMb,
-            Column::Uri,
-            Column::Digest,
-            Column::LastPullTime,
-        ]
+    pub fn id(&self) -> &'static str {
+        match self {
+            Column::Tag => "tag",
+            Column::ArtifactType => "artifact_type",
+            Column::PushedAt => "pushed_at",
+            Column::SizeMb => "size_mb",
+            Column::Uri => "uri",
+            Column::Digest => "digest",
+            Column::LastPullTime => "last_pull_time",
+        }
     }
-}
 
-impl ColumnTrait for Column {
-    fn name(&self) -> &'static str {
+    pub fn default_name(&self) -> &'static str {
         match self {
             Column::Tag => "Image tag",
             Column::ArtifactType => "Artifact type",
@@ -50,15 +65,61 @@ impl ColumnTrait for Column {
             Column::LastPullTime => "Last recorded pull time",
         }
     }
+
+    pub fn all() -> [Column; 7] {
+        [
+            Column::Tag,
+            Column::ArtifactType,
+            Column::PushedAt,
+            Column::SizeMb,
+            Column::Uri,
+            Column::Digest,
+            Column::LastPullTime,
+        ]
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "tag" => Some(Column::Tag),
+            "artifact_type" => Some(Column::ArtifactType),
+            "pushed_at" => Some(Column::PushedAt),
+            "size_mb" => Some(Column::SizeMb),
+            "uri" => Some(Column::Uri),
+            "digest" => Some(Column::Digest),
+            "last_pull_time" => Some(Column::LastPullTime),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> String {
+        let key = format!("column.ecr.image.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
 }
 
 impl TableColumn<Image> for Column {
     fn name(&self) -> &str {
-        ColumnTrait::name(self)
+        let key = format!("column.ecr.image.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name()
+        } else {
+            Box::leak(translated.into_boxed_str())
+        }
     }
 
     fn width(&self) -> u16 {
-        ColumnTrait::name(self).len().max(match self {
+        let translated = t(&format!("column.ecr.image.{}", self.id()));
+        translated.len().max(match self {
             Column::Tag => 20,
             Column::ArtifactType => 20,
             Column::PushedAt => UTC_TIMESTAMP_WIDTH as usize,

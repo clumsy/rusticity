@@ -277,11 +277,14 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         .collect();
 
     // Define columns
-    let columns: Vec<Box<dyn crate::ui::table::Column<&crate::cfn::Stack>>> = app
-        .visible_cfn_columns
+    let column_enums: Vec<CfnColumn> = app
+        .cfn_visible_column_ids
         .iter()
-        .map(|col| col.to_column())
+        .filter_map(|col_id| CfnColumn::from_id(col_id))
         .collect();
+
+    let columns: Vec<Box<dyn crate::ui::table::Column<&CfnStack>>> =
+        column_enums.iter().map(|col| col.to_column()).collect();
 
     let expanded_index = app.cfn_state.table.expanded_item.and_then(|idx| {
         let scroll_offset = app.cfn_state.table.scroll_offset;
@@ -297,7 +300,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         selected_index: app.cfn_state.table.selected % app.cfn_state.table.page_size.value(),
         expanded_index,
         columns: &columns,
-        sort_column: app.cfn_state.sort_column.name(),
+        sort_column: app.cfn_state.sort_column.default_name(),
         sort_direction: app.cfn_state.sort_direction,
         title: format!(" Stacks ({}) ", filtered_count),
         area: chunks[1],

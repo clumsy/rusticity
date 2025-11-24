@@ -59,7 +59,24 @@ pub fn format_header_cell(name: &str, column_index: usize) -> String {
 }
 
 pub trait Column<T> {
-    fn name(&self) -> &str;
+    fn id(&self) -> &'static str {
+        unimplemented!("id() must be implemented if using default name() implementation")
+    }
+
+    fn default_name(&self) -> &'static str {
+        unimplemented!("default_name() must be implemented if using default name() implementation")
+    }
+
+    fn name(&self) -> &str {
+        let id = self.id();
+        let translated = crate::common::t(id);
+        if translated == id {
+            self.default_name()
+        } else {
+            Box::leak(translated.into_boxed_str())
+        }
+    }
+
     fn width(&self) -> u16;
     fn render(&self, item: &T) -> (String, Style);
 }

@@ -1,8 +1,34 @@
+use crate::common::t;
 use crate::common::{
-    format_bytes, format_duration_seconds, format_unix_timestamp, ColumnTrait, UTC_TIMESTAMP_WIDTH,
+    format_bytes, format_duration_seconds, format_unix_timestamp, ColumnId, UTC_TIMESTAMP_WIDTH,
 };
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
+use std::collections::HashMap;
+
+pub fn init(i18n: &mut HashMap<String, String>) {
+    for col in [
+        Column::Name,
+        Column::Type,
+        Column::Created,
+        Column::MessagesAvailable,
+        Column::MessagesInFlight,
+        Column::Encryption,
+        Column::ContentBasedDeduplication,
+        Column::LastUpdated,
+        Column::VisibilityTimeout,
+        Column::MessageRetentionPeriod,
+        Column::MaximumMessageSize,
+        Column::DeliveryDelay,
+        Column::ReceiveMessageWaitTime,
+        Column::HighThroughputFifo,
+        Column::DeduplicationScope,
+        Column::FifoThroughputLimit,
+    ] {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Queue {
@@ -46,30 +72,28 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn all() -> Vec<Column> {
-        vec![
-            Column::Name,
-            Column::Type,
-            Column::Created,
-            Column::MessagesAvailable,
-            Column::MessagesInFlight,
-            Column::Encryption,
-            Column::ContentBasedDeduplication,
-            Column::LastUpdated,
-            Column::VisibilityTimeout,
-            Column::MessageRetentionPeriod,
-            Column::MaximumMessageSize,
-            Column::DeliveryDelay,
-            Column::ReceiveMessageWaitTime,
-            Column::HighThroughputFifo,
-            Column::DeduplicationScope,
-            Column::FifoThroughputLimit,
-        ]
+    pub fn id(&self) -> &'static str {
+        match self {
+            Column::Name => "name",
+            Column::Type => "type",
+            Column::Created => "created",
+            Column::MessagesAvailable => "messages_available",
+            Column::MessagesInFlight => "messages_in_flight",
+            Column::Encryption => "encryption",
+            Column::ContentBasedDeduplication => "content_based_deduplication",
+            Column::LastUpdated => "last_updated",
+            Column::VisibilityTimeout => "visibility_timeout",
+            Column::MessageRetentionPeriod => "message_retention_period",
+            Column::MaximumMessageSize => "maximum_message_size",
+            Column::DeliveryDelay => "delivery_delay",
+            Column::ReceiveMessageWaitTime => "receive_message_wait_time",
+            Column::HighThroughputFifo => "high_throughput_fifo",
+            Column::DeduplicationScope => "deduplication_scope",
+            Column::FifoThroughputLimit => "fifo_throughput_limit",
+        }
     }
-}
 
-impl ColumnTrait for Column {
-    fn name(&self) -> &'static str {
+    pub fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Name",
             Column::Type => "Type",
@@ -89,15 +113,79 @@ impl ColumnTrait for Column {
             Column::FifoThroughputLimit => "FIFO throughput limit",
         }
     }
+
+    pub fn name(&self) -> String {
+        let key = format!("column.sqs.queue.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "name" => Some(Column::Name),
+            "type" => Some(Column::Type),
+            "created" => Some(Column::Created),
+            "messages_available" => Some(Column::MessagesAvailable),
+            "messages_in_flight" => Some(Column::MessagesInFlight),
+            "encryption" => Some(Column::Encryption),
+            "content_based_deduplication" => Some(Column::ContentBasedDeduplication),
+            "last_updated" => Some(Column::LastUpdated),
+            "visibility_timeout" => Some(Column::VisibilityTimeout),
+            "message_retention_period" => Some(Column::MessageRetentionPeriod),
+            "maximum_message_size" => Some(Column::MaximumMessageSize),
+            "delivery_delay" => Some(Column::DeliveryDelay),
+            "receive_message_wait_time" => Some(Column::ReceiveMessageWaitTime),
+            "high_throughput_fifo" => Some(Column::HighThroughputFifo),
+            "deduplication_scope" => Some(Column::DeduplicationScope),
+            "fifo_throughput_limit" => Some(Column::FifoThroughputLimit),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> [Column; 16] {
+        [
+            Column::Name,
+            Column::Type,
+            Column::Created,
+            Column::MessagesAvailable,
+            Column::MessagesInFlight,
+            Column::Encryption,
+            Column::ContentBasedDeduplication,
+            Column::LastUpdated,
+            Column::VisibilityTimeout,
+            Column::MessageRetentionPeriod,
+            Column::MaximumMessageSize,
+            Column::DeliveryDelay,
+            Column::ReceiveMessageWaitTime,
+            Column::HighThroughputFifo,
+            Column::DeduplicationScope,
+            Column::FifoThroughputLimit,
+        ]
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
 }
 
 impl TableColumn<Queue> for Column {
     fn name(&self) -> &str {
-        ColumnTrait::name(self)
+        let key = format!("column.sqs.queue.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name()
+        } else {
+            Box::leak(translated.into_boxed_str())
+        }
     }
 
     fn width(&self) -> u16 {
-        ColumnTrait::name(self).len().max(match self {
+        let translated = t(&format!("column.sqs.queue.{}", self.id()));
+        translated.len().max(match self {
             Column::Name => 40,
             Column::Type => 10,
             Column::Created => UTC_TIMESTAMP_WIDTH as usize,

@@ -1,4 +1,30 @@
-use crate::common::{ColumnTrait, UTC_TIMESTAMP_WIDTH};
+use crate::common::t;
+use crate::common::{ColumnId, UTC_TIMESTAMP_WIDTH};
+use std::collections::HashMap;
+
+pub fn init(i18n: &mut HashMap<String, String>) {
+    for col in [
+        AlarmColumn::Name,
+        AlarmColumn::State,
+        AlarmColumn::LastStateUpdate,
+        AlarmColumn::Description,
+        AlarmColumn::Conditions,
+        AlarmColumn::Actions,
+        AlarmColumn::StateDetails,
+        AlarmColumn::MetricName,
+        AlarmColumn::Namespace,
+        AlarmColumn::Statistic,
+        AlarmColumn::Period,
+        AlarmColumn::Resource,
+        AlarmColumn::Dimensions,
+        AlarmColumn::Expression,
+        AlarmColumn::Type,
+        AlarmColumn::CrossAccount,
+    ] {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Alarm {
@@ -42,7 +68,28 @@ pub enum AlarmColumn {
 }
 
 impl AlarmColumn {
-    pub fn name(&self) -> &'static str {
+    pub fn id(&self) -> &'static str {
+        match self {
+            AlarmColumn::Name => "name",
+            AlarmColumn::State => "state",
+            AlarmColumn::LastStateUpdate => "last_state_update",
+            AlarmColumn::Description => "description",
+            AlarmColumn::Conditions => "conditions",
+            AlarmColumn::Actions => "actions",
+            AlarmColumn::StateDetails => "state_details",
+            AlarmColumn::MetricName => "metric_name",
+            AlarmColumn::Namespace => "namespace",
+            AlarmColumn::Statistic => "statistic",
+            AlarmColumn::Period => "period",
+            AlarmColumn::Resource => "resource",
+            AlarmColumn::Dimensions => "dimensions",
+            AlarmColumn::Expression => "expression",
+            AlarmColumn::Type => "type",
+            AlarmColumn::CrossAccount => "cross_account",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
         match self {
             AlarmColumn::Name => "Name",
             AlarmColumn::State => "State",
@@ -60,6 +107,16 @@ impl AlarmColumn {
             AlarmColumn::Expression => "Expression",
             AlarmColumn::Type => "Type",
             AlarmColumn::CrossAccount => "Cross-account",
+        }
+    }
+
+    pub fn name(&self) -> String {
+        let key = format!("column.cw.alarm.{}", self.id());
+        let translated = t(&key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
         }
     }
 
@@ -84,8 +141,30 @@ impl AlarmColumn {
         }
     }
 
-    pub fn all() -> Vec<AlarmColumn> {
-        vec![
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "name" => Some(AlarmColumn::Name),
+            "state" => Some(AlarmColumn::State),
+            "last_state_update" => Some(AlarmColumn::LastStateUpdate),
+            "description" => Some(AlarmColumn::Description),
+            "conditions" => Some(AlarmColumn::Conditions),
+            "actions" => Some(AlarmColumn::Actions),
+            "state_details" => Some(AlarmColumn::StateDetails),
+            "metric_name" => Some(AlarmColumn::MetricName),
+            "namespace" => Some(AlarmColumn::Namespace),
+            "statistic" => Some(AlarmColumn::Statistic),
+            "period" => Some(AlarmColumn::Period),
+            "resource" => Some(AlarmColumn::Resource),
+            "dimensions" => Some(AlarmColumn::Dimensions),
+            "expression" => Some(AlarmColumn::Expression),
+            "type" => Some(AlarmColumn::Type),
+            "cross_account" => Some(AlarmColumn::CrossAccount),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> [AlarmColumn; 16] {
+        [
             AlarmColumn::Name,
             AlarmColumn::State,
             AlarmColumn::LastStateUpdate,
@@ -104,11 +183,9 @@ impl AlarmColumn {
             AlarmColumn::CrossAccount,
         ]
     }
-}
 
-impl ColumnTrait for AlarmColumn {
-    fn name(&self) -> &'static str {
-        self.name()
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
     }
 }
 

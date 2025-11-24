@@ -66,6 +66,20 @@ export AWS_SECRET_ACCESS_KEY=your-secret
 aws configure
 ```
 
+### Column Customization
+
+Customize column names by adding a `[columns]` section to `~/.config/rusticity/config.toml`:
+
+```toml
+[columns.lambda.function]
+name = "Function Name"
+description = "Description"
+
+[columns.cw.group]
+log_group = "Log Group"
+stored_bytes = "Storage"
+```
+
 ## Usage
 
 ```bash

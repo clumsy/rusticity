@@ -1,30 +1,10 @@
+use crate::common::t;
 use crate::common::{format_iso_timestamp, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
-static I18N: OnceLock<HashMap<String, String>> = OnceLock::new();
-
-pub fn init() {
-    let mut map = HashMap::new();
-
-    if let Some(home) = std::env::var_os("HOME") {
-        let config_path = std::path::Path::new(&home)
-            .join(".config")
-            .join("rusticity")
-            .join("i18n.toml");
-
-        if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if let Ok(toml_map) = contents.parse::<toml::Table>() {
-                if let Some(column_section) = toml_map.get("column").and_then(|v| v.as_table()) {
-                    flatten_toml(column_section, "column", &mut map);
-                }
-            }
-        }
-    }
-
-    // Set defaults from enum
+pub fn init(i18n: &mut HashMap<String, String>) {
     for col in [
         Column::Name,
         Column::Uri,
@@ -32,34 +12,9 @@ pub fn init() {
         Column::TagImmutability,
         Column::EncryptionType,
     ] {
-        let key = format!("column.ecr.repo.{}", col.id());
-        map.entry(key)
+        i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
-
-    I18N.set(map).ok();
-}
-
-fn flatten_toml(table: &toml::Table, prefix: &str, map: &mut HashMap<String, String>) {
-    for (key, value) in table {
-        let full_key = format!("{}.{}", prefix, key);
-        match value {
-            toml::Value::String(s) => {
-                map.insert(full_key, s.clone());
-            }
-            toml::Value::Table(t) => {
-                flatten_toml(t, &full_key, map);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn t(key: &str) -> String {
-    I18N.get()
-        .and_then(|map| map.get(key))
-        .cloned()
-        .unwrap_or_else(|| key.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +56,7 @@ impl Column {
         }
     }
 
-    pub fn all() -> Vec<ColumnId> {
+    pub fn all() -> [Column; 5] {
         [
             Column::Name,
             Column::Uri,
@@ -109,9 +64,10 @@ impl Column {
             Column::TagImmutability,
             Column::EncryptionType,
         ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
     }
 
     pub fn from_id(id: &str) -> Option<Self> {

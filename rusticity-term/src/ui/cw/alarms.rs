@@ -45,9 +45,9 @@ impl State {
                 AlarmColumn::Conditions,
             ]
             .iter()
-            .map(|c| c.id().to_string())
+            .map(|c| c.id())
             .collect(),
-            all_columns: AlarmColumn::all(),
+            all_columns: AlarmColumn::ids(),
             expanded_alarm: None,
             input_focus: InputFocus::Filter,
         }
@@ -212,7 +212,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Alarms ({}) ", count);
 
     let columns: Vec<Box<dyn Column<Alarm>>> = app
-        .visible_alarm_columns
+        .cw_alarm_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             AlarmColumn::from_id(col_id).map(|col| {

@@ -323,7 +323,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" {} ({}) ", bucket_type_name, count);
 
     let header_cells: Vec<Cell> = app
-        .visible_bucket_columns
+        .s3_bucket_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             BucketColumn::from_id(col_id).map(|col| {
@@ -454,7 +454,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             let cells: Vec<Cell> = app
-                .visible_bucket_columns
+                .s3_bucket_visible_column_ids
                 .iter()
                 .enumerate()
                 .filter_map(|(i, col_id)| {
@@ -496,7 +496,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 
                     for (line_idx, error_line) in error_lines.iter().enumerate() {
                         let error_cells: Vec<Cell> = app
-                            .visible_bucket_columns
+                            .s3_bucket_visible_column_ids
                             .iter()
                             .enumerate()
                             .map(|(i, _col)| {
@@ -558,7 +558,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
                             let formatted_date = format_iso_timestamp(&obj.last_modified);
 
                             let child_cells: Vec<Cell> = app
-                                .visible_bucket_columns
+                                .s3_bucket_visible_column_ids
                                 .iter()
                                 .enumerate()
                                 .filter_map(|(i, col_id)| {
@@ -620,7 +620,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let widths: Vec<Constraint> = app
-        .visible_bucket_columns
+        .s3_bucket_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             BucketColumn::from_id(col_id).map(|col| match col {

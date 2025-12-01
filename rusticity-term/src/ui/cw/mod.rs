@@ -6,5 +6,6 @@ pub use alarms::render as render_alarms;
 pub use insights::render as render_insights;
 pub use logs::{
     render_events, render_group_detail, render_groups_list, CloudWatchLogGroupsState, DetailTab,
-    EventColumn, EventFilterFocus, LogGroupColumn, StreamColumn, StreamSort,
+    EventFilterFocus, StreamSort,
 };
+pub use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};

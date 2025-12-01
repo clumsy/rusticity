@@ -1,107 +1,35 @@
-use crate::common::{format_bytes, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::common::{format_bytes, t, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::lambda::{ApplicationDetailTab, DetailTab};
 use crate::ui::table;
 use ratatui::prelude::*;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
-static I18N: OnceLock<HashMap<String, String>> = OnceLock::new();
+pub fn parse_layer_arn(arn: &str) -> (String, String) {
+    let parts: Vec<&str> = arn.split(':').collect();
+    let name = parts.get(6).unwrap_or(&"").to_string();
+    let version = parts.get(7).unwrap_or(&"").to_string();
+    (name, version)
+}
 
-pub fn init() {
-    let mut map = HashMap::new();
-
-    // Try to load from ~/.config/rusticity/i18n.toml
-    if let Some(home) = std::env::var_os("HOME") {
-        let config_path = std::path::Path::new(&home)
-            .join(".config")
-            .join("rusticity")
-            .join("i18n.toml");
-
-        if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if let Ok(toml_map) = contents.parse::<toml::Table>() {
-                if let Some(column_section) = toml_map.get("column").and_then(|v| v.as_table()) {
-                    flatten_toml(column_section, "column", &mut map);
-                }
-            }
-        }
-    }
-
-    // Set defaults for any missing keys
-    map.entry("column.lambda.function.name".to_string())
-        .or_insert("Function name".to_string());
-    map.entry("column.lambda.function.description".to_string())
-        .or_insert("Description".to_string());
-    map.entry("column.lambda.function.package_type".to_string())
-        .or_insert("Package type".to_string());
-    map.entry("column.lambda.function.runtime".to_string())
-        .or_insert("Runtime".to_string());
-    map.entry("column.lambda.function.architecture".to_string())
-        .or_insert("Architecture".to_string());
-    map.entry("column.lambda.function.code_size".to_string())
-        .or_insert("Code size".to_string());
-    map.entry("column.lambda.function.memory_mb".to_string())
-        .or_insert("Memory (MB)".to_string());
-    map.entry("column.lambda.function.timeout_seconds".to_string())
-        .or_insert("Timeout (s)".to_string());
-    map.entry("column.lambda.function.last_modified".to_string())
-        .or_insert("Last modified".to_string());
-    map.entry("column.lambda.application.name".to_string())
-        .or_insert("Name".to_string());
-    map.entry("column.lambda.application.description".to_string())
-        .or_insert("Description".to_string());
-    map.entry("column.lambda.application.status".to_string())
-        .or_insert("Status".to_string());
-    map.entry("column.lambda.application.last_modified".to_string())
-        .or_insert("Last modified".to_string());
-
-    // Deployment columns
-    for col in [
-        DeploymentColumn::Deployment,
-        DeploymentColumn::ResourceType,
-        DeploymentColumn::LastUpdated,
-        DeploymentColumn::Status,
-    ] {
-        let key = format!("column.lambda.deployment.{}", col.id());
-        map.entry(key)
+pub fn init(i18n: &mut HashMap<String, String>) {
+    for col in FunctionColumn::all() {
+        i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
-
-    // Resource columns
-    for col in [
-        ResourceColumn::LogicalId,
-        ResourceColumn::PhysicalId,
-        ResourceColumn::Type,
-        ResourceColumn::LastModified,
-    ] {
-        let key = format!("column.lambda.resource.{}", col.id());
-        map.entry(key)
+    for col in ApplicationColumn::all() {
+        i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
-
-    I18N.set(map).ok();
-}
-
-fn flatten_toml(table: &toml::Table, prefix: &str, map: &mut HashMap<String, String>) {
-    for (key, value) in table {
-        let full_key = format!("{}.{}", prefix, key);
-        match value {
-            toml::Value::String(s) => {
-                map.insert(full_key, s.clone());
-            }
-            toml::Value::Table(t) => {
-                flatten_toml(t, &full_key, map);
-            }
-            _ => {}
-        }
+    for col in DeploymentColumn::all() {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+    for col in ResourceColumn::all() {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
     }
 }
 
-fn t(key: &str) -> String {
-    I18N.get()
-        .and_then(|map| map.get(key))
-        .cloned()
-        .unwrap_or_else(|| key.to_string())
-}
 
 pub fn format_runtime(runtime: &str) -> String {
     let lower = runtime.to_lowercase();
@@ -192,7 +120,7 @@ mod tests {
             layers: vec![],
         };
 
-        let runtime_col = Column::Runtime;
+        let runtime_col = FunctionColumn::Runtime;
         let (text, _) = runtime_col.render(&func);
         assert_eq!(text, "Python 3.12");
     }
@@ -215,7 +143,7 @@ mod tests {
             layers: vec![],
         };
 
-        let arch_col = Column::Architecture;
+        let arch_col = FunctionColumn::Architecture;
         let (text, _) = arch_col.render(&func);
         assert_eq!(text, "x86-64");
     }
@@ -398,58 +326,61 @@ mod tests {
 
     #[test]
     fn test_column_id() {
-        assert_eq!(Column::Name.id(), "name");
-        assert_eq!(Column::Description.id(), "description");
-        assert_eq!(Column::PackageType.id(), "package_type");
-        assert_eq!(Column::Runtime.id(), "runtime");
-        assert_eq!(Column::Architecture.id(), "architecture");
-        assert_eq!(Column::CodeSize.id(), "code_size");
-        assert_eq!(Column::MemoryMb.id(), "memory_mb");
-        assert_eq!(Column::TimeoutSeconds.id(), "timeout_seconds");
-        assert_eq!(Column::LastModified.id(), "last_modified");
+        assert_eq!(FunctionColumn::Name.id(), "column.lambda.function.name");
+        assert_eq!(FunctionColumn::Description.id(), "column.lambda.function.description");
+        assert_eq!(FunctionColumn::PackageType.id(), "column.lambda.function.package_type");
+        assert_eq!(FunctionColumn::Runtime.id(), "column.lambda.function.runtime");
+        assert_eq!(FunctionColumn::Architecture.id(), "column.lambda.function.architecture");
+        assert_eq!(FunctionColumn::CodeSize.id(), "column.lambda.function.code_size");
+        assert_eq!(FunctionColumn::MemoryMb.id(), "column.lambda.function.memory_mb");
+        assert_eq!(FunctionColumn::TimeoutSeconds.id(), "column.lambda.function.timeout_seconds");
+        assert_eq!(FunctionColumn::LastModified.id(), "column.lambda.function.last_modified");
     }
 
     #[test]
     fn test_column_from_id() {
-        assert_eq!(Column::from_id("name"), Some(Column::Name));
-        assert_eq!(Column::from_id("runtime"), Some(Column::Runtime));
-        assert_eq!(Column::from_id("invalid"), None);
+        assert_eq!(FunctionColumn::from_id("column.lambda.function.name"), Some(FunctionColumn::Name));
+        assert_eq!(
+            FunctionColumn::from_id("column.lambda.function.runtime"),
+            Some(FunctionColumn::Runtime)
+        );
+        assert_eq!(FunctionColumn::from_id("invalid"), None);
     }
 
     #[test]
     fn test_column_all_returns_ids() {
-        let all = Column::all();
+        let all = FunctionColumn::ids();
         assert_eq!(all.len(), 9);
-        assert!(all.contains(&"name".to_string()));
-        assert!(all.contains(&"runtime".to_string()));
-        assert!(all.contains(&"code_size".to_string()));
+        assert!(all.contains(&"column.lambda.function.name"));
+        assert!(all.contains(&"column.lambda.function.runtime"));
+        assert!(all.contains(&"column.lambda.function.code_size"));
     }
 
     #[test]
     fn test_column_visible_returns_ids() {
-        let visible = Column::visible();
+        let visible = FunctionColumn::visible();
         assert_eq!(visible.len(), 6);
-        assert!(visible.contains(&"name".to_string()));
-        assert!(visible.contains(&"runtime".to_string()));
-        assert!(!visible.contains(&"description".to_string()));
+        assert!(visible.contains(&"column.lambda.function.name"));
+        assert!(visible.contains(&"column.lambda.function.runtime"));
+        assert!(!visible.contains(&"column.lambda.function.description"));
     }
 
     #[test]
     fn test_application_column_id() {
-        assert_eq!(ApplicationColumn::Name.id(), "name");
-        assert_eq!(ApplicationColumn::Description.id(), "description");
-        assert_eq!(ApplicationColumn::Status.id(), "status");
-        assert_eq!(ApplicationColumn::LastModified.id(), "last_modified");
+        assert_eq!(ApplicationColumn::Name.id(), "column.lambda.application.name");
+        assert_eq!(ApplicationColumn::Description.id(), "column.lambda.application.description");
+        assert_eq!(ApplicationColumn::Status.id(), "column.lambda.application.status");
+        assert_eq!(ApplicationColumn::LastModified.id(), "column.lambda.application.last_modified");
     }
 
     #[test]
     fn test_application_column_from_id() {
         assert_eq!(
-            ApplicationColumn::from_id("name"),
+            ApplicationColumn::from_id("column.lambda.application.name"),
             Some(ApplicationColumn::Name)
         );
         assert_eq!(
-            ApplicationColumn::from_id("status"),
+            ApplicationColumn::from_id("column.lambda.application.status"),
             Some(ApplicationColumn::Status)
         );
         assert_eq!(ApplicationColumn::from_id("invalid"), None);
@@ -457,9 +388,10 @@ mod tests {
 
     #[test]
     fn test_i18n_initialization() {
-        init();
+        let mut i18n = std::collections::HashMap::new();
+        init(&mut i18n);
         // Just verify that translation lookup works, don't assert specific values
-        // since user may have custom i18n.toml
+        // since user may have custom column names in config.toml
         let name = t("column.lambda.function.name");
         assert!(!name.is_empty());
         let nonexistent = t("nonexistent.key");
@@ -468,38 +400,11 @@ mod tests {
 
     #[test]
     fn test_column_width_uses_i18n() {
-        init();
-        let col = Column::Name;
+        let mut i18n = std::collections::HashMap::new();
+        init(&mut i18n);
+        let col = FunctionColumn::Name;
         let width = col.width();
         assert!(width >= "Function name".len() as u16);
-    }
-
-    #[test]
-    fn test_flatten_toml() {
-        let mut inner_table = toml::Table::new();
-        inner_table.insert(
-            "name".to_string(),
-            toml::Value::String("Nom de fonction".to_string()),
-        );
-        inner_table.insert(
-            "description".to_string(),
-            toml::Value::String("Description".to_string()),
-        );
-
-        let mut function_table = toml::Table::new();
-        function_table.insert("function".to_string(), toml::Value::Table(inner_table));
-
-        let mut map = HashMap::new();
-        flatten_toml(&function_table, "column.lambda", &mut map);
-
-        assert_eq!(
-            map.get("column.lambda.function.name"),
-            Some(&"Nom de fonction".to_string())
-        );
-        assert_eq!(
-            map.get("column.lambda.function.description"),
-            Some(&"Description".to_string())
-        );
     }
 }
 
@@ -573,10 +478,15 @@ pub struct Function {
     pub layers: Vec<Layer>,
 }
 
+
 #[derive(Debug, Clone)]
 pub struct Layer {
-    pub arn: String,
-    pub code_size: i64,
+    pub merge_order: String,
+    pub name: String,
+    pub layer_version: String,
+    pub compatible_runtimes: String,
+    pub compatible_architectures: String,
+    pub version_arn: String,
 }
 
 #[derive(Debug, Clone)]
@@ -605,7 +515,7 @@ pub struct Application {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Column {
+pub enum FunctionColumn {
     Name,
     Description,
     PackageType,
@@ -617,133 +527,114 @@ pub enum Column {
     LastModified,
 }
 
-impl Column {
-    pub fn id(&self) -> &'static str {
+impl FunctionColumn {
+    pub fn id(&self) -> ColumnId {
         match self {
-            Column::Name => "name",
-            Column::Description => "description",
-            Column::PackageType => "package_type",
-            Column::Runtime => "runtime",
-            Column::Architecture => "architecture",
-            Column::CodeSize => "code_size",
-            Column::MemoryMb => "memory_mb",
-            Column::TimeoutSeconds => "timeout_seconds",
-            Column::LastModified => "last_modified",
+            Self::Name => "column.lambda.function.name",
+            Self::Description => "column.lambda.function.description",
+            Self::PackageType => "column.lambda.function.package_type",
+            Self::Runtime => "column.lambda.function.runtime",
+            Self::Architecture => "column.lambda.function.architecture",
+            Self::CodeSize => "column.lambda.function.code_size",
+            Self::MemoryMb => "column.lambda.function.memory_mb",
+            Self::TimeoutSeconds => "column.lambda.function.timeout_seconds",
+            Self::LastModified => "column.lambda.function.last_modified",
         }
     }
 
-    pub fn name(&self) -> String {
-        let key = format!("column.lambda.function.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            match self {
-                Column::Name => "Function name",
-                Column::Description => "Description",
-                Column::PackageType => "Package type",
-                Column::Runtime => "Runtime",
-                Column::Architecture => "Architecture",
-                Column::CodeSize => "Code size",
-                Column::MemoryMb => "Memory (MB)",
-                Column::TimeoutSeconds => "Timeout (s)",
-                Column::LastModified => "Last modified",
-            }
-            .to_string()
-        } else {
-            translated
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            Self::Name => "Function name",
+            Self::Description => "Description",
+            Self::PackageType => "Package type",
+            Self::Runtime => "Runtime",
+            Self::Architecture => "Architecture",
+            Self::CodeSize => "Code size",
+            Self::MemoryMb => "Memory (MB)",
+            Self::TimeoutSeconds => "Timeout (s)",
+            Self::LastModified => "Last modified",
         }
     }
 
-    pub fn all() -> Vec<String> {
+    pub fn all() -> [Self; 9] {
         [
-            Column::Name,
-            Column::Description,
-            Column::PackageType,
-            Column::Runtime,
-            Column::Architecture,
-            Column::CodeSize,
-            Column::MemoryMb,
-            Column::TimeoutSeconds,
-            Column::LastModified,
+            Self::Name,
+            Self::Description,
+            Self::PackageType,
+            Self::Runtime,
+            Self::Architecture,
+            Self::CodeSize,
+            Self::MemoryMb,
+            Self::TimeoutSeconds,
+            Self::LastModified,
+        ]
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+
+    pub fn visible() -> Vec<ColumnId> {
+        [
+            Self::Name,
+            Self::Runtime,
+            Self::CodeSize,
+            Self::MemoryMb,
+            Self::TimeoutSeconds,
+            Self::LastModified,
         ]
         .iter()
-        .map(|c| c.id().to_string())
+        .map(|c| c.id())
         .collect()
     }
 
-    pub fn visible() -> Vec<String> {
-        [
-            Column::Name,
-            Column::Runtime,
-            Column::CodeSize,
-            Column::MemoryMb,
-            Column::TimeoutSeconds,
-            Column::LastModified,
-        ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
+    pub fn from_id(id: ColumnId) -> Option<Self> {
         match id {
-            "name" => Some(Column::Name),
-            "description" => Some(Column::Description),
-            "package_type" => Some(Column::PackageType),
-            "runtime" => Some(Column::Runtime),
-            "architecture" => Some(Column::Architecture),
-            "code_size" => Some(Column::CodeSize),
-            "memory_mb" => Some(Column::MemoryMb),
-            "timeout_seconds" => Some(Column::TimeoutSeconds),
-            "last_modified" => Some(Column::LastModified),
+            "column.lambda.function.name" => Some(Self::Name),
+            "column.lambda.function.description" => Some(Self::Description),
+            "column.lambda.function.package_type" => Some(Self::PackageType),
+            "column.lambda.function.runtime" => Some(Self::Runtime),
+            "column.lambda.function.architecture" => Some(Self::Architecture),
+            "column.lambda.function.code_size" => Some(Self::CodeSize),
+            "column.lambda.function.memory_mb" => Some(Self::MemoryMb),
+            "column.lambda.function.timeout_seconds" => Some(Self::TimeoutSeconds),
+            "column.lambda.function.last_modified" => Some(Self::LastModified),
             _ => None,
         }
     }
 }
 
-impl table::Column<Function> for Column {
-    fn name(&self) -> &str {
-        let key = format!("column.lambda.function.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            // No i18n found, use default
-            match self {
-                Column::Name => "Function name",
-                Column::Description => "Description",
-                Column::PackageType => "Package type",
-                Column::Runtime => "Runtime",
-                Column::Architecture => "Architecture",
-                Column::CodeSize => "Code size",
-                Column::MemoryMb => "Memory (MB)",
-                Column::TimeoutSeconds => "Timeout (s)",
-                Column::LastModified => "Last modified",
-            }
-        } else {
-            Box::leak(translated.into_boxed_str())
-        }
+impl table::Column<Function> for FunctionColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.lambda.function.{}", self.id()));
+        let translated = t(self.id());
         translated.len().max(match self {
-            Column::Name => 30,
-            Column::Description => 40,
-            Column::Runtime => 20,
-            Column::LastModified => UTC_TIMESTAMP_WIDTH as usize,
+            Self::Name => 30,
+            Self::Description => 40,
+            Self::Runtime => 20,
+            Self::LastModified => UTC_TIMESTAMP_WIDTH as usize,
             _ => 0,
         }) as u16
     }
 
     fn render(&self, item: &Function) -> (String, Style) {
         let text = match self {
-            Column::Name => item.name.clone(),
-            Column::Description => item.description.clone(),
-            Column::PackageType => item.package_type.clone(),
-            Column::Runtime => format_runtime(&item.runtime),
-            Column::Architecture => format_architecture(&item.architecture),
-            Column::CodeSize => format_bytes(item.code_size),
-            Column::MemoryMb => item.memory_mb.to_string(),
-            Column::TimeoutSeconds => item.timeout_seconds.to_string(),
-            Column::LastModified => item.last_modified.clone(),
+            Self::Name => item.name.clone(),
+            Self::Description => item.description.clone(),
+            Self::PackageType => item.package_type.clone(),
+            Self::Runtime => format_runtime(&item.runtime),
+            Self::Architecture => format_architecture(&item.architecture),
+            Self::CodeSize => format_bytes(item.code_size),
+            Self::MemoryMb => item.memory_mb.to_string(),
+            Self::TimeoutSeconds => item.timeout_seconds.to_string(),
+            Self::LastModified => item.last_modified.clone(),
         };
         (text, Style::default())
     }
@@ -758,52 +649,56 @@ pub enum ApplicationColumn {
 }
 
 impl ApplicationColumn {
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> ColumnId {
         match self {
-            ApplicationColumn::Name => "name",
-            ApplicationColumn::Description => "description",
-            ApplicationColumn::Status => "status",
-            ApplicationColumn::LastModified => "last_modified",
+            Self::Name => "column.lambda.application.name",
+            Self::Description => "column.lambda.application.description",
+            Self::Status => "column.lambda.application.status",
+            Self::LastModified => "column.lambda.application.last_modified",
         }
     }
 
-    pub fn all() -> Vec<String> {
+    pub fn all() -> [Self; 4] {
         [
-            ApplicationColumn::Name,
-            ApplicationColumn::Description,
-            ApplicationColumn::Status,
-            ApplicationColumn::LastModified,
+            Self::Name,
+            Self::Description,
+            Self::Status,
+            Self::LastModified,
         ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
     }
 
-    pub fn visible() -> Vec<String> {
-        Self::all()
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
     }
 
-    pub fn from_id(id: &str) -> Option<Self> {
+    pub fn visible() -> Vec<ColumnId> {
+        Self::ids()
+    }
+
+    pub fn from_id(id: ColumnId) -> Option<Self> {
         match id {
-            "name" => Some(ApplicationColumn::Name),
-            "description" => Some(ApplicationColumn::Description),
-            "status" => Some(ApplicationColumn::Status),
-            "last_modified" => Some(ApplicationColumn::LastModified),
+            "column.lambda.application.name" => Some(Self::Name),
+            "column.lambda.application.description" => Some(Self::Description),
+            "column.lambda.application.status" => Some(Self::Status),
+            "column.lambda.application.last_modified" => Some(Self::LastModified),
             _ => None,
         }
     }
 
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Description => "Description",
+            Self::Status => "Status",
+            Self::LastModified => "Last modified",
+        }
+    }
+
     pub fn name(&self) -> String {
-        let key = format!("column.lambda.application.{}", self.id());
+        let key = self.id();
         let translated = t(&key);
         if translated == key {
-            match self {
-                ApplicationColumn::Name => "Name",
-                ApplicationColumn::Description => "Description",
-                ApplicationColumn::Status => "Status",
-                ApplicationColumn::LastModified => "Last modified",
-            }
-            .to_string()
+            self.default_name().to_string()
         } else {
             translated
         }
@@ -811,47 +706,60 @@ impl ApplicationColumn {
 }
 
 impl table::Column<Application> for ApplicationColumn {
-    fn name(&self) -> &str {
-        let key = format!("column.lambda.application.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            match self {
-                ApplicationColumn::Name => "Name",
-                ApplicationColumn::Description => "Description",
-                ApplicationColumn::Status => "Status",
-                ApplicationColumn::LastModified => "Last modified",
-            }
-        } else {
-            Box::leak(translated.into_boxed_str())
+    fn id(&self) -> &'static str {
+        match self {
+            Self::Name => "column.lambda.application.name",
+            Self::Description => "column.lambda.application.description",
+            Self::Status => "column.lambda.application.status",
+            Self::LastModified => "column.lambda.application.last_modified",
+        }
+    }
+
+    fn default_name(&self) -> &'static str {
+        match self {
+            Self::Name => "Application name",
+            Self::Description => "Description",
+            Self::Status => "Status",
+            Self::LastModified => "Last modified",
         }
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.lambda.application.{}", self.id()));
-        translated.len().max(match self {
-            ApplicationColumn::Name => 40,
-            ApplicationColumn::Description => 50,
-            ApplicationColumn::Status => 20,
-            ApplicationColumn::LastModified => UTC_TIMESTAMP_WIDTH as usize,
+        self.name().len().max(match self {
+            Self::Name => 40,
+            Self::Description => 50,
+            Self::Status => 20,
+            Self::LastModified => UTC_TIMESTAMP_WIDTH as usize,
         }) as u16
     }
 
     fn render(&self, item: &Application) -> (String, Style) {
         match self {
-            ApplicationColumn::Name => (item.name.clone(), Style::default()),
-            ApplicationColumn::Description => (item.description.clone(), Style::default()),
-            ApplicationColumn::Status => {
+            Self::Name => (item.name.clone(), Style::default()),
+            Self::Description => (item.description.clone(), Style::default()),
+            Self::Status => {
                 let status_upper = item.status.to_uppercase();
-                let (text, color) = if status_upper.contains("UPDATE_COMPLETE") {
-                    ("✅ Update complete", Color::Green)
-                } else if status_upper.contains("CREATE_COMPLETE") {
-                    ("✅ Create complete", Color::Green)
+                let text = if status_upper.contains("COMPLETE") {
+                    format!("✅ {}", item.status)
+                } else if status_upper == "UPDATE_IN_PROGRESS" {
+                    format!("ℹ️  {}", item.status)
+                } else if status_upper.contains("ROLLBACK") || status_upper.contains("_FAILED") {
+                    format!("❌ {}", item.status)
                 } else {
-                    (item.status.as_str(), Color::White)
+                    item.status.clone()
                 };
-                (text.to_string(), Style::default().fg(color))
+                let color = if status_upper.contains("COMPLETE") {
+                    Color::Green
+                } else if status_upper == "UPDATE_IN_PROGRESS" {
+                    Color::LightBlue
+                } else if status_upper.contains("ROLLBACK") || status_upper.contains("_FAILED") {
+                    Color::Red
+                } else {
+                    Color::White
+                };
+                (text, Style::default().fg(color))
             }
-            ApplicationColumn::LastModified => (item.last_modified.clone(), Style::default()),
+            Self::LastModified => (item.last_modified.clone(), Style::default()),
         }
     }
 }
@@ -876,8 +784,8 @@ impl VersionColumn {
         }
     }
 
-    pub fn all() -> Vec<VersionColumn> {
-        vec![
+    pub fn all() -> [VersionColumn; 5] {
+        [
             VersionColumn::Version,
             VersionColumn::Aliases,
             VersionColumn::Description,
@@ -938,8 +846,8 @@ impl AliasColumn {
         }
     }
 
-    pub fn all() -> Vec<AliasColumn> {
-        vec![
+    pub fn all() -> [AliasColumn; 3] {
+        [
             AliasColumn::Name,
             AliasColumn::Versions,
             AliasColumn::Description,
@@ -989,7 +897,7 @@ pub enum LayerColumn {
 }
 
 impl LayerColumn {
-    pub fn name(&self) -> &'static str {
+    pub fn default_name(&self) -> &'static str {
         match self {
             LayerColumn::MergeOrder => "Merge order",
             LayerColumn::Name => "Name",
@@ -1000,8 +908,41 @@ impl LayerColumn {
         }
     }
 
-    pub fn all() -> Vec<LayerColumn> {
-        vec![
+    pub fn name(&self) -> String {
+        let key = self.id();
+        let translated = t(&key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
+
+    pub fn id(&self) -> ColumnId {
+        match self {
+            Self::MergeOrder => "column.lambda.layer.merge_order",
+            Self::Name => "column.lambda.layer.name",
+            Self::LayerVersion => "column.lambda.layer.layer_version",
+            Self::CompatibleRuntimes => "column.lambda.layer.compatible_runtimes",
+            Self::CompatibleArchitectures => "column.lambda.layer.compatible_architectures",
+            Self::VersionArn => "column.lambda.layer.version_arn",
+        }
+    }
+
+    pub fn from_id(id: ColumnId) -> Option<Self> {
+        match id {
+            "column.lambda.layer.merge_order" => Some(Self::MergeOrder),
+            "column.lambda.layer.name" => Some(Self::Name),
+            "column.lambda.layer.layer_version" => Some(Self::LayerVersion),
+            "column.lambda.layer.compatible_runtimes" => Some(Self::CompatibleRuntimes),
+            "column.lambda.layer.compatible_architectures" => Some(Self::CompatibleArchitectures),
+            "column.lambda.layer.version_arn" => Some(Self::VersionArn),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> [LayerColumn; 6] {
+        [
             LayerColumn::MergeOrder,
             LayerColumn::Name,
             LayerColumn::LayerVersion,
@@ -1009,6 +950,57 @@ impl LayerColumn {
             LayerColumn::CompatibleArchitectures,
             LayerColumn::VersionArn,
         ]
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+}
+
+impl table::Column<Layer> for LayerColumn {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::MergeOrder => "column.lambda.layer.merge_order",
+            Self::Name => "column.lambda.layer.name",
+            Self::LayerVersion => "column.lambda.layer.layer_version",
+            Self::CompatibleRuntimes => "column.lambda.layer.compatible_runtimes",
+            Self::CompatibleArchitectures => "column.lambda.layer.compatible_architectures",
+            Self::VersionArn => "column.lambda.layer.version_arn",
+        }
+    }
+
+    fn default_name(&self) -> &'static str {
+        match self {
+            Self::MergeOrder => "Merge order",
+            Self::Name => "Layer name",
+            Self::LayerVersion => "Version",
+            Self::CompatibleRuntimes => "Compatible runtimes",
+            Self::CompatibleArchitectures => "Compatible architectures",
+            Self::VersionArn => "Version ARN",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            Self::MergeOrder => 12,
+            Self::Name => 20,
+            Self::LayerVersion => 14,
+            Self::CompatibleRuntimes => 20,
+            Self::CompatibleArchitectures => 26,
+            Self::VersionArn => 40,
+        }
+    }
+
+    fn render(&self, item: &Layer) -> (String, Style) {
+        let text = match self {
+            Self::MergeOrder => item.merge_order.clone(),
+            Self::Name => item.name.clone(),
+            Self::LayerVersion => item.layer_version.clone(),
+            Self::CompatibleRuntimes => item.compatible_runtimes.clone(),
+            Self::CompatibleArchitectures => item.compatible_architectures.clone(),
+            Self::VersionArn => item.version_arn.clone(),
+        };
+        (text, Style::default())
     }
 }
 
@@ -1021,12 +1013,12 @@ pub enum DeploymentColumn {
 }
 
 impl DeploymentColumn {
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> ColumnId {
         match self {
-            Self::Deployment => "deployment",
-            Self::ResourceType => "resource_type",
-            Self::LastUpdated => "last_updated",
-            Self::Status => "status",
+            Self::Deployment => "column.lambda.deployment.deployment",
+            Self::ResourceType => "column.lambda.deployment.resource_type",
+            Self::LastUpdated => "column.lambda.deployment.last_updated",
+            Self::Status => "column.lambda.deployment.status",
         }
     }
 
@@ -1040,7 +1032,7 @@ impl DeploymentColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.lambda.deployment.{}", self.id());
+        let key = self.id();
         let translated = t(&key);
         if translated == key {
             self.default_name().to_string()
@@ -1049,79 +1041,59 @@ impl DeploymentColumn {
         }
     }
 
-    pub fn from_id(id: &str) -> Option<Self> {
+    pub fn from_id(id: ColumnId) -> Option<Self> {
         match id {
-            "deployment" => Some(Self::Deployment),
-            "resource_type" => Some(Self::ResourceType),
-            "last_updated" => Some(Self::LastUpdated),
-            "status" => Some(Self::Status),
+            "column.lambda.deployment.deployment" => Some(Self::Deployment),
+            "column.lambda.deployment.resource_type" => Some(Self::ResourceType),
+            "column.lambda.deployment.last_updated" => Some(Self::LastUpdated),
+            "column.lambda.deployment.status" => Some(Self::Status),
             _ => None,
         }
     }
 
-    pub fn all() -> Vec<ColumnId> {
+    pub fn all() -> [Self; 4] {
         [
             Self::Deployment,
             Self::ResourceType,
             Self::LastUpdated,
             Self::Status,
         ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
     }
 
-    pub fn as_table_column(self) -> Box<dyn table::Column<Deployment>> {
-        struct DeploymentColumnImpl {
-            variant: DeploymentColumn,
-        }
-
-        impl table::Column<Deployment> for DeploymentColumnImpl {
-            fn name(&self) -> &str {
-                let key = format!("column.lambda.deployment.{}", self.variant.id());
-                let translated = t(&key);
-                if translated == key {
-                    self.variant.default_name()
-                } else {
-                    Box::leak(translated.into_boxed_str())
-                }
-            }
-
-            fn width(&self) -> u16 {
-                let translated = t(&format!("column.lambda.deployment.{}", self.variant.id()));
-                translated.len().max(match self.variant {
-                    DeploymentColumn::Deployment => 30,
-                    DeploymentColumn::ResourceType => 20,
-                    DeploymentColumn::LastUpdated => UTC_TIMESTAMP_WIDTH as usize,
-                    DeploymentColumn::Status => 20,
-                }) as u16
-            }
-
-            fn render(&self, item: &Deployment) -> (String, Style) {
-                match self.variant {
-                    DeploymentColumn::Deployment => (item.deployment_id.clone(), Style::default()),
-                    DeploymentColumn::ResourceType => {
-                        (item.resource_type.clone(), Style::default())
-                    }
-                    DeploymentColumn::LastUpdated => (item.last_updated.clone(), Style::default()),
-                    DeploymentColumn::Status => {
-                        if item.status == "Succeeded" {
-                            (
-                                format!("✅ {}", item.status),
-                                Style::default().fg(Color::Green),
-                            )
-                        } else {
-                            (item.status.clone(), Style::default())
-                        }
-                    }
-                }
-            }
-        }
-
-        Box::new(DeploymentColumnImpl { variant: self })
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
     }
 }
 
+impl table::Column<Deployment> for DeploymentColumn {
+    fn width(&self) -> u16 {
+        let translated = t(&self.id());
+        translated.len().max(match self {
+            Self::Deployment => 30,
+            Self::ResourceType => 20,
+            Self::LastUpdated => UTC_TIMESTAMP_WIDTH as usize,
+            Self::Status => 20,
+        }) as u16
+    }
+
+    fn render(&self, item: &Deployment) -> (String, Style) {
+        match self {
+            Self::Deployment => (item.deployment_id.clone(), Style::default()),
+            Self::ResourceType => (item.resource_type.clone(), Style::default()),
+            Self::LastUpdated => (item.last_updated.clone(), Style::default()),
+            Self::Status => {
+                if item.status == "Succeeded" {
+                    (
+                        format!("✅ {}", item.status),
+                        Style::default().fg(Color::Green),
+                    )
+                } else {
+                    (item.status.clone(), Style::default())
+                }
+            }
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Resource {
     pub logical_id: String,
@@ -1147,12 +1119,12 @@ pub enum ResourceColumn {
 }
 
 impl ResourceColumn {
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> ColumnId {
         match self {
-            Self::LogicalId => "logical_id",
-            Self::PhysicalId => "physical_id",
-            Self::Type => "type",
-            Self::LastModified => "last_modified",
+            Self::LogicalId => "column.lambda.resource.logical_id",
+            Self::PhysicalId => "column.lambda.resource.physical_id",
+            Self::Type => "column.lambda.resource.type",
+            Self::LastModified => "column.lambda.resource.last_modified",
         }
     }
 
@@ -1166,7 +1138,7 @@ impl ResourceColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.lambda.resource.{}", self.id());
+        let key = self.id();
         let translated = t(&key);
         if translated == key {
             self.default_name().to_string()
@@ -1175,25 +1147,87 @@ impl ResourceColumn {
         }
     }
 
-    pub fn from_id(id: &str) -> Option<Self> {
+    pub fn from_id(id: ColumnId) -> Option<Self> {
         match id {
-            "logical_id" => Some(Self::LogicalId),
-            "physical_id" => Some(Self::PhysicalId),
-            "type" => Some(Self::Type),
-            "last_modified" => Some(Self::LastModified),
+            "column.lambda.resource.logical_id" => Some(Self::LogicalId),
+            "column.lambda.resource.physical_id" => Some(Self::PhysicalId),
+            "column.lambda.resource.type" => Some(Self::Type),
+            "column.lambda.resource.last_modified" => Some(Self::LastModified),
             _ => None,
         }
     }
 
-    pub fn all() -> Vec<ColumnId> {
+    pub fn all() -> [ResourceColumn; 4] {
         [
             Self::LogicalId,
             Self::PhysicalId,
             Self::Type,
             Self::LastModified,
         ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+}
+
+impl table::Column<Resource> for ResourceColumn {
+    fn width(&self) -> u16 {
+        match self {
+            Self::LogicalId => 30,
+            Self::PhysicalId => 40,
+            Self::Type => 30,
+            Self::LastModified => 27,
+        }
+    }
+
+    fn render(&self, item: &Resource) -> (String, Style) {
+        let text = match self {
+            Self::LogicalId => item.logical_id.clone(),
+            Self::PhysicalId => item.physical_id.clone(),
+            Self::Type => item.resource_type.clone(),
+            Self::LastModified => item.last_modified.clone(),
+        };
+        (text, Style::default())
+    }
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+
+    #[test]
+    fn test_function_column_id_returns_full_key() {
+        let id = FunctionColumn::Name.id();
+        assert_eq!(id, "column.lambda.function.name");
+        assert!(id.starts_with("column."));
+    }
+
+    #[test]
+    fn test_application_column_id_returns_full_key() {
+        let id = ApplicationColumn::Status.id();
+        assert_eq!(id, "column.lambda.application.status");
+        assert!(id.starts_with("column."));
+    }
+
+    #[test]
+    fn test_layer_column_id_returns_full_key() {
+        let id = LayerColumn::Name.id();
+        assert_eq!(id, "column.lambda.layer.name");
+        assert!(id.starts_with("column."));
+    }
+
+    #[test]
+    fn test_deployment_column_id_returns_full_key() {
+        let id = DeploymentColumn::Deployment.id();
+        assert_eq!(id, "column.lambda.deployment.deployment");
+        assert!(id.starts_with("column."));
+    }
+
+    #[test]
+    fn test_resource_column_id_returns_full_key() {
+        let id = ResourceColumn::LogicalId.id();
+        assert_eq!(id, "column.lambda.resource.logical_id");
+        assert!(id.starts_with("column."));
     }
 }

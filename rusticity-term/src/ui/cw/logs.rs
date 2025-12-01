@@ -1,98 +1,16 @@
 // CloudWatch Logs UI rendering and state
 use crate::app::App;
 use crate::common::{
-    format_bytes, format_timestamp, render_pagination_text, render_vertical_scrollbar, ColumnId,
-    CyclicEnum, InputFocus, SortDirection, UTC_TIMESTAMP_WIDTH,
+    format_bytes, format_timestamp, render_pagination_text, render_vertical_scrollbar,
+    CyclicEnum, InputFocus, SortDirection,
 };
 use crate::cw::insights::{DateRangeType, TimeUnit};
+use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
 use crate::ui::{filter_area, get_cursor, labeled_field, render_inner_tab_spans};
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::{LogEvent, LogGroup, LogStream};
-use std::collections::HashMap;
-use std::sync::OnceLock;
-
-static I18N: OnceLock<HashMap<String, String>> = OnceLock::new();
-
-pub fn init() {
-    let mut map = HashMap::new();
-
-    if let Some(home) = std::env::var_os("HOME") {
-        let config_path = std::path::Path::new(&home)
-            .join(".config")
-            .join("rusticity")
-            .join("i18n.toml");
-
-        if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if let Ok(toml_map) = contents.parse::<toml::Table>() {
-                if let Some(column_section) = toml_map.get("column").and_then(|v| v.as_table()) {
-                    flatten_toml(column_section, "column", &mut map);
-                }
-            }
-        }
-    }
-
-    // StreamColumn defaults
-    for col in [
-        StreamColumn::LogStream,
-        StreamColumn::ARN,
-        StreamColumn::CreationTime,
-        StreamColumn::FirstEventTime,
-        StreamColumn::LastEventTime,
-        StreamColumn::LastIngestionTime,
-        StreamColumn::UploadSequenceToken,
-    ] {
-        let key = format!("column.cw.stream.{}", col.id());
-        map.entry(key)
-            .or_insert_with(|| col.default_name().to_string());
-    }
-
-    // EventColumn defaults
-    for col in [EventColumn::Timestamp, EventColumn::Message] {
-        let key = format!("column.cw.event.{}", col.id());
-        map.entry(key)
-            .or_insert_with(|| col.default_name().to_string());
-    }
-
-    // LogGroupColumn defaults
-    for col in [
-        LogGroupColumn::LogGroup,
-        LogGroupColumn::LogClass,
-        LogGroupColumn::Retention,
-        LogGroupColumn::StoredBytes,
-        LogGroupColumn::CreationTime,
-        LogGroupColumn::ARN,
-    ] {
-        let key = format!("column.cw.loggroup.{}", col.id());
-        map.entry(key)
-            .or_insert_with(|| col.default_name().to_string());
-    }
-
-    I18N.set(map).ok();
-}
-
-fn flatten_toml(table: &toml::Table, prefix: &str, map: &mut HashMap<String, String>) {
-    for (key, value) in table {
-        let full_key = format!("{}.{}", prefix, key);
-        match value {
-            toml::Value::String(s) => {
-                map.insert(full_key, s.clone());
-            }
-            toml::Value::Table(t) => {
-                flatten_toml(t, &full_key, map);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn t(key: &str) -> String {
-    I18N.get()
-        .and_then(|map| map.get(key))
-        .cloned()
-        .unwrap_or_else(|| key.to_string())
-}
 
 // State
 pub struct CloudWatchLogGroupsState {
@@ -245,372 +163,6 @@ impl DetailTab {
     }
 }
 
-// Columns
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum StreamColumn {
-    LogStream,
-    ARN,
-    CreationTime,
-    FirstEventTime,
-    LastEventTime,
-    LastIngestionTime,
-    UploadSequenceToken,
-}
-
-impl StreamColumn {
-    pub fn id(&self) -> &'static str {
-        match self {
-            StreamColumn::LogStream => "log_stream",
-            StreamColumn::ARN => "arn",
-            StreamColumn::CreationTime => "creation_time",
-            StreamColumn::FirstEventTime => "first_event_time",
-            StreamColumn::LastEventTime => "last_event_time",
-            StreamColumn::LastIngestionTime => "last_ingestion_time",
-            StreamColumn::UploadSequenceToken => "upload_sequence_token",
-        }
-    }
-
-    pub fn default_name(&self) -> &'static str {
-        match self {
-            StreamColumn::LogStream => "Log stream",
-            StreamColumn::ARN => "ARN",
-            StreamColumn::CreationTime => "Creation time",
-            StreamColumn::FirstEventTime => "First event time",
-            StreamColumn::LastEventTime => "Last event time",
-            StreamColumn::LastIngestionTime => "Last ingestion time",
-            StreamColumn::UploadSequenceToken => "Upload sequence token",
-        }
-    }
-
-    pub fn name(&self) -> String {
-        let key = format!("column.cw.stream.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "log_stream" => Some(StreamColumn::LogStream),
-            "arn" => Some(StreamColumn::ARN),
-            "creation_time" => Some(StreamColumn::CreationTime),
-            "first_event_time" => Some(StreamColumn::FirstEventTime),
-            "last_event_time" => Some(StreamColumn::LastEventTime),
-            "last_ingestion_time" => Some(StreamColumn::LastIngestionTime),
-            "upload_sequence_token" => Some(StreamColumn::UploadSequenceToken),
-            _ => None,
-        }
-    }
-
-    pub fn width(&self) -> u16 {
-        let translated = t(&format!("column.cw.stream.{}", self.id()));
-        translated.len().max(match self {
-            StreamColumn::LogStream => 50,
-            StreamColumn::ARN => 80,
-            StreamColumn::CreationTime => UTC_TIMESTAMP_WIDTH as usize,
-            StreamColumn::FirstEventTime => UTC_TIMESTAMP_WIDTH as usize,
-            StreamColumn::LastEventTime => UTC_TIMESTAMP_WIDTH as usize,
-            StreamColumn::LastIngestionTime => UTC_TIMESTAMP_WIDTH as usize,
-            StreamColumn::UploadSequenceToken => 30,
-        }) as u16
-    }
-
-    pub fn all() -> Vec<ColumnId> {
-        [
-            StreamColumn::LogStream,
-            StreamColumn::ARN,
-            StreamColumn::CreationTime,
-            StreamColumn::FirstEventTime,
-            StreamColumn::LastEventTime,
-            StreamColumn::LastIngestionTime,
-            StreamColumn::UploadSequenceToken,
-        ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
-    }
-
-    pub fn default_visible() -> Vec<ColumnId> {
-        [
-            StreamColumn::LogStream,
-            StreamColumn::CreationTime,
-            StreamColumn::LastEventTime,
-        ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
-    }
-
-    pub fn to_column(
-        self,
-        account_id: &str,
-        region: &str,
-        log_group_name: &str,
-    ) -> Box<dyn crate::ui::table::Column<LogStream>> {
-        use crate::common::format_optional_timestamp;
-        use crate::ui::table::Column;
-
-        struct StreamColumnImpl {
-            variant: StreamColumn,
-            account_id: String,
-            region: String,
-            log_group_name: String,
-        }
-
-        impl Column<LogStream> for StreamColumnImpl {
-            fn name(&self) -> &str {
-                let key = format!("column.cw.stream.{}", self.variant.id());
-                let translated = t(&key);
-                if translated == key {
-                    self.variant.default_name()
-                } else {
-                    Box::leak(translated.into_boxed_str())
-                }
-            }
-
-            fn width(&self) -> u16 {
-                self.variant.width()
-            }
-
-            fn render(&self, item: &LogStream) -> (String, Style) {
-                let text = match self.variant {
-                    StreamColumn::LogStream => item.name.clone(),
-                    StreamColumn::ARN => format!(
-                        "arn:aws:logs:{}:{}:log-group:{}:log-stream:{}",
-                        self.region, self.account_id, self.log_group_name, item.name
-                    ),
-                    StreamColumn::CreationTime => format_optional_timestamp(item.creation_time),
-                    StreamColumn::FirstEventTime => "-".to_string(),
-                    StreamColumn::LastEventTime => format_optional_timestamp(item.last_event_time),
-                    StreamColumn::LastIngestionTime => "-".to_string(),
-                    StreamColumn::UploadSequenceToken => "-".to_string(),
-                };
-                (text, Style::default())
-            }
-        }
-
-        Box::new(StreamColumnImpl {
-            variant: self,
-            account_id: account_id.to_string(),
-            region: region.to_string(),
-            log_group_name: log_group_name.to_string(),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum EventColumn {
-    Timestamp,
-    IngestionTime,
-    Message,
-    EventId,
-    LogStreamName,
-}
-
-impl EventColumn {
-    pub fn id(&self) -> &'static str {
-        match self {
-            EventColumn::Timestamp => "timestamp",
-            EventColumn::IngestionTime => "ingestion_time",
-            EventColumn::Message => "message",
-            EventColumn::EventId => "event_id",
-            EventColumn::LogStreamName => "log_stream_name",
-        }
-    }
-
-    pub fn default_name(&self) -> &'static str {
-        match self {
-            EventColumn::Timestamp => "Timestamp",
-            EventColumn::IngestionTime => "Ingestion time",
-            EventColumn::Message => "Message",
-            EventColumn::EventId => "Event ID",
-            EventColumn::LogStreamName => "Log stream name",
-        }
-    }
-
-    pub fn name(&self) -> String {
-        let key = format!("column.cw.event.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "timestamp" => Some(EventColumn::Timestamp),
-            "ingestion_time" => Some(EventColumn::IngestionTime),
-            "message" => Some(EventColumn::Message),
-            "event_id" => Some(EventColumn::EventId),
-            "log_stream_name" => Some(EventColumn::LogStreamName),
-            _ => None,
-        }
-    }
-
-    pub fn width(&self) -> u16 {
-        let translated = t(&format!("column.cw.event.{}", self.id()));
-        translated.len().max(match self {
-            EventColumn::Timestamp => UTC_TIMESTAMP_WIDTH as usize,
-            EventColumn::IngestionTime => UTC_TIMESTAMP_WIDTH as usize,
-            EventColumn::Message => 0, // Min constraint
-            EventColumn::EventId => 40,
-            EventColumn::LogStreamName => 50,
-        }) as u16
-    }
-
-    pub fn all() -> Vec<ColumnId> {
-        [
-            EventColumn::Timestamp,
-            EventColumn::IngestionTime,
-            EventColumn::Message,
-            EventColumn::EventId,
-            EventColumn::LogStreamName,
-        ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
-    }
-
-    pub fn default_visible() -> Vec<ColumnId> {
-        [EventColumn::Timestamp, EventColumn::Message]
-            .iter()
-            .map(|c| c.id().to_string())
-            .collect()
-    }
-
-    pub fn to_column(self) -> Box<dyn TableColumn<LogEvent>> {
-        struct EventColumnImpl {
-            variant: EventColumn,
-        }
-
-        impl TableColumn<LogEvent> for EventColumnImpl {
-            fn name(&self) -> &str {
-                let key = format!("column.cw.event.{}", self.variant.id());
-                let translated = t(&key);
-                if translated == key {
-                    self.variant.default_name()
-                } else {
-                    Box::leak(translated.into_boxed_str())
-                }
-            }
-
-            fn width(&self) -> u16 {
-                self.variant.width()
-            }
-
-            fn render(&self, item: &LogEvent) -> (String, Style) {
-                let text = match self.variant {
-                    EventColumn::Timestamp => format_timestamp(&item.timestamp),
-                    EventColumn::Message => {
-                        let msg = item.message.lines().next().unwrap_or("").replace('\t', " ");
-                        msg
-                    }
-                    EventColumn::IngestionTime => "-".to_string(),
-                    EventColumn::EventId => "-".to_string(),
-                    EventColumn::LogStreamName => "-".to_string(),
-                };
-                (text, Style::default())
-            }
-        }
-
-        Box::new(EventColumnImpl { variant: self })
-    }
-}
-
-// Log Group Columns
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LogGroupColumn {
-    LogGroup,
-    LogClass,
-    Retention,
-    StoredBytes,
-    CreationTime,
-    ARN,
-}
-
-impl LogGroupColumn {
-    pub fn id(&self) -> &'static str {
-        match self {
-            LogGroupColumn::LogGroup => "log_group",
-            LogGroupColumn::LogClass => "log_class",
-            LogGroupColumn::Retention => "retention",
-            LogGroupColumn::StoredBytes => "stored_bytes",
-            LogGroupColumn::CreationTime => "creation_time",
-            LogGroupColumn::ARN => "arn",
-        }
-    }
-
-    pub fn default_name(&self) -> &'static str {
-        match self {
-            LogGroupColumn::LogGroup => "Log group",
-            LogGroupColumn::LogClass => "Log class",
-            LogGroupColumn::Retention => "Retention",
-            LogGroupColumn::StoredBytes => "Stored bytes",
-            LogGroupColumn::CreationTime => "Creation time",
-            LogGroupColumn::ARN => "ARN",
-        }
-    }
-
-    pub fn name(&self) -> String {
-        let key = format!("column.cw.loggroup.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "log_group" => Some(LogGroupColumn::LogGroup),
-            "log_class" => Some(LogGroupColumn::LogClass),
-            "retention" => Some(LogGroupColumn::Retention),
-            "stored_bytes" => Some(LogGroupColumn::StoredBytes),
-            "creation_time" => Some(LogGroupColumn::CreationTime),
-            "arn" => Some(LogGroupColumn::ARN),
-            _ => None,
-        }
-    }
-
-    pub fn width(&self) -> u16 {
-        let translated = t(&format!("column.cw.loggroup.{}", self.id()));
-        translated.len().max(match self {
-            LogGroupColumn::LogGroup => 0,
-            LogGroupColumn::LogClass => 12,
-            LogGroupColumn::Retention => 12,
-            LogGroupColumn::StoredBytes => 15,
-            LogGroupColumn::CreationTime => UTC_TIMESTAMP_WIDTH as usize,
-            LogGroupColumn::ARN => 0,
-        }) as u16
-    }
-
-    pub fn all() -> Vec<ColumnId> {
-        [
-            LogGroupColumn::LogGroup,
-            LogGroupColumn::LogClass,
-            LogGroupColumn::Retention,
-            LogGroupColumn::StoredBytes,
-            LogGroupColumn::CreationTime,
-            LogGroupColumn::ARN,
-        ]
-        .iter()
-        .map(|c| c.id().to_string())
-        .collect()
-    }
-
-    pub fn default_visible() -> Vec<ColumnId> {
-        [LogGroupColumn::LogGroup, LogGroupColumn::StoredBytes]
-            .iter()
-            .map(|c| c.id().to_string())
-            .collect()
-    }
-}
 
 // Helper functions
 
@@ -722,120 +274,11 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut columns: Vec<Box<dyn TableColumn<LogGroup>>> = vec![];
 
-    for col_id in &app.visible_columns {
+    for col_id in &app.cw_log_group_visible_column_ids {
         let Some(col) = LogGroupColumn::from_id(col_id) else {
             continue;
         };
-        match col {
-            LogGroupColumn::LogGroup => {
-                struct LogGroupNameColumn;
-                impl TableColumn<LogGroup> for LogGroupNameColumn {
-                    fn name(&self) -> &str {
-                        "Log group name"
-                    }
-                    fn width(&self) -> u16 {
-                        65
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        (item.name.clone(), Style::default())
-                    }
-                }
-                columns.push(Box::new(LogGroupNameColumn));
-            }
-            LogGroupColumn::LogClass => {
-                struct LogClassColumn;
-                impl TableColumn<LogGroup> for LogClassColumn {
-                    fn name(&self) -> &str {
-                        "Log class"
-                    }
-                    fn width(&self) -> u16 {
-                        12
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        (
-                            item.log_class.clone().unwrap_or_else(|| "-".to_string()),
-                            Style::default(),
-                        )
-                    }
-                }
-                columns.push(Box::new(LogClassColumn));
-            }
-            LogGroupColumn::Retention => {
-                struct RetentionColumn;
-                impl TableColumn<LogGroup> for RetentionColumn {
-                    fn name(&self) -> &str {
-                        "Retention"
-                    }
-                    fn width(&self) -> u16 {
-                        12
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        let retention = item
-                            .retention_days
-                            .map(|d| format!("{} days", d))
-                            .unwrap_or_else(|| "Never".to_string());
-                        (retention, Style::default())
-                    }
-                }
-                columns.push(Box::new(RetentionColumn));
-            }
-            LogGroupColumn::StoredBytes => {
-                struct LogGroupStoredBytesColumn;
-                impl TableColumn<LogGroup> for LogGroupStoredBytesColumn {
-                    fn name(&self) -> &str {
-                        "Stored bytes"
-                    }
-                    fn width(&self) -> u16 {
-                        15
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        let formatted = item
-                            .stored_bytes
-                            .map(format_bytes)
-                            .unwrap_or_else(|| "-".to_string());
-                        (formatted, Style::default())
-                    }
-                }
-                columns.push(Box::new(LogGroupStoredBytesColumn));
-            }
-            LogGroupColumn::CreationTime => {
-                struct CreationTimeColumn;
-                impl TableColumn<LogGroup> for CreationTimeColumn {
-                    fn name(&self) -> &str {
-                        "Creation time"
-                    }
-                    fn width(&self) -> u16 {
-                        27
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        let time = item
-                            .creation_time
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S (UTC)").to_string())
-                            .unwrap_or_else(|| "-".to_string());
-                        (time, Style::default())
-                    }
-                }
-                columns.push(Box::new(CreationTimeColumn));
-            }
-            LogGroupColumn::ARN => {
-                struct ArnColumn;
-                impl TableColumn<LogGroup> for ArnColumn {
-                    fn name(&self) -> &str {
-                        "ARN"
-                    }
-                    fn width(&self) -> u16 {
-                        80
-                    }
-                    fn render(&self, item: &LogGroup) -> (String, Style) {
-                        (
-                            item.arn.clone().unwrap_or_else(|| "-".to_string()),
-                            Style::default(),
-                        )
-                    }
-                }
-                columns.push(Box::new(ArnColumn));
-            }
-        }
+        columns.push(Box::new(col));
     }
 
     let expanded_index = app
@@ -1038,18 +481,12 @@ fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, _border_st
         },
     );
 
-    let log_group_name = app
-        .selected_log_group()
-        .map(|g| g.name.as_str())
-        .unwrap_or("");
-
     let columns: Vec<Box<dyn TableColumn<LogStream>>> = app
-        .visible_stream_columns
+        .cw_log_stream_visible_column_ids
         .iter()
         .filter_map(|col_id| {
-            StreamColumn::from_id(col_id).map(|col| {
-                col.to_column(&app.config.account_id, &app.config.region, log_group_name)
-            })
+            StreamColumn::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn TableColumn<LogStream>>)
         })
         .collect();
 
@@ -1179,7 +616,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
     let table_area = chunks[1];
 
     let header_cells = app
-        .visible_event_columns
+        .cw_log_event_visible_column_ids
         .iter()
         .enumerate()
         .filter_map(|(i, col_id)| {
@@ -1187,7 +624,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
                 let name = if i > 0 {
                     format!("⋮ {}", col.name())
                 } else {
-                    col.name()
+                    col.name().to_string()
                 };
                 Cell::from(name).style(Style::default().add_modifier(Modifier::BOLD))
             })
@@ -1214,7 +651,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
     // Calculate available width for message column
     let table_width = table_area.width.saturating_sub(4) as usize; // borders + spacing
     let fixed_width: usize = app
-        .visible_event_columns
+        .cw_log_event_visible_column_ids
         .iter()
         .filter_map(|col_id| EventColumn::from_id(col_id))
         .filter(|col| col.width() > 0)
@@ -1231,7 +668,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
 
         // Main row with columns - always show first line or truncated message
         let mut cells: Vec<Cell> = Vec::new();
-        for (i, col_id) in app.visible_event_columns.iter().enumerate() {
+        for (i, col_id) in app.cw_log_event_visible_column_ids.iter().enumerate() {
             let Some(col) = EventColumn::from_id(col_id) else {
                 continue;
             };
@@ -1279,7 +716,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
             let max_width = (table_area.width.saturating_sub(3)) as usize;
             let mut line_count = 0;
 
-            for col_id in &app.visible_event_columns {
+            for col_id in &app.cw_log_event_visible_column_ids {
                 let Some(col) = EventColumn::from_id(col_id) else {
                     continue;
                 };
@@ -1318,7 +755,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let widths: Vec<Constraint> = app
-        .visible_event_columns
+        .cw_log_event_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             EventColumn::from_id(col_id).map(|col| {
@@ -1374,7 +811,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
             let mut lines = Vec::new();
             let max_width = table_area.width.saturating_sub(3) as usize;
 
-            for col_id in &app.visible_event_columns {
+            for col_id in &app.cw_log_event_visible_column_ids {
                 let Some(col) = EventColumn::from_id(col_id) else {
                     continue;
                 };

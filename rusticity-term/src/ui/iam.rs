@@ -246,29 +246,13 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     use crate::iam::UserColumn;
-    let mut columns: Vec<Box<dyn Column<&IamUser>>> = vec![];
-    for col in &app.visible_iam_columns {
-        let column = match col.as_str() {
-            "User name" => Some(UserColumn::UserName),
-            "Path" => Some(UserColumn::Path),
-            "Groups" => Some(UserColumn::Groups),
-            "Last activity" => Some(UserColumn::LastActivity),
-            "MFA" => Some(UserColumn::Mfa),
-            "Password age" => Some(UserColumn::PasswordAge),
-            "Console last sign-in" => Some(UserColumn::ConsoleLastSignIn),
-            "Access key ID" => Some(UserColumn::AccessKeyId),
-            "Active key age" => Some(UserColumn::ActiveKeyAge),
-            "Access key last used" => Some(UserColumn::AccessKeyLastUsed),
-            "ARN" => Some(UserColumn::Arn),
-            "Creation time" => Some(UserColumn::CreationTime),
-            "Console access" => Some(UserColumn::ConsoleAccess),
-            "Signing certs" => Some(UserColumn::SigningCerts),
-            _ => None,
-        };
-        if let Some(c) = column {
-            columns.push(Box::new(c));
-        }
-    }
+    let columns: Vec<Box<dyn Column<&IamUser>>> = app
+        .iam_user_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            UserColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<&IamUser>>)
+        })
+        .collect();
 
     let expanded_index = app.iam_state.users.expanded_item.and_then(|idx| {
         if idx >= scroll_offset && idx < scroll_offset + page_size {
@@ -598,7 +582,7 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
 
     use crate::iam::GroupColumn;
     let mut columns: Vec<Box<dyn Column<IamGroup>>> = vec![];
-    for col_name in &app.visible_group_columns {
+    for col_name in &app.iam_group_visible_column_ids {
         let column = match col_name.as_str() {
             "Group name" => Some(GroupColumn::GroupName),
             "Path" => Some(GroupColumn::Path),
@@ -690,7 +674,7 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
 
     use crate::iam::RoleColumn;
     let mut columns: Vec<Box<dyn Column<IamRole>>> = vec![];
-    for col in &app.visible_role_columns {
+    for col in &app.iam_role_visible_column_ids {
         let column = match col.as_str() {
             "Role name" => Some(RoleColumn::RoleName),
             "Path" => Some(RoleColumn::Path),
@@ -1119,7 +1103,7 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
     // Define columns
     use crate::iam::PolicyColumn;
     let mut columns: Vec<Box<dyn Column<Policy>>> = vec![];
-    for col in &app.visible_policy_columns {
+    for col in &app.iam_policy_visible_column_ids {
         match col.as_str() {
             "Policy name" => columns.push(Box::new(PolicyColumn::PolicyName)),
             "Type" => columns.push(Box::new(PolicyColumn::Type)),

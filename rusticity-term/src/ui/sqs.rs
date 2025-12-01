@@ -334,7 +334,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
     let title = format!(" Queues ({}) ", filtered.len());
 
     let columns: Vec<Box<dyn crate::ui::table::Column<Queue>>> = app
-        .visible_sqs_columns
+        .sqs_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             SqsColumn::from_id(col_id)

@@ -176,7 +176,7 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
 
     // Define columns
     let columns: Vec<Box<dyn crate::ui::table::Column<EcrRepository>>> = app
-        .visible_ecr_columns
+        .ecr_repo_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             repo::Column::from_id(col_id)
@@ -286,7 +286,7 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
 
     // Define columns
     let columns: Vec<Box<dyn crate::ui::table::Column<EcrImage>>> = app
-        .visible_ecr_image_columns
+        .ecr_image_visible_column_ids
         .iter()
         .filter_map(|col_id| {
             image::Column::from_id(col_id)

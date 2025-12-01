@@ -1,15 +1,14 @@
 use crate::app::App;
-use crate::column;
 use crate::common::CyclicEnum;
 use crate::common::{
-    format_bytes, format_duration_seconds, format_memory_mb, render_pagination_text, InputFocus,
-    SortDirection,
+    format_bytes, format_duration_seconds, format_memory_mb, render_pagination_text, ColumnId,
+    InputFocus, SortDirection,
 };
 use crate::keymap::Mode;
 use crate::lambda::{
     format_architecture, format_runtime, Alias, AliasColumn, Application as LambdaApplication,
-    Column as LambdaColumn, Deployment, Function as LambdaFunction, Layer, LayerColumn, Resource,
-    Version, VersionColumn,
+    Deployment, Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer,
+    LayerColumn, Resource, Version, VersionColumn,
 };
 use crate::table::TableState;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
@@ -24,16 +23,16 @@ pub struct State {
     pub current_version: Option<String>,
     pub current_alias: Option<String>,
     pub detail_tab: DetailTab,
-    pub visible_columns: Vec<String>,
-    pub all_columns: Vec<String>,
+    pub function_visible_column_ids: Vec<ColumnId>,
+    pub function_column_ids: Vec<ColumnId>,
     pub version_table: TableState<Version>,
-    pub visible_version_columns: Vec<String>,
-    pub all_version_columns: Vec<String>,
+    pub version_visible_column_ids: Vec<String>,
+    pub version_column_ids: Vec<String>,
     pub alias_table: TableState<Alias>,
-    pub visible_alias_columns: Vec<String>,
-    pub all_alias_columns: Vec<String>,
-    pub visible_layer_columns: Vec<String>,
-    pub all_layer_columns: Vec<String>,
+    pub alias_visible_column_ids: Vec<String>,
+    pub alias_column_ids: Vec<String>,
+    pub layer_visible_column_ids: Vec<String>,
+    pub layer_column_ids: Vec<String>,
     pub input_focus: InputFocus,
     pub version_input_focus: InputFocus,
     pub alias_input_focus: InputFocus,
@@ -55,31 +54,31 @@ impl State {
             current_version: None,
             current_alias: None,
             detail_tab: DetailTab::Code,
-            visible_columns: LambdaColumn::visible(),
-            all_columns: LambdaColumn::all(),
+            function_visible_column_ids: LambdaColumn::visible(),
+            function_column_ids: LambdaColumn::ids(),
             version_table: TableState::new(),
-            visible_version_columns: VersionColumn::all()
+            version_visible_column_ids: VersionColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
-            all_version_columns: VersionColumn::all()
+            version_column_ids: VersionColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
             alias_table: TableState::new(),
-            visible_alias_columns: AliasColumn::all()
+            alias_visible_column_ids: AliasColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
-            all_alias_columns: AliasColumn::all()
+            alias_column_ids: AliasColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
-            visible_layer_columns: LayerColumn::all()
+            layer_visible_column_ids: LayerColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
-            all_layer_columns: LayerColumn::all()
+            layer_column_ids: LayerColumn::all()
                 .iter()
                 .map(|c| c.name().to_string())
                 .collect(),
@@ -262,7 +261,7 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Lambda functions ({}) ", filtered.len());
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaFunction>>> = vec![];
-    for col_id in &app.lambda_state.visible_columns {
+    for col_id in &app.lambda_state.function_visible_column_ids {
         if let Some(column) = LambdaColumn::from_id(col_id) {
             columns.push(Box::new(column));
         }
@@ -432,50 +431,16 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
 
                 // Layers section
-                #[derive(Clone)]
-                struct Layer {
-                    merge_order: String,
-                    name: String,
-                    layer_version: String,
-                    compatible_runtimes: String,
-                    compatible_architectures: String,
-                    version_arn: String,
-                }
-
-                let layers: Vec<Layer> = func
-                    .layers
-                    .iter()
-                    .enumerate()
-                    .map(|(i, l)| {
-                        let parts: Vec<&str> = l.arn.split(':').collect();
-                        let name = parts.get(6).unwrap_or(&"").to_string();
-                        let version = parts.get(7).unwrap_or(&"").to_string();
-                        Layer {
-                            merge_order: (i + 1).to_string(),
-                            name,
-                            layer_version: version,
-                            compatible_runtimes: "-".to_string(),
-                            compatible_architectures: "-".to_string(),
-                            version_arn: l.arn.clone(),
-                        }
-                    })
-                    .collect();
-                let layer_refs: Vec<&Layer> = layers.iter().collect();
+                let layer_refs: Vec<&Layer> = func.layers.iter().collect();
                 let title = format!(" Layers ({}) ", layer_refs.len());
 
                 let columns: Vec<Box<dyn TableColumn<Layer>>> = vec![
-                    Box::new(column!(name="Merge order", width=12, type=Layer, field=merge_order)),
-                    Box::new(column!(name="Name", width=20, type=Layer, field=name)),
-                    Box::new(
-                        column!(name="Layer version", width=14, type=Layer, field=layer_version),
-                    ),
-                    Box::new(
-                        column!(name="Compatible runtimes", width=20, type=Layer, field=compatible_runtimes),
-                    ),
-                    Box::new(
-                        column!(name="Compatible architectures", width=26, type=Layer, field=compatible_architectures),
-                    ),
-                    Box::new(column!(name="Version ARN", width=40, type=Layer, field=version_arn)),
+                    Box::new(LayerColumn::MergeOrder),
+                    Box::new(LayerColumn::Name),
+                    Box::new(LayerColumn::LayerVersion),
+                    Box::new(LayerColumn::CompatibleRuntimes),
+                    Box::new(LayerColumn::CompatibleArchitectures),
+                    Box::new(LayerColumn::VersionArn),
                 ];
 
                 let config = TableConfig {
@@ -613,7 +578,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let title = format!(" Versions ({}) ", filtered.len());
 
         let mut columns: Vec<Box<dyn TableColumn<Version>>> = vec![];
-        for col_name in &app.lambda_state.visible_version_columns {
+        for col_name in &app.lambda_state.version_visible_column_ids {
             let column = match col_name.as_str() {
                 "Version" => Some(VersionColumn::Version),
                 "Aliases" => Some(VersionColumn::Aliases),
@@ -728,7 +693,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let title = format!(" Aliases ({}) ", filtered.len());
 
         let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
-        for col_name in &app.lambda_state.visible_alias_columns {
+        for col_name in &app.lambda_state.alias_visible_column_ids {
             let column = match col_name.as_str() {
                 "Name" => Some(AliasColumn::Name),
                 "Versions" => Some(AliasColumn::Versions),
@@ -1036,33 +1001,17 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
 
                 // Layers section (empty table)
-                #[derive(Clone)]
-                struct Layer {
-                    merge_order: String,
-                    name: String,
-                    layer_version: String,
-                    compatible_runtimes: String,
-                    compatible_architectures: String,
-                    version_arn: String,
-                }
-
                 let layers: Vec<Layer> = vec![];
                 let layer_refs: Vec<&Layer> = layers.iter().collect();
                 let title = format!(" Layers ({}) ", layer_refs.len());
 
                 let columns: Vec<Box<dyn TableColumn<Layer>>> = vec![
-                    Box::new(column!(name="Merge order", width=12, type=Layer, field=merge_order)),
-                    Box::new(column!(name="Name", width=20, type=Layer, field=name)),
-                    Box::new(
-                        column!(name="Layer version", width=14, type=Layer, field=layer_version),
-                    ),
-                    Box::new(
-                        column!(name="Compatible runtimes", width=20, type=Layer, field=compatible_runtimes),
-                    ),
-                    Box::new(
-                        column!(name="Compatible architectures", width=26, type=Layer, field=compatible_architectures),
-                    ),
-                    Box::new(column!(name="Version ARN", width=40, type=Layer, field=version_arn)),
+                    Box::new(LayerColumn::MergeOrder),
+                    Box::new(LayerColumn::Name),
+                    Box::new(LayerColumn::LayerVersion),
+                    Box::new(LayerColumn::CompatibleRuntimes),
+                    Box::new(LayerColumn::CompatibleArchitectures),
+                    Box::new(LayerColumn::VersionArn),
                 ];
 
                 let config = TableConfig {
@@ -1199,7 +1148,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let title = format!(" Aliases ({}) ", filtered.len());
 
                     let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
-                    for col_name in &app.lambda_state.visible_alias_columns {
+                    for col_name in &app.lambda_state.alias_visible_column_ids {
                         let column = match col_name.as_str() {
                             "Name" => Some(AliasColumn::Name),
                             "Versions" => Some(AliasColumn::Versions),
@@ -1287,7 +1236,7 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Applications ({}) ", filtered.len());
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaApplication>>> = vec![];
-    for col_id in &app.visible_lambda_application_columns {
+    for col_id in &app.lambda_application_visible_column_ids {
         if let Some(column) = crate::lambda::ApplicationColumn::from_id(col_id) {
             columns.push(Box::new(column));
         }
@@ -1389,9 +1338,17 @@ pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {
             layers: f
                 .layers
                 .into_iter()
-                .map(|l| Layer {
-                    arn: l.arn,
-                    code_size: l.code_size,
+                .enumerate()
+                .map(|(i, l)| {
+                    let (name, version) = crate::lambda::parse_layer_arn(&l.arn);
+                    Layer {
+                        merge_order: (i + 1).to_string(),
+                        name,
+                        layer_version: version,
+                        compatible_runtimes: "-".to_string(),
+                        compatible_architectures: "-".to_string(),
+                        version_arn: l.arn,
+                    }
                 })
                 .collect(),
         })
@@ -1531,12 +1488,20 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             app.lambda_application_state.resources.items.len()
         );
 
-        let columns: Vec<Box<dyn TableColumn<Resource>>> = vec![
-            Box::new(column!(name="Logical ID", width=30, type=Resource, field=logical_id)),
-            Box::new(column!(name="Physical ID", width=40, type=Resource, field=physical_id)),
-            Box::new(column!(name="Type", width=30, type=Resource, field=resource_type)),
-            Box::new(column!(name="Last modified", width=27, type=Resource, field=last_modified)),
-        ];
+        let columns: Vec<Box<dyn crate::ui::table::Column<Resource>>> = app
+            .lambda_resource_visible_column_ids
+            .iter()
+            .filter_map(|col_id| {
+                crate::lambda::ResourceColumn::from_id(col_id)
+                    .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<Resource>>)
+            })
+            .collect();
+        // let columns: Vec<Box<dyn TableColumn<Resource>>> = vec![
+        //     Box::new(column!(name="Logical ID", width=30, type=Resource, field=logical_id)),
+        //     Box::new(column!(name="Physical ID", width=40, type=Resource, field=physical_id)),
+        //     Box::new(column!(name="Type", width=30, type=Resource, field=resource_type)),
+        //     Box::new(column!(name="Last modified", width=27, type=Resource, field=last_modified)),
+        // ];
 
         let start_idx = current_page * page_size;
         let end_idx = (start_idx + page_size).min(filtered_count);
@@ -1603,10 +1568,10 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         use crate::lambda::DeploymentColumn;
         let columns: Vec<Box<dyn TableColumn<Deployment>>> = vec![
-            DeploymentColumn::Deployment.as_table_column(),
-            DeploymentColumn::ResourceType.as_table_column(),
-            DeploymentColumn::LastUpdated.as_table_column(),
-            DeploymentColumn::Status.as_table_column(),
+            Box::new(DeploymentColumn::Deployment),
+            Box::new(DeploymentColumn::ResourceType),
+            Box::new(DeploymentColumn::LastUpdated),
+            Box::new(DeploymentColumn::Status),
         ];
 
         let start_idx = current_page * page_size;

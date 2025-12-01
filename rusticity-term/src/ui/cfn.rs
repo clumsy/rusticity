@@ -278,7 +278,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
 
     // Define columns
     let column_enums: Vec<CfnColumn> = app
-        .visible_cfn_columns
+        .cfn_visible_column_ids
         .iter()
         .filter_map(|col_id| CfnColumn::from_id(col_id))
         .collect();

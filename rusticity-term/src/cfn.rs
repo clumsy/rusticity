@@ -1,5 +1,4 @@
-use crate::common::t;
-use crate::common::{ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::common::{translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::cfn::DetailTab;
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -96,16 +95,16 @@ pub enum Column {
 impl Column {
     pub fn id(&self) -> &'static str {
         match self {
-            Column::Name => "name",
-            Column::StackId => "stack_id",
-            Column::Status => "status",
-            Column::CreatedTime => "created_time",
-            Column::UpdatedTime => "updated_time",
-            Column::DeletedTime => "deleted_time",
-            Column::DriftStatus => "drift_status",
-            Column::LastDriftCheckTime => "last_drift_check_time",
-            Column::StatusReason => "status_reason",
-            Column::Description => "description",
+            Column::Name => "column.cfn.stack.name",
+            Column::StackId => "column.cfn.stack.stack_id",
+            Column::Status => "column.cfn.stack.status",
+            Column::CreatedTime => "column.cfn.stack.created_time",
+            Column::UpdatedTime => "column.cfn.stack.updated_time",
+            Column::DeletedTime => "column.cfn.stack.deleted_time",
+            Column::DriftStatus => "column.cfn.stack.drift_status",
+            Column::LastDriftCheckTime => "column.cfn.stack.last_drift_check_time",
+            Column::StatusReason => "column.cfn.stack.status_reason",
+            Column::Description => "column.cfn.stack.description",
         }
     }
 
@@ -125,27 +124,21 @@ impl Column {
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.cfn.stack.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "name" => Some(Column::Name),
-            "stack_id" => Some(Column::StackId),
-            "status" => Some(Column::Status),
-            "created_time" => Some(Column::CreatedTime),
-            "updated_time" => Some(Column::UpdatedTime),
-            "deleted_time" => Some(Column::DeletedTime),
-            "drift_status" => Some(Column::DriftStatus),
-            "last_drift_check_time" => Some(Column::LastDriftCheckTime),
-            "status_reason" => Some(Column::StatusReason),
-            "description" => Some(Column::Description),
+            "column.cfn.stack.name" => Some(Column::Name),
+            "column.cfn.stack.stack_id" => Some(Column::StackId),
+            "column.cfn.stack.status" => Some(Column::Status),
+            "column.cfn.stack.created_time" => Some(Column::CreatedTime),
+            "column.cfn.stack.updated_time" => Some(Column::UpdatedTime),
+            "column.cfn.stack.deleted_time" => Some(Column::DeletedTime),
+            "column.cfn.stack.drift_status" => Some(Column::DriftStatus),
+            "column.cfn.stack.last_drift_check_time" => Some(Column::LastDriftCheckTime),
+            "column.cfn.stack.status_reason" => Some(Column::StatusReason),
+            "column.cfn.stack.description" => Some(Column::Description),
             _ => None,
         }
     }
@@ -180,7 +173,7 @@ impl Column {
             }
 
             fn width(&self) -> u16 {
-                let translated = t(&format!("column.cfn.stack.{}", self.variant.id()));
+                let translated = translate_column(self.variant.id(), self.variant.default_name());
                 translated.len().max(match self.variant {
                     Column::Name => 30,
                     Column::StackId => 20,
@@ -510,6 +503,17 @@ mod tests {
             // Ensure all statuses get formatted (no panics) and contain some text
             assert!(!formatted.is_empty());
             assert!(formatted.len() > 2); // More than just emoji
+        }
+    }
+
+    #[test]
+    fn test_column_ids_have_correct_prefix() {
+        for col in Column::all() {
+            assert!(
+                col.id().starts_with("column.cfn.stack."),
+                "Column ID '{}' should start with 'column.cfn.stack.'",
+                col.id()
+            );
         }
     }
 }

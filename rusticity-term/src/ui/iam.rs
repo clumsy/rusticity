@@ -112,20 +112,20 @@ pub enum AccessHistoryFilter {
     ServicesNotAccessed,
 }
 
+impl CyclicEnum for AccessHistoryFilter {
+    const ALL: &'static [Self] = &[
+        Self::NoFilter,
+        Self::ServicesAccessed,
+        Self::ServicesNotAccessed,
+    ];
+}
+
 impl AccessHistoryFilter {
     pub fn name(&self) -> &'static str {
         match self {
             AccessHistoryFilter::NoFilter => "No filter",
             AccessHistoryFilter::ServicesAccessed => "Services accessed",
             AccessHistoryFilter::ServicesNotAccessed => "Services not accessed",
-        }
-    }
-
-    pub fn next(&self) -> Self {
-        match self {
-            AccessHistoryFilter::NoFilter => AccessHistoryFilter::ServicesAccessed,
-            AccessHistoryFilter::ServicesAccessed => AccessHistoryFilter::ServicesNotAccessed,
-            AccessHistoryFilter::ServicesNotAccessed => AccessHistoryFilter::NoFilter,
         }
     }
 }
@@ -751,11 +751,8 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
         {
             let formatted_duration = role
                 .max_session_duration
-                .split_whitespace()
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(crate::ui::format_duration)
-                .unwrap_or_else(|| role.max_session_duration.clone());
+                .map(|d| crate::ui::format_duration(d as u64))
+                .unwrap_or_default();
 
             crate::ui::render_summary(
                 frame,
@@ -1942,10 +1939,7 @@ pub async fn load_iam_roles(app: &mut App) -> anyhow::Result<()> {
                     datetime.format("%Y-%m-%d %H:%M:%S (UTC)").to_string()
                 },
                 description: r.description().unwrap_or("").to_string(),
-                max_session_duration: r
-                    .max_session_duration()
-                    .map(|d| format!("{} seconds", d))
-                    .unwrap_or_default(),
+                max_session_duration: r.max_session_duration(),
             }
         })
         .collect();

@@ -1,4 +1,4 @@
-use crate::common::t;
+use crate::common::translate_column;
 use crate::common::{format_bytes, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -74,9 +74,9 @@ pub enum BucketColumn {
 impl BucketColumn {
     pub fn id(&self) -> &'static str {
         match self {
-            BucketColumn::Name => "name",
-            BucketColumn::Region => "region",
-            BucketColumn::CreationDate => "creation_date",
+            BucketColumn::Name => "column.s3.bucket.name",
+            BucketColumn::Region => "column.s3.bucket.region",
+            BucketColumn::CreationDate => "column.s3.bucket.creation_date",
         }
     }
 
@@ -102,37 +102,25 @@ impl BucketColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "name" => Some(BucketColumn::Name),
-            "region" => Some(BucketColumn::Region),
-            "creation_date" => Some(BucketColumn::CreationDate),
+            "column.s3.bucket.name" => Some(BucketColumn::Name),
+            "column.s3.bucket.region" => Some(BucketColumn::Region),
+            "column.s3.bucket.creation_date" => Some(BucketColumn::CreationDate),
             _ => None,
         }
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.s3.bucket.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 }
 
 impl TableColumn<Bucket> for BucketColumn {
     fn name(&self) -> &str {
-        let key = format!("column.s3.bucket.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name()
-        } else {
-            Box::leak(translated.into_boxed_str())
-        }
+        Box::leak(translate_column(self.id(), self.default_name()).into_boxed_str())
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.s3.bucket.{}", self.id()));
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             BucketColumn::Name => 30,
             BucketColumn::Region => 15,
@@ -162,11 +150,11 @@ pub enum ObjectColumn {
 impl ObjectColumn {
     pub fn id(&self) -> &'static str {
         match self {
-            ObjectColumn::Key => "key",
-            ObjectColumn::Type => "type",
-            ObjectColumn::LastModified => "last_modified",
-            ObjectColumn::Size => "size",
-            ObjectColumn::StorageClass => "storage_class",
+            ObjectColumn::Key => "column.s3.object.key",
+            ObjectColumn::Type => "column.s3.object.type",
+            ObjectColumn::LastModified => "column.s3.object.last_modified",
+            ObjectColumn::Size => "column.s3.object.size",
+            ObjectColumn::StorageClass => "column.s3.object.storage_class",
         }
     }
 
@@ -192,39 +180,27 @@ impl ObjectColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "key" => Some(ObjectColumn::Key),
-            "type" => Some(ObjectColumn::Type),
-            "last_modified" => Some(ObjectColumn::LastModified),
-            "size" => Some(ObjectColumn::Size),
-            "storage_class" => Some(ObjectColumn::StorageClass),
+            "column.s3.object.key" => Some(ObjectColumn::Key),
+            "column.s3.object.type" => Some(ObjectColumn::Type),
+            "column.s3.object.last_modified" => Some(ObjectColumn::LastModified),
+            "column.s3.object.size" => Some(ObjectColumn::Size),
+            "column.s3.object.storage_class" => Some(ObjectColumn::StorageClass),
             _ => None,
         }
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.s3.object.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 }
 
 impl TableColumn<Object> for ObjectColumn {
     fn name(&self) -> &str {
-        let key = format!("column.s3.object.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name()
-        } else {
-            Box::leak(translated.into_boxed_str())
-        }
+        Box::leak(translate_column(self.id(), self.default_name()).into_boxed_str())
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.s3.object.{}", self.id()));
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             ObjectColumn::Key => 40,
             ObjectColumn::Type => 10,
@@ -282,5 +258,32 @@ impl TableColumn<Object> for ObjectColumn {
             }
         };
         (text, Style::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bucket_column_ids_have_correct_prefix() {
+        for col in BucketColumn::all() {
+            assert!(
+                col.id().starts_with("column.s3.bucket."),
+                "BucketColumn ID '{}' should start with 'column.s3.bucket.'",
+                col.id()
+            );
+        }
+    }
+
+    #[test]
+    fn test_object_column_ids_have_correct_prefix() {
+        for col in ObjectColumn::all() {
+            assert!(
+                col.id().starts_with("column.s3.object."),
+                "ObjectColumn ID '{}' should start with 'column.s3.object.'",
+                col.id()
+            );
+        }
     }
 }

@@ -144,6 +144,57 @@ async fn main() -> Result<()> {
                             app.sqs_state.queues.loading = false;
                         }
 
+                        // Load Lambda triggers when viewing queue detail on triggers tab
+                        if app.current_service == Service::SqsQueues
+                            && app.sqs_state.current_queue.is_some()
+                            && app.sqs_state.detail_tab == rusticity_term::ui::sqs::QueueDetailTab::LambdaTriggers
+                            && app.sqs_state.triggers.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(queue_url) = &app.sqs_state.current_queue.clone() {
+                                if let Err(e) = rusticity_term::ui::sqs::load_lambda_triggers(&mut app, queue_url).await {
+                                    app.error_message = Some(format!("Failed to load Lambda triggers: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.sqs_state.triggers.loading = false;
+                        }
+
+                        // Load EventBridge Pipes when tab is switched
+                        if app.current_service == Service::SqsQueues
+                            && app.sqs_state.current_queue.is_some()
+                            && app.sqs_state.detail_tab == rusticity_term::ui::sqs::QueueDetailTab::EventBridgePipes
+                            && app.sqs_state.pipes.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(queue_url) = &app.sqs_state.current_queue.clone() {
+                                if let Err(e) = rusticity_term::ui::sqs::load_pipes(&mut app, queue_url).await {
+                                    app.error_message = Some(format!("Failed to load EventBridge Pipes: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.sqs_state.pipes.loading = false;
+                        }
+
+                        // Load Tags when tab is switched
+                        if app.current_service == Service::SqsQueues
+                            && app.sqs_state.current_queue.is_some()
+                            && app.sqs_state.detail_tab == rusticity_term::ui::sqs::QueueDetailTab::Tagging
+                            && app.sqs_state.tags.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(queue_url) = &app.sqs_state.current_queue.clone() {
+                                if let Err(e) = rusticity_term::ui::sqs::load_tags(&mut app, queue_url).await {
+                                    app.error_message = Some(format!("Failed to load tags: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.sqs_state.tags.loading = false;
+                        }
+
                         // Load CloudWatch Alarms when service is switched to and empty
                         if app.service_selected && app.current_service == Service::CloudWatchAlarms
                             && (!prev_service_selected || prev_service != Service::CloudWatchAlarms)

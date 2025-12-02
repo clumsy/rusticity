@@ -1,6 +1,7 @@
 use ratatui::{prelude::*, widgets::*};
 
 use super::styles;
+use crate::common::t;
 
 pub const CURSOR_COLLAPSED: &str = "►";
 pub const CURSOR_EXPANDED: &str = "▼";
@@ -69,7 +70,7 @@ pub trait Column<T> {
 
     fn name(&self) -> &str {
         let id = self.id();
-        let translated = crate::common::t(id);
+        let translated = t(id);
         if translated == id {
             self.default_name()
         } else {

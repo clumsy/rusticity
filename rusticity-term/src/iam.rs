@@ -1,5 +1,5 @@
 use crate::common::t;
-use crate::common::{ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::common::{format_duration_seconds, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -89,7 +89,7 @@ pub struct IamRole {
     pub arn: String,
     pub creation_time: String,
     pub description: String,
-    pub max_session_duration: String,
+    pub max_session_duration: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -512,7 +512,10 @@ impl Column<IamRole> for RoleColumn {
             Self::Arn => item.arn.clone(),
             Self::CreationTime => item.creation_time.clone(),
             Self::Description => item.description.clone(),
-            Self::MaxSessionDuration => item.max_session_duration.clone(),
+            Self::MaxSessionDuration => item
+                .max_session_duration
+                .map(format_duration_seconds)
+                .unwrap_or_default(),
         };
         (text, ratatui::style::Style::default())
     }

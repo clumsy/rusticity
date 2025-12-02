@@ -1,4 +1,4 @@
-use crate::common::t;
+use crate::common::translate_column;
 use crate::common::{ColumnId, UTC_TIMESTAMP_WIDTH};
 use std::collections::HashMap;
 
@@ -70,22 +70,22 @@ pub enum AlarmColumn {
 impl AlarmColumn {
     pub fn id(&self) -> &'static str {
         match self {
-            AlarmColumn::Name => "name",
-            AlarmColumn::State => "state",
-            AlarmColumn::LastStateUpdate => "last_state_update",
-            AlarmColumn::Description => "description",
-            AlarmColumn::Conditions => "conditions",
-            AlarmColumn::Actions => "actions",
-            AlarmColumn::StateDetails => "state_details",
-            AlarmColumn::MetricName => "metric_name",
-            AlarmColumn::Namespace => "namespace",
-            AlarmColumn::Statistic => "statistic",
-            AlarmColumn::Period => "period",
-            AlarmColumn::Resource => "resource",
-            AlarmColumn::Dimensions => "dimensions",
-            AlarmColumn::Expression => "expression",
-            AlarmColumn::Type => "type",
-            AlarmColumn::CrossAccount => "cross_account",
+            AlarmColumn::Name => "column.cw.alarm.name",
+            AlarmColumn::State => "column.cw.alarm.state",
+            AlarmColumn::LastStateUpdate => "column.cw.alarm.last_state_update",
+            AlarmColumn::Description => "column.cw.alarm.description",
+            AlarmColumn::Conditions => "column.cw.alarm.conditions",
+            AlarmColumn::Actions => "column.cw.alarm.actions",
+            AlarmColumn::StateDetails => "column.cw.alarm.state_details",
+            AlarmColumn::MetricName => "column.cw.alarm.metric_name",
+            AlarmColumn::Namespace => "column.cw.alarm.namespace",
+            AlarmColumn::Statistic => "column.cw.alarm.statistic",
+            AlarmColumn::Period => "column.cw.alarm.period",
+            AlarmColumn::Resource => "column.cw.alarm.resource",
+            AlarmColumn::Dimensions => "column.cw.alarm.dimensions",
+            AlarmColumn::Expression => "column.cw.alarm.expression",
+            AlarmColumn::Type => "column.cw.alarm.type",
+            AlarmColumn::CrossAccount => "column.cw.alarm.cross_account",
         }
     }
 
@@ -111,13 +111,7 @@ impl AlarmColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.cw.alarm.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 
     pub fn width(&self) -> u16 {
@@ -143,22 +137,22 @@ impl AlarmColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "name" => Some(AlarmColumn::Name),
-            "state" => Some(AlarmColumn::State),
-            "last_state_update" => Some(AlarmColumn::LastStateUpdate),
-            "description" => Some(AlarmColumn::Description),
-            "conditions" => Some(AlarmColumn::Conditions),
-            "actions" => Some(AlarmColumn::Actions),
-            "state_details" => Some(AlarmColumn::StateDetails),
-            "metric_name" => Some(AlarmColumn::MetricName),
-            "namespace" => Some(AlarmColumn::Namespace),
-            "statistic" => Some(AlarmColumn::Statistic),
-            "period" => Some(AlarmColumn::Period),
-            "resource" => Some(AlarmColumn::Resource),
-            "dimensions" => Some(AlarmColumn::Dimensions),
-            "expression" => Some(AlarmColumn::Expression),
-            "type" => Some(AlarmColumn::Type),
-            "cross_account" => Some(AlarmColumn::CrossAccount),
+            "column.cw.alarm.name" => Some(AlarmColumn::Name),
+            "column.cw.alarm.state" => Some(AlarmColumn::State),
+            "column.cw.alarm.last_state_update" => Some(AlarmColumn::LastStateUpdate),
+            "column.cw.alarm.description" => Some(AlarmColumn::Description),
+            "column.cw.alarm.conditions" => Some(AlarmColumn::Conditions),
+            "column.cw.alarm.actions" => Some(AlarmColumn::Actions),
+            "column.cw.alarm.state_details" => Some(AlarmColumn::StateDetails),
+            "column.cw.alarm.metric_name" => Some(AlarmColumn::MetricName),
+            "column.cw.alarm.namespace" => Some(AlarmColumn::Namespace),
+            "column.cw.alarm.statistic" => Some(AlarmColumn::Statistic),
+            "column.cw.alarm.period" => Some(AlarmColumn::Period),
+            "column.cw.alarm.resource" => Some(AlarmColumn::Resource),
+            "column.cw.alarm.dimensions" => Some(AlarmColumn::Dimensions),
+            "column.cw.alarm.expression" => Some(AlarmColumn::Expression),
+            "column.cw.alarm.type" => Some(AlarmColumn::Type),
+            "column.cw.alarm.cross_account" => Some(AlarmColumn::CrossAccount),
             _ => None,
         }
     }
@@ -200,4 +194,20 @@ pub fn console_url(
         "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarms/{}/{}?~(sortingColumn~'{}~sortingDirection~'{})",
         region, region, view_mode, page_size, sort_col, sort_dir
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_ids_have_correct_prefix() {
+        for col in AlarmColumn::all() {
+            assert!(
+                col.id().starts_with("column.cw.alarm."),
+                "AlarmColumn ID '{}' should start with 'column.cw.alarm.'",
+                col.id()
+            );
+        }
+    }
 }

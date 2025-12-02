@@ -1,4 +1,4 @@
-use crate::common::{format_bytes, t, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::common::{format_bytes, translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::lambda::{ApplicationDetailTab, DetailTab};
 use crate::ui::table;
 use ratatui::prelude::*;
@@ -430,9 +430,9 @@ mod tests {
         init(&mut i18n);
         // Just verify that translation lookup works, don't assert specific values
         // since user may have custom column names in config.toml
-        let name = t("column.lambda.function.name");
+        let name = crate::common::t("column.lambda.function.name");
         assert!(!name.is_empty());
-        let nonexistent = t("nonexistent.key");
+        let nonexistent = crate::common::t("nonexistent.key");
         assert_eq!(nonexistent, "nonexistent.key");
     }
 
@@ -651,7 +651,7 @@ impl table::Column<Function> for FunctionColumn {
     }
 
     fn width(&self) -> u16 {
-        let translated = t(self.id());
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             Self::Name => 30,
             Self::Description => 40,
@@ -732,13 +732,7 @@ impl ApplicationColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = self.id();
-        let translated = t(key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 }
 
@@ -946,13 +940,7 @@ impl LayerColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = self.id();
-        let translated = t(key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 
     pub fn id(&self) -> ColumnId {
@@ -1069,13 +1057,7 @@ impl DeploymentColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = self.id();
-        let translated = t(key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 
     pub fn from_id(id: ColumnId) -> Option<Self> {
@@ -1104,7 +1086,7 @@ impl DeploymentColumn {
 
 impl table::Column<Deployment> for DeploymentColumn {
     fn width(&self) -> u16 {
-        let translated = t(self.id());
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             Self::Deployment => 30,
             Self::ResourceType => 20,
@@ -1175,13 +1157,7 @@ impl ResourceColumn {
     }
 
     pub fn name(&self) -> String {
-        let key = self.id();
-        let translated = t(key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 
     pub fn from_id(id: ColumnId) -> Option<Self> {
@@ -1266,5 +1242,49 @@ mod column_tests {
         let id = ResourceColumn::LogicalId.id();
         assert_eq!(id, "column.lambda.resource.logical_id");
         assert!(id.starts_with("column."));
+    }
+
+    #[test]
+    fn test_function_column_ids_have_correct_prefix() {
+        for col in FunctionColumn::all() {
+            assert!(
+                col.id().starts_with("column.lambda.function."),
+                "FunctionColumn ID '{}' should start with 'column.lambda.function.'",
+                col.id()
+            );
+        }
+    }
+
+    #[test]
+    fn test_application_column_ids_have_correct_prefix() {
+        for col in ApplicationColumn::all() {
+            assert!(
+                col.id().starts_with("column.lambda.application."),
+                "ApplicationColumn ID '{}' should start with 'column.lambda.application.'",
+                col.id()
+            );
+        }
+    }
+
+    #[test]
+    fn test_deployment_column_ids_have_correct_prefix() {
+        for col in DeploymentColumn::all() {
+            assert!(
+                col.id().starts_with("column.lambda.deployment."),
+                "DeploymentColumn ID '{}' should start with 'column.lambda.deployment.'",
+                col.id()
+            );
+        }
+    }
+
+    #[test]
+    fn test_resource_column_ids_have_correct_prefix() {
+        for col in ResourceColumn::all() {
+            assert!(
+                col.id().starts_with("column.lambda.resource."),
+                "ResourceColumn ID '{}' should start with 'column.lambda.resource.'",
+                col.id()
+            );
+        }
     }
 }

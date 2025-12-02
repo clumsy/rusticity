@@ -260,6 +260,14 @@ impl AwsConfig {
             .await;
         aws_sdk_cloudwatchlogs::Client::new(&config)
     }
+
+    pub async fn pipes_client(&self) -> aws_sdk_pipes::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_pipes::Client::new(&config)
+    }
 }
 
 #[cfg(test)]

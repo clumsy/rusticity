@@ -1,4 +1,4 @@
-use crate::common::t;
+use crate::common::translate_column;
 use crate::common::{format_iso_timestamp, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -38,11 +38,11 @@ pub enum Column {
 impl Column {
     pub fn id(&self) -> &'static str {
         match self {
-            Column::Name => "name",
-            Column::Uri => "uri",
-            Column::CreatedAt => "created_at",
-            Column::TagImmutability => "tag_immutability",
-            Column::EncryptionType => "encryption_type",
+            Column::Name => "column.ecr.repo.name",
+            Column::Uri => "column.ecr.repo.uri",
+            Column::CreatedAt => "column.ecr.repo.created_at",
+            Column::TagImmutability => "column.ecr.repo.tag_immutability",
+            Column::EncryptionType => "column.ecr.repo.encryption_type",
         }
     }
 
@@ -72,39 +72,27 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "name" => Some(Column::Name),
-            "uri" => Some(Column::Uri),
-            "created_at" => Some(Column::CreatedAt),
-            "tag_immutability" => Some(Column::TagImmutability),
-            "encryption_type" => Some(Column::EncryptionType),
+            "column.ecr.repo.name" => Some(Column::Name),
+            "column.ecr.repo.uri" => Some(Column::Uri),
+            "column.ecr.repo.created_at" => Some(Column::CreatedAt),
+            "column.ecr.repo.tag_immutability" => Some(Column::TagImmutability),
+            "column.ecr.repo.encryption_type" => Some(Column::EncryptionType),
             _ => None,
         }
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.ecr.repo.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 }
 
 impl TableColumn<Repository> for Column {
     fn name(&self) -> &str {
-        let key = format!("column.ecr.repo.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name()
-        } else {
-            Box::leak(translated.into_boxed_str())
-        }
+        Box::leak(translate_column(self.id(), self.default_name()).into_boxed_str())
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.ecr.repo.{}", self.id()));
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             Column::Name => 30,
             Column::Uri => 50,
@@ -127,5 +115,21 @@ impl TableColumn<Repository> for Column {
             },
         };
         (text, Style::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_ids_have_correct_prefix() {
+        for col in Column::all() {
+            assert!(
+                col.id().starts_with("column.ecr.repo."),
+                "Column ID '{}' should start with 'column.ecr.repo.'",
+                col.id()
+            );
+        }
     }
 }

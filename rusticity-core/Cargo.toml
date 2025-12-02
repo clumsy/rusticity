@@ -17,6 +17,7 @@ aws-sdk-ecr = "1.52"
 aws-sdk-ecrpublic = "1.49"
 aws-sdk-iam = "1"
 aws-sdk-lambda = "1"
+aws-sdk-pipes = "1"
 aws-sdk-s3 = { workspace = true }
 aws-sdk-sqs = "1"
 aws-sdk-sts = { workspace = true }

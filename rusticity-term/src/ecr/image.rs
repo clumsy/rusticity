@@ -1,4 +1,4 @@
-use crate::common::t;
+use crate::common::translate_column;
 use crate::common::{format_iso_timestamp, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -44,13 +44,13 @@ pub enum Column {
 impl Column {
     pub fn id(&self) -> &'static str {
         match self {
-            Column::Tag => "tag",
-            Column::ArtifactType => "artifact_type",
-            Column::PushedAt => "pushed_at",
-            Column::SizeMb => "size_mb",
-            Column::Uri => "uri",
-            Column::Digest => "digest",
-            Column::LastPullTime => "last_pull_time",
+            Column::Tag => "column.ecr.image.tag",
+            Column::ArtifactType => "column.ecr.image.artifact_type",
+            Column::PushedAt => "column.ecr.image.pushed_at",
+            Column::SizeMb => "column.ecr.image.size_mb",
+            Column::Uri => "column.ecr.image.uri",
+            Column::Digest => "column.ecr.image.digest",
+            Column::LastPullTime => "column.ecr.image.last_pull_time",
         }
     }
 
@@ -84,41 +84,29 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "tag" => Some(Column::Tag),
-            "artifact_type" => Some(Column::ArtifactType),
-            "pushed_at" => Some(Column::PushedAt),
-            "size_mb" => Some(Column::SizeMb),
-            "uri" => Some(Column::Uri),
-            "digest" => Some(Column::Digest),
-            "last_pull_time" => Some(Column::LastPullTime),
+            "column.ecr.image.tag" => Some(Column::Tag),
+            "column.ecr.image.artifact_type" => Some(Column::ArtifactType),
+            "column.ecr.image.pushed_at" => Some(Column::PushedAt),
+            "column.ecr.image.size_mb" => Some(Column::SizeMb),
+            "column.ecr.image.uri" => Some(Column::Uri),
+            "column.ecr.image.digest" => Some(Column::Digest),
+            "column.ecr.image.last_pull_time" => Some(Column::LastPullTime),
             _ => None,
         }
     }
 
     pub fn name(&self) -> String {
-        let key = format!("column.ecr.image.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name().to_string()
-        } else {
-            translated
-        }
+        translate_column(self.id(), self.default_name())
     }
 }
 
 impl TableColumn<Image> for Column {
     fn name(&self) -> &str {
-        let key = format!("column.ecr.image.{}", self.id());
-        let translated = t(&key);
-        if translated == key {
-            self.default_name()
-        } else {
-            Box::leak(translated.into_boxed_str())
-        }
+        Box::leak(translate_column(self.id(), self.default_name()).into_boxed_str())
     }
 
     fn width(&self) -> u16 {
-        let translated = t(&format!("column.ecr.image.{}", self.id()));
+        let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
             Column::Tag => 20,
             Column::ArtifactType => 20,
@@ -141,5 +129,21 @@ impl TableColumn<Image> for Column {
             Column::LastPullTime => format_iso_timestamp(&item.last_pull_time),
         };
         (text, Style::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_ids_have_correct_prefix() {
+        for col in Column::all() {
+            assert!(
+                col.id().starts_with("column.ecr.image."),
+                "Column ID '{}' should start with 'column.ecr.image.'",
+                col.id()
+            );
+        }
     }
 }

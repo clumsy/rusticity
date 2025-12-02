@@ -18,7 +18,8 @@ use crate::cfn::Column as CfnColumn;
 use crate::cw::alarms::AlarmColumn;
 use crate::ecr::{image, repo};
 use crate::lambda::{DeploymentColumn, ResourceColumn};
-use crate::sqs::Column as SqsColumn;
+use crate::sqs::queue::Column as SqsColumn;
+use crate::sqs::trigger::Column as SqsTriggerColumn;
 use crate::ui::table::Column as TableColumn;
 use styles::highlight;
 
@@ -839,20 +840,57 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         };
         (items, " Preferences ", max_len)
     } else if app.current_service == Service::SqsQueues {
-        let mut max_len = 0;
-        let items: Vec<ListItem> = app
-            .sqs_column_ids
-            .iter()
-            .filter_map(|col_id| {
-                SqsColumn::from_id(col_id).map(|col| {
-                    let is_visible = app.sqs_visible_column_ids.contains(col_id);
+        if app.sqs_state.current_queue.is_some()
+            && app.sqs_state.detail_tab == crate::ui::sqs::QueueDetailTab::LambdaTriggers
+        {
+            // Triggers tab - columns + page size
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.sqs_state.trigger_column_ids {
+                if let Some(col) = SqsTriggerColumn::from_id(col_id) {
+                    let is_visible = app.sqs_state.trigger_visible_column_ids.contains(col_id);
                     let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
                     max_len = max_len.max(len);
-                    item
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.sqs_state.triggers.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        } else {
+            // Queue list - just columns
+            let mut max_len = 0;
+            let items: Vec<ListItem> = app
+                .sqs_column_ids
+                .iter()
+                .filter_map(|col_id| {
+                    SqsColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.sqs_visible_column_ids.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
                 })
-            })
-            .collect();
-        (items, " Preferences ", max_len)
+                .collect();
+            (items, " Preferences ", max_len)
+        }
     } else if app.current_service == Service::LambdaFunctions {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
@@ -2262,12 +2300,16 @@ mod tests {
         }
 
         assert_eq!(app.s3_bucket_visible_column_ids.len(), 2);
-        assert!(!app.s3_bucket_visible_column_ids.contains(&"region"));
+        assert!(!app
+            .s3_bucket_visible_column_ids
+            .contains(&"column.s3.bucket.region"));
 
         // Toggle it back on
         app.s3_bucket_visible_column_ids.push(col);
         assert_eq!(app.s3_bucket_visible_column_ids.len(), 3);
-        assert!(app.s3_bucket_visible_column_ids.contains(&"region"));
+        assert!(app
+            .s3_bucket_visible_column_ids
+            .contains(&"column.s3.bucket.region"));
     }
 
     #[test]

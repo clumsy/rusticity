@@ -1,7 +1,8 @@
 use crate::app::App;
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
-use crate::common::CyclicEnum;
-use crate::common::{render_pagination_text, InputFocus, SortDirection};
+use crate::common::{
+    render_dropdown, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+};
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::labeled_field;
@@ -85,29 +86,20 @@ impl StatusFilter {
             StatusFilter::InProgress,
         ]
     }
+}
 
-    pub fn next(&self) -> Self {
-        match self {
-            StatusFilter::All => StatusFilter::Active,
-            StatusFilter::Active => StatusFilter::Complete,
-            StatusFilter::Complete => StatusFilter::Failed,
-            StatusFilter::Failed => StatusFilter::Deleted,
-            StatusFilter::Deleted => StatusFilter::InProgress,
-            StatusFilter::InProgress => StatusFilter::All,
-        }
-    }
+impl crate::common::CyclicEnum for StatusFilter {
+    const ALL: &'static [Self] = &[
+        Self::All,
+        Self::Active,
+        Self::Complete,
+        Self::Failed,
+        Self::Deleted,
+        Self::InProgress,
+    ];
+}
 
-    pub fn prev(&self) -> Self {
-        match self {
-            StatusFilter::All => StatusFilter::InProgress,
-            StatusFilter::Active => StatusFilter::All,
-            StatusFilter::Complete => StatusFilter::Active,
-            StatusFilter::Failed => StatusFilter::Complete,
-            StatusFilter::Deleted => StatusFilter::Failed,
-            StatusFilter::InProgress => StatusFilter::Deleted,
-        }
-    }
-
+impl StatusFilter {
     pub fn matches(&self, status: &str) -> bool {
         match self {
             StatusFilter::All => true,
@@ -314,54 +306,19 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
 
     // Render dropdown for StatusFilter when focused (after table so it appears on top)
     if app.mode == Mode::FilterInput && app.cfn_state.input_focus == STATUS_FILTER {
-        // Find the longest filter name for consistent width
-        let max_filter_width = StatusFilter::all()
+        let filter_names: Vec<&str> = StatusFilter::all().iter().map(|f| f.name()).collect();
+        let selected_idx = StatusFilter::all()
             .iter()
-            .map(|f| f.name().len())
-            .max()
-            .unwrap_or(10) as u16
-            + 4; // +4 for padding and borders
-
-        let dropdown_items: Vec<ListItem> = StatusFilter::all()
-            .iter()
-            .map(|filter| {
-                let style = if *filter == app.cfn_state.status_filter {
-                    Style::default().fg(Color::Yellow).bold()
-                } else {
-                    Style::default()
-                };
-                ListItem::new(format!(" {} ", filter.name())).style(style)
-            })
-            .collect();
-
-        let dropdown_height = dropdown_items.len() as u16 + 2;
-
-        // Calculate position based on actual control positions
+            .position(|f| *f == app.cfn_state.status_filter)
+            .unwrap_or(0);
         let view_nested_width = " ☑ View nested ".len() as u16;
-        let pagination_width = pagination.len() as u16;
-
-        let dropdown_width = max_filter_width;
-        let dropdown_x = chunks[0]
-            .x
-            .saturating_add(chunks[0].width)
-            .saturating_sub(view_nested_width + 3 + pagination_width + 3 + dropdown_width);
-
-        let dropdown_area = Rect {
-            x: dropdown_x,
-            y: chunks[0].y + chunks[0].height,
-            width: dropdown_width,
-            height: dropdown_height.min(10),
-        };
-
-        frame.render_widget(
-            List::new(dropdown_items)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Yellow)),
-                )
-                .style(Style::default().bg(Color::Black)),
-            dropdown_area,
+        let controls_after = view_nested_width + 3 + pagination.len() as u16 + 3;
+        render_dropdown(
+            frame,
+            &filter_names,
+            selected_idx,
+            chunks[0],
+            controls_after,
         );
     }
 }

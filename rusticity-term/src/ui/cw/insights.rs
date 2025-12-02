@@ -63,20 +63,16 @@ pub enum QueryLanguage {
     SQL,
 }
 
+impl crate::common::CyclicEnum for QueryLanguage {
+    const ALL: &'static [Self] = &[Self::LogsInsightsQL, Self::PPL, Self::SQL];
+}
+
 impl QueryLanguage {
     pub fn name(&self) -> &'static str {
         match self {
             QueryLanguage::LogsInsightsQL => "Logs Insights QL",
             QueryLanguage::PPL => "PPL",
             QueryLanguage::SQL => "SQL",
-        }
-    }
-
-    pub fn next(&self) -> QueryLanguage {
-        match self {
-            QueryLanguage::LogsInsightsQL => QueryLanguage::PPL,
-            QueryLanguage::PPL => QueryLanguage::SQL,
-            QueryLanguage::SQL => QueryLanguage::LogsInsightsQL,
         }
     }
 }
@@ -103,6 +99,10 @@ pub enum TimeUnit {
     Weeks,
 }
 
+impl crate::common::CyclicEnum for TimeUnit {
+    const ALL: &'static [Self] = &[Self::Minutes, Self::Hours, Self::Days, Self::Weeks];
+}
+
 impl TimeUnit {
     pub fn name(&self) -> &'static str {
         match self {
@@ -110,15 +110,6 @@ impl TimeUnit {
             TimeUnit::Hours => "hours",
             TimeUnit::Days => "days",
             TimeUnit::Weeks => "weeks",
-        }
-    }
-
-    pub fn next(&self) -> TimeUnit {
-        match self {
-            TimeUnit::Minutes => TimeUnit::Hours,
-            TimeUnit::Hours => TimeUnit::Days,
-            TimeUnit::Days => TimeUnit::Weeks,
-            TimeUnit::Weeks => TimeUnit::Minutes,
         }
     }
 }

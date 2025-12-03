@@ -673,7 +673,6 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = if show_filter {
         crate::ui::vertical(
             [
-                Constraint::Length(1), // Parent prefix
                 Constraint::Length(1), // Tabs
                 Constraint::Length(3), // Filter (1 line + borders)
                 Constraint::Min(0),    // Content
@@ -683,7 +682,6 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         crate::ui::vertical(
             [
-                Constraint::Length(1), // Parent prefix
                 Constraint::Length(1), // Tabs
                 Constraint::Min(0),    // Content (no filter)
             ],
@@ -692,31 +690,9 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     // Update visible rows based on actual content area
-    let content_area_idx = if show_filter { 3 } else { 2 };
+    let content_area_idx = if show_filter { 2 } else { 1 };
     let visible_rows = chunks[content_area_idx].height.saturating_sub(3) as usize;
     app.s3_state.object_visible_rows.set(visible_rows);
-
-    // Parent prefix (last part only)
-    let parent_text = if let Some(last_prefix) = app.s3_state.prefix_stack.last() {
-        last_prefix
-            .trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .unwrap_or(last_prefix)
-            .to_string()
-            + "/"
-    } else if let Some(bucket) = &app.s3_state.current_bucket {
-        bucket.clone()
-    } else {
-        String::new()
-    };
-    let parent = Paragraph::new(parent_text).style(
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(Clear, chunks[0]);
-    frame.render_widget(parent, chunks[0]);
 
     // Tabs
     let available_tabs = if app.s3_state.prefix_stack.is_empty() {
@@ -732,8 +708,8 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
         .map(|tab| (tab.name(), *tab))
         .collect();
 
-    frame.render_widget(Clear, chunks[1]);
-    render_tabs(frame, chunks[1], &tab_tuples, &app.s3_state.object_tab);
+    frame.render_widget(Clear, chunks[0]);
+    render_tabs(frame, chunks[0], &tab_tuples, &app.s3_state.object_tab);
 
     // Filter (only for Objects tab)
     if app.s3_state.object_tab == ObjectTab::Objects {
@@ -754,11 +730,11 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
             ]
         };
         let filter = filter_area(filter_text, app.mode == Mode::FilterInput);
-        frame.render_widget(filter, chunks[2]);
+        frame.render_widget(filter, chunks[1]);
     }
 
     // Render content based on selected tab
-    let content_idx = if show_filter { 3 } else { 2 };
+    let content_idx = if show_filter { 2 } else { 1 };
     match app.s3_state.object_tab {
         ObjectTab::Objects => render_objects_table(frame, app, chunks[content_idx]),
         ObjectTab::Properties => render_bucket_properties(frame, app, chunks[content_idx]),

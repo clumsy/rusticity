@@ -721,6 +721,11 @@ impl App {
             Action::CloseMenu => {
                 self.mode = Mode::Normal;
                 self.service_picker.filter.clear();
+                // Reset selection when closing filter to avoid out-of-bounds
+                if self.current_service == Service::S3Buckets {
+                    self.s3_state.selected_row = 0;
+                    self.s3_state.selected_object = 0;
+                }
             }
             Action::NextTab => {
                 if !self.tabs.is_empty() {
@@ -13941,5 +13946,50 @@ mod sqs_tests {
         app.handle_action(Action::ApplyFilter);
         assert_eq!(app.sqs_state.subscription_region_filter, "us-west-1");
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_s3_object_filter_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::S3Buckets;
+        app.s3_state.current_bucket = Some("test-bucket".to_string());
+        app.s3_state.selected_row = 5;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::CloseMenu);
+
+        assert_eq!(app.s3_state.selected_row, 0);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_s3_bucket_filter_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::S3Buckets;
+        app.s3_state.selected_row = 10;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::CloseMenu);
+
+        assert_eq!(app.s3_state.selected_row, 0);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_s3_selection_stays_in_bounds() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::S3Buckets;
+        app.s3_state.selected_row = 0;
+        app.s3_state.selected_object = 0;
+
+        // Simulate going up from row 0
+        app.prev_item();
+
+        // Should stay at 0, not wrap to negative
+        assert_eq!(app.s3_state.selected_row, 0);
+        assert_eq!(app.s3_state.selected_object, 0);
     }
 }

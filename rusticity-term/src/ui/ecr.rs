@@ -5,7 +5,7 @@ use crate::ecr::image::{self, Image as EcrImage};
 use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::ui::render_inner_tab_spans;
+use crate::ui::render_tabs;
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -46,6 +46,15 @@ pub enum Tab {
 
 impl CyclicEnum for Tab {
     const ALL: &'static [Self] = &[Self::Private, Self::Public];
+}
+
+impl Tab {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Tab::Private => "Private",
+            Tab::Public => "Public",
+        }
+    }
 }
 
 pub fn filtered_ecr_repositories(app: &App) -> Vec<&EcrRepository> {
@@ -107,12 +116,8 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Tabs
-    let tabs = [
-        ("Private", app.ecr_state.tab == Tab::Private),
-        ("Public", app.ecr_state.tab == Tab::Public),
-    ];
-    let tabs_spans = render_inner_tab_spans(&tabs);
-    frame.render_widget(Paragraph::new(Line::from(tabs_spans)), chunks[0]);
+    let tabs: Vec<(&str, Tab)> = Tab::ALL.iter().map(|tab| (tab.name(), *tab)).collect();
+    render_tabs(frame, chunks[0], &tabs, &app.ecr_state.tab);
 
     // Calculate pagination
     let filtered_count: usize = app

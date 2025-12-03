@@ -9,7 +9,8 @@ use crate::table::TableState;
 use crate::ui::table::Column;
 use crate::ui::{
     active_border, filter_area, get_cursor, labeled_field, render_json_highlighted,
-    render_last_accessed_section, render_permissions_section, render_tags_section, vertical,
+    render_last_accessed_section, render_permissions_section, render_tabs, render_tags_section,
+    vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -348,16 +349,9 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         }
 
         // Tabs
-        crate::ui::render_tabs(
-            frame,
-            chunks[2],
-            &[
-                ("Users", GroupTab::Users),
-                ("Permissions", GroupTab::Permissions),
-                ("Access Advisor", GroupTab::AccessAdvisor),
-            ],
-            &app.iam_state.group_tab,
-        );
+        let tabs: Vec<(&str, GroupTab)> =
+            GroupTab::ALL.iter().map(|tab| (tab.name(), *tab)).collect();
+        render_tabs(frame, chunks[2], &tabs, &app.iam_state.group_tab);
 
         // Content area based on selected tab
         match app.iam_state.group_tab {
@@ -770,19 +764,13 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tabs
-    crate::ui::render_tabs(
+    render_tabs(
         frame,
         chunks[2],
-        &[
-            (RoleTab::Permissions.name(), RoleTab::Permissions),
-            (
-                RoleTab::TrustRelationships.name(),
-                RoleTab::TrustRelationships,
-            ),
-            (RoleTab::Tags.name(), RoleTab::Tags),
-            (RoleTab::LastAccessed.name(), RoleTab::LastAccessed),
-            (RoleTab::RevokeSessions.name(), RoleTab::RevokeSessions),
-        ],
+        &RoleTab::ALL
+            .iter()
+            .map(|tab| (tab.name(), *tab))
+            .collect::<Vec<_>>(),
         &app.iam_state.role_tab,
     );
 
@@ -951,16 +939,13 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tabs
-    crate::ui::render_tabs(
+    render_tabs(
         frame,
         chunks[2],
-        &[
-            ("Permissions", UserTab::Permissions),
-            ("Groups", UserTab::Groups),
-            ("Tags", UserTab::Tags),
-            ("Security Credentials", UserTab::SecurityCredentials),
-            ("Last Accessed", UserTab::LastAccessed),
-        ],
+        &UserTab::ALL
+            .iter()
+            .map(|tab| (tab.name(), *tab))
+            .collect::<Vec<_>>(),
         &app.iam_state.user_tab,
     );
 

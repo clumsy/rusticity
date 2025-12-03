@@ -4,9 +4,7 @@ use crate::common::{format_bytes, format_iso_timestamp, UTC_TIMESTAMP_WIDTH};
 use crate::keymap::Mode;
 use crate::s3::{Bucket as S3Bucket, BucketColumn, Object as S3Object};
 use crate::table::TableState;
-use crate::ui::{
-    active_border, filter_area, get_cursor, red_text, render_inner_tab_spans, render_tabs,
-};
+use crate::ui::{active_border, filter_area, get_cursor, red_text, render_tabs};
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 
@@ -130,6 +128,19 @@ impl State {
 pub enum BucketType {
     GeneralPurpose,
     Directory,
+}
+
+impl CyclicEnum for BucketType {
+    const ALL: &'static [Self] = &[Self::GeneralPurpose, Self::Directory];
+}
+
+impl BucketType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            BucketType::GeneralPurpose => "General purpose buckets (All AWS Regions)",
+            BucketType::Directory => "Directory buckets",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -263,19 +274,11 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     app.s3_state.bucket_visible_rows.set(visible_rows);
 
     // Tabs
-    let tabs = [
-        (
-            "General purpose buckets (All AWS Regions)",
-            app.s3_state.bucket_type == BucketType::GeneralPurpose,
-        ),
-        (
-            "Directory buckets",
-            app.s3_state.bucket_type == BucketType::Directory,
-        ),
-    ];
-    let tabs_spans = render_inner_tab_spans(&tabs);
-    let tabs_widget = Paragraph::new(Line::from(tabs_spans));
-    frame.render_widget(tabs_widget, chunks[0]);
+    let tabs: Vec<(&str, BucketType)> = BucketType::ALL
+        .iter()
+        .map(|tab| (tab.name(), *tab))
+        .collect();
+    render_tabs(frame, chunks[0], &tabs, &app.s3_state.bucket_type);
 
     // Filter pane
     let cursor = get_cursor(app.mode == Mode::FilterInput);

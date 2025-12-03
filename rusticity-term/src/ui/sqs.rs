@@ -1,5 +1,5 @@
 use crate::aws::Region;
-use crate::common::{render_dropdown, InputFocus};
+use crate::common::{render_dropdown, render_vertical_scrollbar, InputFocus};
 use crate::keymap::Mode::FilterInput;
 use crate::sqs::pipe::{Column as PipeColumn, EventBridgePipe};
 use crate::sqs::queue::{Column as SqsColumn, Queue};
@@ -10,7 +10,7 @@ use crate::table::TableState;
 use crate::ui::filter::{
     render_filter_bar, render_simple_filter, FilterConfig, FilterControl, SimpleFilterConfig,
 };
-use crate::ui::labeled_field;
+use crate::ui::{labeled_field, render_tabs};
 
 pub const FILTER_CONTROLS: &[InputFocus] = &[InputFocus::Filter, InputFocus::Pagination];
 pub const SUBSCRIPTION_REGION: InputFocus = InputFocus::Dropdown("SubscriptionRegion");
@@ -23,32 +23,41 @@ pub const SUBSCRIPTION_FILTER_CONTROLS: &[InputFocus] = &[
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QueueDetailTab {
     QueuePolicies,
+    Monitoring,
     SnsSubscriptions,
     LambdaTriggers,
     EventBridgePipes,
-    Tagging,
     DeadLetterQueue,
+    Tagging,
+    Encryption,
+    DeadLetterQueueRedriveTasks,
 }
 
 impl QueueDetailTab {
     pub fn all() -> Vec<QueueDetailTab> {
         vec![
             QueueDetailTab::QueuePolicies,
+            QueueDetailTab::Monitoring,
             QueueDetailTab::SnsSubscriptions,
             QueueDetailTab::LambdaTriggers,
             QueueDetailTab::EventBridgePipes,
-            QueueDetailTab::Tagging,
             QueueDetailTab::DeadLetterQueue,
+            QueueDetailTab::Tagging,
+            QueueDetailTab::Encryption,
+            QueueDetailTab::DeadLetterQueueRedriveTasks,
         ]
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &'static str {
         match self {
             QueueDetailTab::QueuePolicies => "Queue policies",
+            QueueDetailTab::Monitoring => "Monitoring",
             QueueDetailTab::SnsSubscriptions => "SNS subscriptions",
             QueueDetailTab::LambdaTriggers => "Lambda triggers",
             QueueDetailTab::EventBridgePipes => "EventBridge Pipes",
             QueueDetailTab::Tagging => "Tagging",
+            QueueDetailTab::Encryption => "Encryption",
+            QueueDetailTab::DeadLetterQueueRedriveTasks => "Dead-letter queue redrive tasks",
             QueueDetailTab::DeadLetterQueue => "Dead-letter queue",
         }
     }
@@ -57,11 +66,14 @@ impl QueueDetailTab {
 impl crate::common::CyclicEnum for QueueDetailTab {
     const ALL: &'static [Self] = &[
         QueueDetailTab::QueuePolicies,
+        QueueDetailTab::Monitoring,
         QueueDetailTab::SnsSubscriptions,
         QueueDetailTab::LambdaTriggers,
         QueueDetailTab::EventBridgePipes,
-        QueueDetailTab::Tagging,
         QueueDetailTab::DeadLetterQueue,
+        QueueDetailTab::Tagging,
+        QueueDetailTab::Encryption,
+        QueueDetailTab::DeadLetterQueueRedriveTasks,
     ];
 }
 
@@ -87,6 +99,17 @@ pub struct State {
     pub detail_tab: QueueDetailTab,
     pub policy_scroll: usize,
     pub policy_document: String,
+    pub metric_data: Vec<(i64, f64)>, // (timestamp, value) for ApproximateAgeOfOldestMessage
+    pub metric_data_delayed: Vec<(i64, f64)>, // (timestamp, value) for ApproximateNumberOfMessagesDelayed
+    pub metric_data_not_visible: Vec<(i64, f64)>, // (timestamp, value) for ApproximateNumberOfMessagesNotVisible
+    pub metric_data_visible: Vec<(i64, f64)>, // (timestamp, value) for ApproximateNumberOfMessagesVisible
+    pub metric_data_empty_receives: Vec<(i64, f64)>, // (timestamp, value) for NumberOfEmptyReceives
+    pub metric_data_messages_deleted: Vec<(i64, f64)>, // (timestamp, value) for NumberOfMessagesDeleted
+    pub metric_data_messages_received: Vec<(i64, f64)>, // (timestamp, value) for NumberOfMessagesReceived
+    pub metric_data_messages_sent: Vec<(i64, f64)>, // (timestamp, value) for NumberOfMessagesSent
+    pub metric_data_sent_message_size: Vec<(i64, f64)>, // (timestamp, value) for SentMessageSize
+    pub metrics_loading: bool,
+    pub monitoring_scroll: usize,
 }
 
 impl Default for State {
@@ -145,6 +168,17 @@ impl State {
   ]
 }"#
             .to_string(),
+            metric_data: Vec::new(),
+            metric_data_delayed: Vec::new(),
+            metric_data_not_visible: Vec::new(),
+            metric_data_visible: Vec::new(),
+            metric_data_empty_receives: Vec::new(),
+            metric_data_messages_deleted: Vec::new(),
+            metric_data_messages_received: Vec::new(),
+            metric_data_messages_sent: Vec::new(),
+            metric_data_sent_message_size: Vec::new(),
+            metrics_loading: false,
+            monitoring_scroll: 0,
         }
     }
 }
@@ -279,6 +313,11 @@ pub async fn load_sqs_queues(app: &mut crate::App) -> anyhow::Result<()> {
             messages_delayed: q.messages_delayed,
             redrive_allow_policy: q.redrive_allow_policy,
             redrive_policy: q.redrive_policy,
+            redrive_task_id: q.redrive_task_id,
+            redrive_task_start_time: q.redrive_task_start_time,
+            redrive_task_status: q.redrive_task_status,
+            redrive_task_percent: q.redrive_task_percent,
+            redrive_task_destination: q.redrive_task_destination,
         })
         .collect();
     Ok(())
@@ -303,6 +342,55 @@ pub async fn load_lambda_triggers(app: &mut crate::App, queue_url: &str) -> anyh
         .triggers
         .items
         .sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
+
+    Ok(())
+}
+
+pub async fn load_metrics(app: &mut crate::App, queue_name: &str) -> anyhow::Result<()> {
+    let metrics = app.sqs_client.get_queue_metrics(queue_name).await?;
+    app.sqs_state.metric_data = metrics;
+
+    let delayed_metrics = app.sqs_client.get_queue_delayed_metrics(queue_name).await?;
+    app.sqs_state.metric_data_delayed = delayed_metrics;
+
+    let not_visible_metrics = app
+        .sqs_client
+        .get_queue_not_visible_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_not_visible = not_visible_metrics;
+
+    let visible_metrics = app.sqs_client.get_queue_visible_metrics(queue_name).await?;
+    app.sqs_state.metric_data_visible = visible_metrics;
+
+    let empty_receives_metrics = app
+        .sqs_client
+        .get_queue_empty_receives_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_empty_receives = empty_receives_metrics;
+
+    let messages_deleted_metrics = app
+        .sqs_client
+        .get_queue_messages_deleted_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_messages_deleted = messages_deleted_metrics;
+
+    let messages_received_metrics = app
+        .sqs_client
+        .get_queue_messages_received_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_messages_received = messages_received_metrics;
+
+    let messages_sent_metrics = app
+        .sqs_client
+        .get_queue_messages_sent_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_messages_sent = messages_sent_metrics;
+
+    let sent_message_size_metrics = app
+        .sqs_client
+        .get_queue_sent_message_size_metrics(queue_name)
+        .await?;
+    app.sqs_state.metric_data_sent_message_size = sent_message_size_metrics;
 
     Ok(())
 }
@@ -404,24 +492,21 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &crate::App, area: ratat
     }
 
     // Tabs
-    crate::ui::render_tabs(
-        frame,
-        chunks[2],
-        &[
-            ("Queue policies", QueueDetailTab::QueuePolicies),
-            ("SNS subscriptions", QueueDetailTab::SnsSubscriptions),
-            ("Lambda triggers", QueueDetailTab::LambdaTriggers),
-            ("EventBridge Pipes", QueueDetailTab::EventBridgePipes),
-            ("Tagging", QueueDetailTab::Tagging),
-            ("Dead-letter queue", QueueDetailTab::DeadLetterQueue),
-        ],
-        &app.sqs_state.detail_tab,
-    );
+    // Tabs - generated from QueueDetailTab::all()
+    let tabs: Vec<(&str, QueueDetailTab)> = QueueDetailTab::all()
+        .into_iter()
+        .map(|tab| (tab.name(), tab))
+        .collect();
+
+    render_tabs(frame, chunks[2], &tabs, &app.sqs_state.detail_tab);
 
     // Tab content
     match app.sqs_state.detail_tab {
         QueueDetailTab::QueuePolicies => {
             render_queue_policies_tab(frame, app, chunks[3]);
+        }
+        QueueDetailTab::Monitoring => {
+            render_monitoring_tab(frame, app, chunks[3]);
         }
         QueueDetailTab::SnsSubscriptions => {
             render_subscriptions_tab(frame, app, chunks[3]);
@@ -432,11 +517,17 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &crate::App, area: ratat
         QueueDetailTab::EventBridgePipes => {
             render_eventbridge_pipes_tab(frame, app, chunks[3]);
         }
+        QueueDetailTab::DeadLetterQueue => {
+            render_dead_letter_queue_tab(frame, app, chunks[3]);
+        }
         QueueDetailTab::Tagging => {
             render_tags_tab(frame, app, chunks[3]);
         }
-        QueueDetailTab::DeadLetterQueue => {
-            render_dead_letter_queue_tab(frame, app, chunks[3]);
+        QueueDetailTab::Encryption => {
+            render_encryption_tab(frame, app, chunks[3]);
+        }
+        QueueDetailTab::DeadLetterQueueRedriveTasks => {
+            render_dlq_redrive_tasks_tab(frame, app, chunks[3]);
         }
     }
 }
@@ -560,6 +651,1077 @@ fn render_queue_policies_tab(
         app.sqs_state.policy_scroll,
         " Access policy ",
     );
+}
+
+fn render_monitoring_tab(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+
+    let available_height = area.height as usize;
+
+    // Determine which page we're on (0-5)
+    let current_page = app.sqs_state.monitoring_scroll;
+
+    if current_page == 0 {
+        // Page 0: Show first chart, and second chart if 10+ lines remain
+        let chart1_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_age_chart(frame, app, chart1_rect);
+
+        // If 14+ lines remain after first chart, show second chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart2_height = remaining.min(20);
+            let chart2_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart2_height as u16,
+            };
+            render_delayed_chart(frame, app, chart2_rect);
+        }
+    } else if current_page == 1 {
+        // Page 1: Show second chart, and third chart if 14+ lines remain
+        let chart2_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_delayed_chart(frame, app, chart2_rect);
+
+        // If 14+ lines remain after second chart, show third chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart3_height = remaining.min(20);
+            let chart3_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart3_height as u16,
+            };
+            render_not_visible_chart(frame, app, chart3_rect);
+        }
+    } else if current_page == 2 {
+        // Page 2: Show third chart, and fourth chart if 14+ lines remain
+        let chart3_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_not_visible_chart(frame, app, chart3_rect);
+
+        // If 14+ lines remain after third chart, show fourth chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart4_height = remaining.min(20);
+            let chart4_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart4_height as u16,
+            };
+            render_visible_chart(frame, app, chart4_rect);
+        }
+    } else if current_page == 3 {
+        // Page 3: Show fourth chart, and fifth chart if 14+ lines remain
+        let chart4_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_visible_chart(frame, app, chart4_rect);
+
+        // If 14+ lines remain after fourth chart, show fifth chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart5_height = remaining.min(20);
+            let chart5_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart5_height as u16,
+            };
+            render_empty_receives_chart(frame, app, chart5_rect);
+        }
+    } else if current_page == 4 {
+        // Page 4: Show fifth chart, and sixth chart if 14+ lines remain
+        let chart5_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_empty_receives_chart(frame, app, chart5_rect);
+
+        // If 14+ lines remain after fifth chart, show sixth chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart6_height = remaining.min(20);
+            let chart6_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart6_height as u16,
+            };
+            render_messages_deleted_chart(frame, app, chart6_rect);
+        }
+    } else if current_page == 5 {
+        // Page 5: Show sixth chart, and seventh chart if 14+ lines remain
+        let chart6_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_messages_deleted_chart(frame, app, chart6_rect);
+
+        // If 14+ lines remain after sixth chart, show seventh chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart7_height = remaining.min(20);
+            let chart7_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart7_height as u16,
+            };
+            render_messages_received_chart(frame, app, chart7_rect);
+        }
+    } else if current_page == 6 {
+        // Page 6: Show seventh chart, and eighth chart if 14+ lines remain
+        let chart7_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_messages_received_chart(frame, app, chart7_rect);
+
+        // If 14+ lines remain after seventh chart, show eighth chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart8_height = remaining.min(20);
+            let chart8_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart8_height as u16,
+            };
+            render_messages_sent_chart(frame, app, chart8_rect);
+        }
+    } else if current_page == 7 {
+        // Page 7: Show eighth chart, and ninth chart if 14+ lines remain
+        let chart8_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_messages_sent_chart(frame, app, chart8_rect);
+
+        // If 14+ lines remain after eighth chart, show ninth chart
+        let remaining = available_height.saturating_sub(20);
+        if remaining >= 14 {
+            let chart9_height = remaining.min(20);
+            let chart9_rect = Rect {
+                x: area.x,
+                y: area.y + 20,
+                width: area.width,
+                height: chart9_height as u16,
+            };
+            render_sent_message_size_chart(frame, app, chart9_rect);
+        }
+    } else if current_page == 8 {
+        // Page 8: Show ninth chart
+        let chart9_rect = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 20.min(available_height as u16),
+        };
+        render_sent_message_size_chart(frame, app, chart9_rect);
+    }
+
+    // Always show scrollbar
+    let total_charts = 9;
+    let total_height = total_charts * 20;
+    let scroll_offset = current_page * 20;
+    render_vertical_scrollbar(frame, area, total_height, scroll_offset);
+}
+
+fn render_age_chart(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Approximate Age Of Oldest Message ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    // Convert metric data to chart points
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    // Calculate bounds
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0); // Use at least 1 for better visualization
+
+    let dataset = Dataset::default()
+        .name("ApproximateAgeOfOldestMessage")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    // X-axis with HH:MM labels every 30 minutes
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800; // 30 minutes in seconds
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    // Y-axis with 0.5 step labels
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let step = 0.5;
+        let max = (max_y * 1.1).ceil();
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Seconds")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_delayed_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Approximate Number Of Messages Delayed ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_delayed.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    // Convert metric data to chart points
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_delayed
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    // Calculate bounds
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("ApproximateNumberOfMessagesDelayed")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    // X-axis with HH:MM labels every 30 minutes
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    // Y-axis with 0.5 step labels
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let step = 0.5;
+        let max = (max_y * 1.1).ceil();
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_not_visible_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Approximate Number Of Messages Not Visible ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_not_visible.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    // Convert metric data to chart points
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_not_visible
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    // Calculate bounds
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("ApproximateNumberOfMessagesNotVisible")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    // X-axis with HH:MM labels every 30 minutes
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    // Y-axis with 0.5 step labels
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let step = 0.5;
+        let max = (max_y * 1.1).ceil();
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_visible_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Approximate Number Of Messages Visible ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_visible.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_visible
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("ApproximateNumberOfMessagesVisible")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let step = 0.5;
+        let max = (max_y * 1.1).ceil();
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_empty_receives_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Number Of Empty Receives ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_empty_receives.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_empty_receives
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("NumberOfEmptyReceives")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let max = max_y * 1.1;
+        let step = if max <= 10.0 {
+            1.0
+        } else {
+            (max / 10.0).ceil()
+        };
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_messages_deleted_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Number Of Messages Deleted ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_messages_deleted.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_messages_deleted
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("NumberOfMessagesDeleted")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let max = max_y * 1.1;
+        let step = if max <= 10.0 {
+            1.0
+        } else {
+            (max / 10.0).ceil()
+        };
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_messages_received_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Number Of Messages Received ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_messages_received.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_messages_received
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("NumberOfMessagesReceived")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let max = max_y * 1.1;
+        let step = if max <= 10.0 {
+            1.0
+        } else {
+            (max / 10.0).ceil()
+        };
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_messages_sent_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Number Of Messages Sent ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_messages_sent.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_messages_sent
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("NumberOfMessagesSent")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let max = max_y * 1.1;
+        let step = if max <= 10.0 {
+            1.0
+        } else {
+            (max / 10.0).ceil()
+        };
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Count")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+
+fn render_sent_message_size_chart(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::prelude::*;
+    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
+
+    let block = Block::default()
+        .title(" Sent Message Size ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Gray));
+
+    if app.sqs_state.metric_data_sent_message_size.is_empty() {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let data: Vec<(f64, f64)> = app
+        .sqs_state
+        .metric_data_sent_message_size
+        .iter()
+        .map(|(timestamp, value)| (*timestamp as f64, *value))
+        .collect();
+
+    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = data
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = data
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    let dataset = Dataset::default()
+        .name("SentMessageSize")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(Color::Cyan))
+        .data(&data);
+
+    let x_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let step = 1800;
+        let mut current = (min_x as i64 / step) * step;
+        while current <= max_x as i64 {
+            let time = chrono::DateTime::from_timestamp(current, 0)
+                .unwrap_or_default()
+                .format("%H:%M")
+                .to_string();
+            labels.push(ratatui::text::Span::raw(time));
+            current += step;
+        }
+        labels
+    };
+
+    let x_axis = Axis::default()
+        .style(Style::default().fg(Color::Gray))
+        .bounds([min_x, max_x])
+        .labels(x_labels);
+
+    let y_labels: Vec<ratatui::text::Span> = {
+        let mut labels = Vec::new();
+        let mut current = 0.0;
+        let max = max_y * 1.1;
+        let step = if max <= 10.0 {
+            1.0
+        } else {
+            (max / 10.0).ceil()
+        };
+        while current <= max {
+            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
+            current += step;
+        }
+        labels
+    };
+
+    let y_axis = Axis::default()
+        .title("Bytes")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([0.0, max_y * 1.1])
+        .labels(y_labels);
+
+    let chart = Chart::new(vec![dataset])
+        .block(block)
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
 }
 
 fn render_lambda_triggers_tab(
@@ -954,6 +2116,78 @@ fn render_dead_letter_queue_tab(
     }
 }
 
+fn render_encryption_tab(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+    let queue = app
+        .sqs_state
+        .queues
+        .items
+        .iter()
+        .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
+
+    let block = Block::default()
+        .title(" Encryption ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(crate::ui::active_border());
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(q) = queue {
+        let encryption_text = if q.encryption.is_empty() || q.encryption == "-" {
+            "Server-side encryption is not enabled".to_string()
+        } else {
+            format!("Server-side encryption is managed by {}", q.encryption)
+        };
+
+        let paragraph = Paragraph::new(encryption_text);
+        frame.render_widget(paragraph, inner);
+    }
+}
+
+fn render_dlq_redrive_tasks_tab(
+    frame: &mut ratatui::Frame,
+    app: &crate::App,
+    area: ratatui::prelude::Rect,
+) {
+    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+    let queue = app
+        .sqs_state
+        .queues
+        .items
+        .iter()
+        .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
+
+    let block = Block::default()
+        .title(" Dead-letter queue redrive status ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(crate::ui::active_border());
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(q) = queue {
+        let lines = vec![
+            labeled_field("Name", &q.redrive_task_id),
+            labeled_field("Date started", &q.redrive_task_start_time),
+            labeled_field("Percent processed", &q.redrive_task_percent),
+            labeled_field("Status", &q.redrive_task_status),
+            labeled_field("Redrive destination", &q.redrive_task_destination),
+        ];
+
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, inner);
+    }
+}
+
 fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
     use crate::common::SortDirection;
     use crate::keymap::Mode;
@@ -1074,6 +2308,11 @@ mod tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
             Queue {
                 name: "queue2".to_string(),
@@ -1097,6 +2336,11 @@ mod tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
         ];
 
@@ -1129,6 +2373,11 @@ mod tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
             Queue {
                 name: "dev-orders".to_string(),
@@ -1152,6 +2401,11 @@ mod tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
         ];
 
@@ -1184,6 +2438,11 @@ mod tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         }];
 
         let filtered = filtered_queues(&queues, "my");
@@ -1247,40 +2506,58 @@ mod tests {
     #[test]
     fn test_queue_detail_tab_navigation() {
         let tab = QueueDetailTab::QueuePolicies;
+        assert_eq!(tab.next(), QueueDetailTab::Monitoring);
+        assert_eq!(tab.prev(), QueueDetailTab::DeadLetterQueueRedriveTasks);
+
+        let tab = QueueDetailTab::Monitoring;
         assert_eq!(tab.next(), QueueDetailTab::SnsSubscriptions);
-        assert_eq!(tab.prev(), QueueDetailTab::DeadLetterQueue);
+        assert_eq!(tab.prev(), QueueDetailTab::QueuePolicies);
 
         let tab = QueueDetailTab::SnsSubscriptions;
         assert_eq!(tab.next(), QueueDetailTab::LambdaTriggers);
-        assert_eq!(tab.prev(), QueueDetailTab::QueuePolicies);
+        assert_eq!(tab.prev(), QueueDetailTab::Monitoring);
 
         let tab = QueueDetailTab::LambdaTriggers;
         assert_eq!(tab.next(), QueueDetailTab::EventBridgePipes);
         assert_eq!(tab.prev(), QueueDetailTab::SnsSubscriptions);
 
         let tab = QueueDetailTab::EventBridgePipes;
-        assert_eq!(tab.next(), QueueDetailTab::Tagging);
+        assert_eq!(tab.next(), QueueDetailTab::DeadLetterQueue);
         assert_eq!(tab.prev(), QueueDetailTab::LambdaTriggers);
 
-        let tab = QueueDetailTab::Tagging;
-        assert_eq!(tab.next(), QueueDetailTab::DeadLetterQueue);
+        let tab = QueueDetailTab::DeadLetterQueue;
+        assert_eq!(tab.next(), QueueDetailTab::Tagging);
         assert_eq!(tab.prev(), QueueDetailTab::EventBridgePipes);
 
-        let tab = QueueDetailTab::DeadLetterQueue;
-        assert_eq!(tab.next(), QueueDetailTab::QueuePolicies);
+        let tab = QueueDetailTab::Tagging;
+        assert_eq!(tab.next(), QueueDetailTab::Encryption);
+        assert_eq!(tab.prev(), QueueDetailTab::DeadLetterQueue);
+
+        let tab = QueueDetailTab::Encryption;
+        assert_eq!(tab.next(), QueueDetailTab::DeadLetterQueueRedriveTasks);
         assert_eq!(tab.prev(), QueueDetailTab::Tagging);
+
+        let tab = QueueDetailTab::DeadLetterQueueRedriveTasks;
+        assert_eq!(tab.next(), QueueDetailTab::QueuePolicies);
+        assert_eq!(tab.prev(), QueueDetailTab::Encryption);
+
+        let tab = QueueDetailTab::QueuePolicies;
+        assert_eq!(tab.prev(), QueueDetailTab::DeadLetterQueueRedriveTasks);
     }
 
     #[test]
     fn test_queue_detail_tab_all() {
         let tabs = QueueDetailTab::all();
-        assert_eq!(tabs.len(), 6);
+        assert_eq!(tabs.len(), 9);
         assert_eq!(tabs[0], QueueDetailTab::QueuePolicies);
-        assert_eq!(tabs[1], QueueDetailTab::SnsSubscriptions);
-        assert_eq!(tabs[2], QueueDetailTab::LambdaTriggers);
-        assert_eq!(tabs[3], QueueDetailTab::EventBridgePipes);
-        assert_eq!(tabs[4], QueueDetailTab::Tagging);
+        assert_eq!(tabs[1], QueueDetailTab::Monitoring);
+        assert_eq!(tabs[2], QueueDetailTab::SnsSubscriptions);
+        assert_eq!(tabs[3], QueueDetailTab::LambdaTriggers);
+        assert_eq!(tabs[4], QueueDetailTab::EventBridgePipes);
         assert_eq!(tabs[5], QueueDetailTab::DeadLetterQueue);
+        assert_eq!(tabs[6], QueueDetailTab::Tagging);
+        assert_eq!(tabs[7], QueueDetailTab::Encryption);
+        assert_eq!(tabs[8], QueueDetailTab::DeadLetterQueueRedriveTasks);
     }
 
     #[test]
@@ -1551,6 +2828,114 @@ mod tests {
     }
 
     #[test]
+    fn test_monitoring_metric_data_with_values() {
+        let mut state = State::new();
+        // Mock obfuscated metric data
+        state.metric_data = vec![
+            (1700000000, 0.0),
+            (1700000060, 5.0),
+            (1700000120, 10.0),
+            (1700000180, 0.0),
+        ];
+        assert_eq!(state.metric_data.len(), 4);
+        assert_eq!(state.metric_data[0], (1700000000, 0.0));
+        assert_eq!(state.metric_data[1], (1700000060, 5.0));
+    }
+
+    #[test]
+    fn test_monitoring_all_metrics_initialized() {
+        let state = State::new();
+        assert!(state.metric_data.is_empty());
+        assert!(state.metric_data_delayed.is_empty());
+        assert!(state.metric_data_not_visible.is_empty());
+        assert!(state.metric_data_visible.is_empty());
+        assert!(state.metric_data_empty_receives.is_empty());
+        assert!(state.metric_data_messages_deleted.is_empty());
+        assert!(state.metric_data_messages_received.is_empty());
+        assert!(state.metric_data_messages_sent.is_empty());
+        assert!(state.metric_data_sent_message_size.is_empty());
+        assert_eq!(state.monitoring_scroll, 0);
+    }
+
+    #[test]
+    fn test_monitoring_scroll_pages() {
+        let mut state = State::new();
+        assert_eq!(state.monitoring_scroll, 0);
+
+        // Scroll to page 1
+        state.monitoring_scroll = 1;
+        assert_eq!(state.monitoring_scroll, 1);
+
+        // Scroll to page 2
+        state.monitoring_scroll = 2;
+        assert_eq!(state.monitoring_scroll, 2);
+    }
+
+    #[test]
+    fn test_monitoring_delayed_metrics() {
+        let mut state = State::new();
+        state.metric_data_delayed = vec![(1700000000, 1.0), (1700000060, 2.0)];
+        assert_eq!(state.metric_data_delayed.len(), 2);
+        assert_eq!(state.metric_data_delayed[0].1, 1.0);
+    }
+
+    #[test]
+    fn test_monitoring_not_visible_metrics() {
+        let mut state = State::new();
+        state.metric_data_not_visible = vec![(1700000000, 3.0), (1700000060, 4.0)];
+        assert_eq!(state.metric_data_not_visible.len(), 2);
+        assert_eq!(state.metric_data_not_visible[1].1, 4.0);
+    }
+
+    #[test]
+    fn test_monitoring_visible_metrics() {
+        let mut state = State::new();
+        state.metric_data_visible = vec![(1700000000, 5.0), (1700000060, 6.0)];
+        assert_eq!(state.metric_data_visible.len(), 2);
+        assert_eq!(state.metric_data_visible[0].1, 5.0);
+    }
+
+    #[test]
+    fn test_monitoring_empty_receives_metrics() {
+        let mut state = State::new();
+        state.metric_data_empty_receives = vec![(1700000000, 10.0), (1700000060, 15.0)];
+        assert_eq!(state.metric_data_empty_receives.len(), 2);
+        assert_eq!(state.metric_data_empty_receives[0].1, 10.0);
+    }
+
+    #[test]
+    fn test_monitoring_messages_deleted_metrics() {
+        let mut state = State::new();
+        state.metric_data_messages_deleted = vec![(1700000000, 20.0), (1700000060, 25.0)];
+        assert_eq!(state.metric_data_messages_deleted.len(), 2);
+        assert_eq!(state.metric_data_messages_deleted[0].1, 20.0);
+    }
+
+    #[test]
+    fn test_monitoring_messages_received_metrics() {
+        let mut state = State::new();
+        state.metric_data_messages_received = vec![(1700000000, 30.0), (1700000060, 35.0)];
+        assert_eq!(state.metric_data_messages_received.len(), 2);
+        assert_eq!(state.metric_data_messages_received[0].1, 30.0);
+    }
+
+    #[test]
+    fn test_monitoring_messages_sent_metrics() {
+        let mut state = State::new();
+        state.metric_data_messages_sent = vec![(1700000000, 40.0), (1700000060, 45.0)];
+        assert_eq!(state.metric_data_messages_sent.len(), 2);
+        assert_eq!(state.metric_data_messages_sent[0].1, 40.0);
+    }
+
+    #[test]
+    fn test_monitoring_sent_message_size_metrics() {
+        let mut state = State::new();
+        state.metric_data_sent_message_size = vec![(1700000000, 1024.0), (1700000060, 2048.0)];
+        assert_eq!(state.metric_data_sent_message_size.len(), 2);
+        assert_eq!(state.metric_data_sent_message_size[0].1, 1024.0);
+    }
+
+    #[test]
     fn test_trigger_expand_collapse() {
         let mut state = State::new();
 
@@ -1755,5 +3140,107 @@ mod tests {
     fn test_subscription_region_selected_index() {
         let state = State::new();
         assert_eq!(state.subscription_region_selected, 0);
+    }
+
+    #[test]
+    fn test_encryption_tab_in_all() {
+        let tabs = QueueDetailTab::all();
+        assert!(tabs.contains(&QueueDetailTab::Encryption));
+    }
+
+    #[test]
+    fn test_encryption_tab_name() {
+        assert_eq!(QueueDetailTab::Encryption.name(), "Encryption");
+    }
+
+    #[test]
+    fn test_encryption_tab_order() {
+        let tabs = QueueDetailTab::all();
+        let dlq_idx = tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::DeadLetterQueue)
+            .unwrap();
+        let tagging_idx = tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::Tagging)
+            .unwrap();
+        let encryption_idx = tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::Encryption)
+            .unwrap();
+
+        // Encryption should be after Tagging and DeadLetterQueue should be before Tagging
+        assert!(dlq_idx < tagging_idx);
+        assert!(encryption_idx > tagging_idx);
+    }
+
+    #[test]
+    fn test_dlq_redrive_tasks_tab_in_all() {
+        let tabs = QueueDetailTab::all();
+        assert!(tabs.contains(&QueueDetailTab::DeadLetterQueueRedriveTasks));
+    }
+
+    #[test]
+    fn test_dlq_redrive_tasks_tab_name() {
+        assert_eq!(
+            QueueDetailTab::DeadLetterQueueRedriveTasks.name(),
+            "Dead-letter queue redrive tasks"
+        );
+    }
+
+    #[test]
+    fn test_dlq_redrive_tasks_tab_order() {
+        let tabs = QueueDetailTab::all();
+        let encryption_idx = tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::Encryption)
+            .unwrap();
+        let redrive_idx = tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::DeadLetterQueueRedriveTasks)
+            .unwrap();
+
+        // DeadLetterQueueRedriveTasks should be after Encryption (last tab)
+        assert!(redrive_idx > encryption_idx);
+        assert_eq!(redrive_idx, tabs.len() - 1);
+    }
+
+    #[test]
+    fn test_tab_strip_matches_enum_order() {
+        // This test ensures the hardcoded tab strip in render_queue_detail matches QueueDetailTab::all()
+        let all_tabs = QueueDetailTab::all();
+        assert_eq!(all_tabs.len(), 9);
+
+        // Verify order matches
+        assert_eq!(all_tabs[0], QueueDetailTab::QueuePolicies);
+        assert_eq!(all_tabs[1], QueueDetailTab::Monitoring);
+        assert_eq!(all_tabs[2], QueueDetailTab::SnsSubscriptions);
+        assert_eq!(all_tabs[3], QueueDetailTab::LambdaTriggers);
+        assert_eq!(all_tabs[4], QueueDetailTab::EventBridgePipes);
+        assert_eq!(all_tabs[5], QueueDetailTab::DeadLetterQueue);
+        assert_eq!(all_tabs[6], QueueDetailTab::Tagging);
+        assert_eq!(all_tabs[7], QueueDetailTab::Encryption);
+        assert_eq!(all_tabs[8], QueueDetailTab::DeadLetterQueueRedriveTasks);
+    }
+
+    #[test]
+    fn test_monitoring_tab_in_all() {
+        let all_tabs = QueueDetailTab::all();
+        assert!(all_tabs.contains(&QueueDetailTab::Monitoring));
+    }
+
+    #[test]
+    fn test_monitoring_tab_name() {
+        assert_eq!(QueueDetailTab::Monitoring.name(), "Monitoring");
+    }
+
+    #[test]
+    fn test_monitoring_tab_order() {
+        let all_tabs = QueueDetailTab::all();
+        let monitoring_index = all_tabs
+            .iter()
+            .position(|t| *t == QueueDetailTab::Monitoring)
+            .unwrap();
+        assert_eq!(monitoring_index, 1); // Should be second, after QueuePolicies
     }
 }

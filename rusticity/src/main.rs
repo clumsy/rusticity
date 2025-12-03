@@ -161,6 +161,24 @@ async fn main() -> Result<()> {
                             app.sqs_state.triggers.loading = false;
                         }
 
+                        // Load metrics when viewing queue detail on monitoring tab
+                        if app.current_service == Service::SqsQueues
+                            && app.sqs_state.current_queue.is_some()
+                            && app.sqs_state.detail_tab == rusticity_term::ui::sqs::QueueDetailTab::Monitoring
+                            && app.sqs_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(queue) = app.sqs_state.queues.items.iter().find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref()) {
+                                let queue_name = queue.name.clone();
+                                if let Err(e) = rusticity_term::ui::sqs::load_metrics(&mut app, &queue_name).await {
+                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.sqs_state.metrics_loading = false;
+                        }
+
                         // Load EventBridge Pipes when tab is switched
                         if app.current_service == Service::SqsQueues
                             && app.sqs_state.current_queue.is_some()

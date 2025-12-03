@@ -93,17 +93,6 @@ pub fn render_tab_spans<'a>(tabs: &[(&'a str, bool)]) -> Vec<Span<'a>> {
     spans
 }
 
-pub fn render_inner_tab_spans<'a>(tabs: &[(&'a str, bool)]) -> Vec<Span<'a>> {
-    let mut spans = Vec::new();
-    for (i, (name, selected)) in tabs.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" ⋮ "));
-        }
-        spans.push(Span::styled(*name, tab_style(*selected)));
-    }
-    spans
-}
-
 use ratatui::{prelude::*, widgets::*};
 
 // Common UI constants
@@ -506,7 +495,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         let paragraph = Paragraph::new(message).alignment(Alignment::Center);
         frame.render_widget(paragraph, chunks[content_idx]);
         render_bottom_bar(frame, app, chunks[bottom_idx]);
-    } else if !app.service_selected && app.mode != Mode::SpaceMenu {
+    } else if !app.service_selected && app.mode == Mode::Normal {
         render_service_picker(frame, app, chunks[content_idx]);
         render_bottom_bar(frame, app, chunks[bottom_idx]);
     } else if app.service_selected {

@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{ColumnId, InputFocus};
+use crate::common::{ColumnId, CyclicEnum, InputFocus};
 use crate::cw::{Alarm, AlarmColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{render_table, Column, TableConfig};
@@ -58,6 +58,19 @@ impl State {
 pub enum AlarmTab {
     AllAlarms,
     InAlarm,
+}
+
+impl CyclicEnum for AlarmTab {
+    const ALL: &'static [Self] = &[Self::AllAlarms, Self::InAlarm];
+}
+
+impl AlarmTab {
+    pub fn name(&self) -> &'static str {
+        match self {
+            AlarmTab::AllAlarms => "All alarms",
+            AlarmTab::InAlarm => "In alarm",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -177,19 +190,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Tabs between panes (left-justified)
-    let tabs_data = [
-        (
-            "All alarms",
-            app.alarms_state.alarm_tab == crate::app::AlarmTab::AllAlarms,
-        ),
-        (
-            "In alarm",
-            app.alarms_state.alarm_tab == crate::app::AlarmTab::InAlarm,
-        ),
-    ];
-    let tab_spans = crate::ui::render_inner_tab_spans(&tabs_data);
-    let tabs = Paragraph::new(Line::from(tab_spans));
-    frame.render_widget(tabs, chunks[1]);
+    let tabs: Vec<(&str, AlarmTab)> = AlarmTab::ALL.iter().map(|tab| (tab.name(), *tab)).collect();
+    crate::ui::render_tabs(frame, chunks[1], &tabs, &app.alarms_state.alarm_tab);
 
     // Filter alarms
     let mut filtered_alarms: Vec<&Alarm> = match app.alarms_state.alarm_tab {

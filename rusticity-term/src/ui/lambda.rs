@@ -141,7 +141,7 @@ impl CyclicEnum for ApplicationDetailTab {
 }
 
 impl ApplicationDetailTab {
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Deployments => "Deployments",
@@ -356,12 +356,10 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tabs
-    let tabs = [
-        ("Code", DetailTab::Code),
-        ("Configuration", DetailTab::Configuration),
-        ("Aliases", DetailTab::Aliases),
-        ("Versions", DetailTab::Versions),
-    ];
+    let tabs: Vec<(&str, DetailTab)> = DetailTab::ALL
+        .iter()
+        .map(|tab| (tab.name(), *tab))
+        .collect();
 
     render_tabs(frame, chunks[1], &tabs, &app.lambda_state.detail_tab);
 
@@ -940,10 +938,10 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tabs - only Code and Configuration
-    let tabs = [
-        ("Code", DetailTab::Code),
-        ("Configuration", DetailTab::Configuration),
-    ];
+    let tabs: Vec<(&str, DetailTab)> = DetailTab::ALL
+        .iter()
+        .map(|tab| (tab.name(), *tab))
+        .collect();
 
     render_tabs(frame, chunks[1], &tabs, &app.lambda_state.detail_tab);
 
@@ -1439,10 +1437,10 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tabs
-    let tabs = [
-        ("Overview", ApplicationDetailTab::Overview),
-        ("Deployments", ApplicationDetailTab::Deployments),
-    ];
+    let tabs: Vec<(&str, ApplicationDetailTab)> = ApplicationDetailTab::ALL
+        .iter()
+        .map(|tab| (tab.name(), *tab))
+        .collect();
     render_tabs(
         frame,
         chunks[1],

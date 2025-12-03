@@ -971,6 +971,7 @@ impl App {
                             && (self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
                                 || self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
                                 || self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
+                                || self.sqs_state.detail_tab == SqsQueueDetailTab::Encryption
                                 || self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions)
                         {
                             self.sqs_state.input_focus == InputFocus::Pagination
@@ -1063,6 +1064,7 @@ impl App {
                         && (self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
                             || self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
                             || self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
+                            || self.sqs_state.detail_tab == SqsQueueDetailTab::Encryption
                             || self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions)
                     {
                         if self.sqs_state.input_focus == InputFocus::Filter {
@@ -1891,7 +1893,9 @@ impl App {
                     && self.sqs_state.current_queue.is_some()
                 {
                     self.sqs_state.detail_tab = self.sqs_state.detail_tab.next();
-                    if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
+                    if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
+                        self.sqs_state.metrics_loading = true;
+                    } else if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
                         self.sqs_state.triggers.loading = true;
                     } else if self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes {
                         self.sqs_state.pipes.loading = true;
@@ -1970,6 +1974,9 @@ impl App {
                     && self.sqs_state.current_queue.is_some()
                 {
                     self.sqs_state.detail_tab = self.sqs_state.detail_tab.prev();
+                    if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
+                        self.sqs_state.metrics_loading = true;
+                    }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -2023,6 +2030,11 @@ impl App {
                 }
             }
             Action::StartFilter => {
+                // Don't allow filter mode when no service is selected and no tabs open
+                if !self.service_selected && self.tabs.is_empty() {
+                    return;
+                }
+
                 if self.current_service == Service::CloudWatchInsights {
                     self.mode = Mode::InsightsInput;
                 } else if self.current_service == Service::CloudWatchAlarms {
@@ -2416,6 +2428,12 @@ impl App {
             Action::ScrollUp => {
                 if self.mode == Mode::ErrorModal {
                     self.error_scroll = self.error_scroll.saturating_sub(1);
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                {
+                    self.sqs_state.monitoring_scroll =
+                        self.sqs_state.monitoring_scroll.saturating_sub(5);
                 } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
                 } else if self.current_service == Service::IamRoles
@@ -2464,6 +2482,12 @@ impl App {
                         let max_scroll = lines.saturating_sub(1);
                         self.error_scroll = (self.error_scroll + 1).min(max_scroll);
                     }
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                {
+                    self.sqs_state.monitoring_scroll =
+                        (self.sqs_state.monitoring_scroll + 1).min(1);
                 } else if self.view_mode == ViewMode::PolicyView {
                     let lines = self.iam_state.policy_document.lines().count();
                     let max_scroll = lines.saturating_sub(1);
@@ -3488,6 +3512,12 @@ impl App {
                     let max_scroll = lines.saturating_sub(1);
                     self.sqs_state.policy_scroll =
                         (self.sqs_state.policy_scroll + 1).min(max_scroll);
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                {
+                    self.sqs_state.monitoring_scroll =
+                        (self.sqs_state.monitoring_scroll + 1).min(8);
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
                     if self.log_groups_state.event_scroll_offset >= max_scroll {
@@ -3894,6 +3924,12 @@ impl App {
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
                 {
                     self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(1);
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                {
+                    self.sqs_state.monitoring_scroll =
+                        self.sqs_state.monitoring_scroll.saturating_sub(1);
                 } else if self.view_mode == ViewMode::Events {
                     if self.log_groups_state.event_scroll_offset == 0 {
                         if self.log_groups_state.has_older_events {
@@ -4195,9 +4231,13 @@ impl App {
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
-            let lines = self.sqs_state.policy_document.lines().count();
-            let max_scroll = lines.saturating_sub(1);
-            self.sqs_state.policy_scroll = (self.sqs_state.policy_scroll + 10).min(max_scroll);
+            if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
+                self.sqs_state.monitoring_scroll = (self.sqs_state.monitoring_scroll + 1).min(8);
+            } else {
+                let lines = self.sqs_state.policy_document.lines().count();
+                let max_scroll = lines.saturating_sub(1);
+                self.sqs_state.policy_scroll = (self.sqs_state.policy_scroll + 10).min(max_scroll);
+            }
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -4479,7 +4519,12 @@ impl App {
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
-            self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(10);
+            if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
+                self.sqs_state.monitoring_scroll =
+                    self.sqs_state.monitoring_scroll.saturating_sub(1);
+            } else {
+                self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(10);
+            }
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -5825,7 +5870,10 @@ impl App {
                     );
                     if let Some(queue) = self.sqs_state.queues.get_selected(&filtered_queues) {
                         self.sqs_state.current_queue = Some(queue.url.clone());
-                        if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
+
+                        if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
+                            self.sqs_state.metrics_loading = true;
+                        } else if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
                             self.sqs_state.triggers.loading = true;
                         } else if self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes {
                             self.sqs_state.pipes.loading = true;
@@ -13349,6 +13397,11 @@ mod sqs_tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             })
             .collect();
 
@@ -13388,6 +13441,11 @@ mod sqs_tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             })
             .collect();
 
@@ -13425,6 +13483,11 @@ mod sqs_tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         }];
         app.sqs_state.queues.selected = 0;
 
@@ -13525,6 +13588,11 @@ mod sqs_tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         }];
         app.sqs_state.queues.selected = 0;
 
@@ -13851,6 +13919,11 @@ mod sqs_tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
             crate::sqs::Queue {
                 name: "queue2".to_string(),
@@ -13874,6 +13947,11 @@ mod sqs_tests {
                 messages_delayed: "0".to_string(),
                 redrive_allow_policy: "-".to_string(),
                 redrive_policy: "".to_string(),
+                redrive_task_id: "-".to_string(),
+                redrive_task_start_time: "-".to_string(),
+                redrive_task_status: "-".to_string(),
+                redrive_task_percent: "-".to_string(),
+                redrive_task_destination: "-".to_string(),
             },
         ];
 

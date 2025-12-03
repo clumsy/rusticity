@@ -24,6 +24,11 @@ pub struct SqsQueue {
     pub messages_delayed: String,
     pub redrive_allow_policy: String,
     pub redrive_policy: String,
+    pub redrive_task_id: String,
+    pub redrive_task_start_time: String,
+    pub redrive_task_status: String,
+    pub redrive_task_percent: String,
+    pub redrive_task_destination: String,
 }
 
 #[derive(Clone, Debug)]
@@ -132,10 +137,16 @@ impl SqsClient {
                         .get(&aws_sdk_sqs::types::QueueAttributeName::ApproximateNumberOfMessagesNotVisible)
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "0".to_string()),
-                    encryption: if attrs.contains_key(&aws_sdk_sqs::types::QueueAttributeName::KmsMasterKeyId) {
-                        "Enabled".to_string()
+                    encryption: if let Some(kms_key) = attrs.get(&aws_sdk_sqs::types::QueueAttributeName::KmsMasterKeyId) {
+                        if kms_key.is_empty() {
+                            "SSE-SQS".to_string()
+                        } else {
+                            "SSE-KMS".to_string()
+                        }
+                    } else if attrs.contains_key(&aws_sdk_sqs::types::QueueAttributeName::SqsManagedSseEnabled) {
+                        "SSE-SQS".to_string()
                     } else {
-                        "Disabled".to_string()
+                        "-".to_string()
                     },
                     content_based_deduplication: attrs
                         .get(&aws_sdk_sqs::types::QueueAttributeName::ContentBasedDeduplication)
@@ -209,12 +220,68 @@ impl SqsClient {
                         .get(&aws_sdk_sqs::types::QueueAttributeName::RedrivePolicy)
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "".to_string()),
+                    // TODO: Fetch actual redrive task data using ListMessageMoveTasksCommand
+                    redrive_task_id: "-".to_string(),
+                    redrive_task_start_time: "-".to_string(),
+                    redrive_task_status: "-".to_string(),
+                    redrive_task_percent: "-".to_string(),
+                    redrive_task_destination: "-".to_string(),
                 });
             }
         }
 
         queues.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(queues)
+    }
+
+    pub async fn list_message_move_tasks(
+        &self,
+        queue_url: &str,
+    ) -> Result<(String, String, String, String, String)> {
+        let client = self.config.sqs_client().await;
+
+        match client
+            .list_message_move_tasks()
+            .source_arn(queue_url)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let results = response.results();
+                if let Some(task) = results.first() {
+                    let task_id = task.task_handle().unwrap_or("-").to_string();
+
+                    let start_time = chrono::DateTime::from_timestamp(task.started_timestamp(), 0)
+                        .map(|dt| format!("{} (UTC)", dt.format("%Y-%m-%d %H:%M:%S")))
+                        .unwrap_or_else(|| "-".to_string());
+
+                    let status = format!("{:?}", task.status());
+
+                    let moved = task.approximate_number_of_messages_moved();
+                    let total = task.approximate_number_of_messages_to_move().unwrap_or(0);
+                    let percent = if total > 0 {
+                        format!("{}%", (moved * 100) / total)
+                    } else {
+                        "-".to_string()
+                    };
+
+                    let destination = task.destination_arn().unwrap_or("-").to_string();
+
+                    return Ok((task_id, start_time, status, percent, destination));
+                }
+            }
+            Err(_) => {
+                // No active redrive tasks or error fetching
+            }
+        }
+
+        Ok((
+            "-".to_string(),
+            "-".to_string(),
+            "-".to_string(),
+            "-".to_string(),
+            "-".to_string(),
+        ))
     }
 
     pub async fn get_queue_arn(&self, queue_url: &str) -> Result<String> {
@@ -279,5 +346,437 @@ impl SqsClient {
         }
 
         Ok(tags)
+    }
+
+    pub async fn get_queue_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600, // 3 hours ago
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("ApproximateAgeOfOldestMessage")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.maximum) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        // Sort by timestamp
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_delayed_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600, // 3 hours ago
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("ApproximateNumberOfMessagesDelayed")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        // Sort by timestamp
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_not_visible_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600, // 3 hours ago
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("ApproximateNumberOfMessagesNotVisible")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        // Sort by timestamp
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_visible_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("ApproximateNumberOfMessagesVisible")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_empty_receives_metrics(
+        &self,
+        queue_name: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("NumberOfEmptyReceives")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_messages_deleted_metrics(
+        &self,
+        queue_name: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("NumberOfMessagesDeleted")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_messages_received_metrics(
+        &self,
+        queue_name: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("NumberOfMessagesReceived")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_messages_sent_metrics(
+        &self,
+        queue_name: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("NumberOfMessagesSent")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
+    }
+
+    pub async fn get_queue_sent_message_size_metrics(
+        &self,
+        queue_name: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let cw_client = self.config.cloudwatch_client().await;
+
+        let end_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64,
+        );
+        let start_time = aws_smithy_types::DateTime::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64
+                - 3 * 3600,
+        );
+
+        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
+            .name("QueueName")
+            .value(queue_name)
+            .build();
+
+        let response = cw_client
+            .get_metric_statistics()
+            .namespace("AWS/SQS")
+            .metric_name("SentMessageSize")
+            .dimensions(dimension)
+            .start_time(start_time)
+            .end_time(end_time)
+            .period(60)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data.sort_by_key(|(ts, _)| *ts);
+
+        Ok(data)
     }
 }

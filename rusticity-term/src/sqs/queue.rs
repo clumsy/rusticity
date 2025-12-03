@@ -36,6 +36,11 @@ pub struct Queue {
     pub messages_delayed: String,
     pub redrive_allow_policy: String,
     pub redrive_policy: String,
+    pub redrive_task_id: String,
+    pub redrive_task_start_time: String,
+    pub redrive_task_status: String,
+    pub redrive_task_percent: String,
+    pub redrive_task_destination: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -272,6 +277,11 @@ mod tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         };
 
         let (text, _) = Column::MaximumMessageSize.render(&queue);
@@ -302,6 +312,11 @@ mod tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         };
 
         let (text, _) = Column::VisibilityTimeout.render(&queue);
@@ -341,6 +356,11 @@ mod tests {
             messages_delayed: "0".to_string(),
             redrive_allow_policy: "-".to_string(),
             redrive_policy: "".to_string(),
+            redrive_task_id: "-".to_string(),
+            redrive_task_start_time: "-".to_string(),
+            redrive_task_status: "-".to_string(),
+            redrive_task_percent: "-".to_string(),
+            redrive_task_destination: "-".to_string(),
         };
 
         let (text, _) = Column::Created.render(&queue);

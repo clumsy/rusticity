@@ -8,7 +8,7 @@ use crate::cw::insights::{DateRangeType, TimeUnit};
 use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
-use crate::ui::{filter_area, get_cursor, labeled_field, render_inner_tab_spans};
+use crate::ui::{filter_area, get_cursor, labeled_field, render_tabs};
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::{LogEvent, LogGroup, LogStream};
 
@@ -402,16 +402,8 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
 fn render_tab_menu(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
     let all_tabs = DetailTab::all();
-    let tabs: Vec<(&str, bool)> = all_tabs
-        .iter()
-        .map(|tab| (tab.name(), *tab == app.log_groups_state.detail_tab))
-        .collect();
-    let spans = render_inner_tab_spans(&tabs);
-
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).alignment(Alignment::Left),
-        area,
-    );
+    let tabs: Vec<(&str, DetailTab)> = all_tabs.iter().map(|tab| (tab.name(), *tab)).collect();
+    render_tabs(frame, area, &tabs, &app.log_groups_state.detail_tab);
 }
 
 fn render_tab_placeholder(frame: &mut Frame, app: &App, area: Rect, border_style: Style) {

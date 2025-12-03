@@ -55,6 +55,7 @@ pub fn render_filter_bar(frame: &mut Frame, config: FilterConfig) {
         Block::default()
             .title(SEARCH_ICON)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(if config.mode == Mode::FilterInput {
                 Style::default().fg(Color::Yellow)
             } else {

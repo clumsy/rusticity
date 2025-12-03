@@ -645,6 +645,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)),
         );
 
@@ -768,6 +769,7 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
                             .border_style(active_border()),
                     )
                     .style(Style::default().fg(Color::Gray));
@@ -1051,6 +1053,7 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(active_border()),
     );
 
@@ -1086,6 +1089,7 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" Properties ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(active_border());
     let inner = block.inner(area);
 

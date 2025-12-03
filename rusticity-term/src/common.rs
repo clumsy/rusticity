@@ -210,7 +210,7 @@ pub fn render_dropdown<T: AsRef<str>>(
     controls_after_width: u16,
 ) {
     use ratatui::prelude::*;
-    use ratatui::widgets::{Block, Borders, List, ListItem};
+    use ratatui::widgets::{Block, BorderType, Borders, List, ListItem};
 
     let max_width = items
         .iter()
@@ -251,6 +251,7 @@ pub fn render_dropdown<T: AsRef<str>>(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(Color::Yellow)),
             )
             .style(Style::default().bg(Color::Black)),

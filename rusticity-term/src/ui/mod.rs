@@ -117,6 +117,9 @@ pub fn filter_area(filter_text: Vec<Span<'_>>, is_active: bool) -> Paragraph<'_>
             Block::default()
                 .title(SEARCH_ICON)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(if is_active {
                     active_border()
                 } else {
@@ -129,6 +132,18 @@ pub fn filter_area(filter_text: Vec<Span<'_>>, is_active: bool) -> Paragraph<'_>
 // Common style helpers
 pub fn active_border() -> Style {
     Style::default().fg(Color::Green)
+}
+
+pub fn rounded_block() -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Rounded)
+}
+
+pub fn titled_rounded_block(title: &'static str) -> Block<'static> {
+    rounded_block().title(title)
 }
 
 pub fn bold_style() -> Style {
@@ -250,7 +265,7 @@ pub fn horizontal(
 
 // Block helpers
 pub fn block(title: &str) -> Block<'_> {
-    Block::default().title(title).borders(Borders::ALL)
+    crate::ui::rounded_block().title(title)
 }
 
 pub fn block_with_style(title: &str, style: Style) -> Block<'_> {
@@ -259,7 +274,7 @@ pub fn block_with_style(title: &str, style: Style) -> Block<'_> {
 
 // Render a summary section with labeled fields
 pub fn render_summary(frame: &mut Frame, area: Rect, title: &str, fields: &[(&str, String)]) {
-    let summary_block = block(title).border_type(BorderType::Plain);
+    let summary_block = block(title).border_type(BorderType::Rounded);
     let inner = summary_block.inner(area);
     frame.render_widget(summary_block, area);
 
@@ -1221,6 +1236,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
@@ -1254,6 +1271,8 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" Error ")
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Rounded)
             .border_style(crate::ui::red_text())
             .style(Style::default().bg(Color::Black)),
         popup_area,
@@ -1303,6 +1322,8 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border()),
         )
         .style(Style::default().fg(Color::White));
@@ -1386,6 +1407,8 @@ fn render_space_menu(frame: &mut Frame, area: Rect) {
                 .title(" Menu ")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Cyan)),
         )
         .style(Style::default().bg(Color::Black));
@@ -1414,6 +1437,8 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(SEARCH_ICON)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(if is_active {
                 active_color
             } else {
@@ -1430,6 +1455,9 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(" AWS Services ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(if is_active {
                     active_border()
                 } else {
@@ -1471,6 +1499,8 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(SEARCH_ICON)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Yellow)),
     );
     frame.render_widget(Clear, main_chunks[0]);
@@ -1497,7 +1527,9 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
                     app.tabs.len()
                 ))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border()),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
@@ -1515,6 +1547,8 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
     let preview_block = Block::default()
         .title(" Preview ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Cyan));
 
     let preview_inner = preview_block.inner(chunks[1]);
@@ -1693,6 +1727,8 @@ fn render_help_modal(frame: &mut Frame, area: Rect) {
                     Style::default().add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border())
                 .padding(Padding::horizontal(1)),
         )
@@ -1738,6 +1774,8 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(" Regions ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border()),
         )
         .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
@@ -1785,6 +1823,8 @@ fn render_calendar_picker(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(format!(" Select {} ", field_name))
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border()),
         )
         .show_weekdays_header(Style::new().bold().yellow())
@@ -1843,6 +1883,8 @@ pub fn render_json_highlighted(
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
                 .border_style(crate::ui::active_border()),
         ),
         area,

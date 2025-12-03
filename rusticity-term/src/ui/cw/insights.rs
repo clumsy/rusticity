@@ -161,6 +161,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
     let block = Block::default()
         .title(" Logs Insights ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style);
 
     let inner = block.inner(area);
@@ -192,6 +193,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
 
     let ql_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(ql_style);
     let ql_text = format!(" {} ", app.insights_state.insights.query_language.name());
     let ql_para = Paragraph::new(ql_text).block(ql_block);
@@ -208,6 +210,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
 
     let date_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(date_style);
     let date_text = format!(
         " Last {} {} ",
@@ -224,7 +227,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
         .split(chunks[1]);
 
     // Combo box (static for now)
-    let combo_block = Block::default().borders(Borders::ALL);
+    let combo_block = crate::ui::rounded_block();
     let combo_text = " Log group name ";
     let combo_para = Paragraph::new(combo_text).block(combo_block);
     frame.render_widget(combo_para, row2_chunks[0]);
@@ -240,6 +243,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
 
     let search_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(search_style);
 
     let search_text = if !app.insights_state.insights.show_dropdown
@@ -281,6 +285,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
 
     let query_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(query_style);
 
     let query_inner = query_block.inner(chunks[2]);
@@ -353,7 +358,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL))
+            .block(crate::ui::rounded_block())
             .highlight_style(
                 Style::default()
                     .bg(Color::DarkGray)
@@ -395,6 +400,7 @@ fn render_results_pane(frame: &mut Frame, app: &App, area: Rect) {
             app.insights_state.insights.query_results.len()
         ))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style);
 
     let results_inner = results_block.inner(area);

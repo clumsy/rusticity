@@ -216,8 +216,9 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
             Block::default()
                 .title(config.title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(border_style)
-                .border_type(BorderType::Plain),
+                .border_type(BorderType::Rounded),
         )
         .column_spacing(1)
         .row_highlight_style(styles::highlight());

@@ -529,7 +529,7 @@ fn render_details_pane(frame: &mut ratatui::Frame, queue: &Queue, area: ratatui:
     let block = Block::default()
         .title(" Details ")
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .border_style(crate::ui::active_border());
 
     let inner = block.inner(area);
@@ -916,7 +916,7 @@ fn render_dead_letter_queue_tab(
     let block = Block::default()
         .title(" Dead-letter queue ")
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .border_style(crate::ui::active_border());
 
     let inner = block.inner(area);

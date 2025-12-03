@@ -335,8 +335,8 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         .find(|s| &s.name == stack_name);
 
     if stack.is_none() {
-        let paragraph = Paragraph::new("Stack not found")
-            .block(Block::default().borders(Borders::ALL).title(" Error "));
+        let paragraph =
+            Paragraph::new("Stack not found").block(crate::ui::rounded_block().title(" Error "));
         frame.render_widget(paragraph, area);
         return;
     }
@@ -585,13 +585,13 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         .map(|(label, value)| labeled_field(label, *value))
         .collect();
     let overview = Paragraph::new(overview_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Overview "))
+        .block(crate::ui::rounded_block().title(" Overview "))
         .wrap(Wrap { trim: true });
     frame.render_widget(overview, sections[0]);
 
     // Render tags
     let tags = Paragraph::new(tags_lines.join("\n"))
-        .block(Block::default().borders(Borders::ALL).title(" Tags "))
+        .block(crate::ui::rounded_block().title(" Tags "))
         .wrap(Wrap { trim: true });
     frame.render_widget(tags, sections[1]);
 
@@ -600,6 +600,7 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Stack policy "),
         )
         .wrap(Wrap { trim: true });
@@ -610,6 +611,7 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Rollback configuration "),
         )
         .wrap(Wrap { trim: true });
@@ -620,6 +622,7 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Notification options "),
         )
         .wrap(Wrap { trim: true });

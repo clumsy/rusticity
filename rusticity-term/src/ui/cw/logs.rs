@@ -343,6 +343,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         let detail_block = Block::default()
             .title(" Log group details ")
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default());
         let inner = detail_block.inner(chunks[0]);
         frame.render_widget(detail_block, chunks[0]);
@@ -420,6 +421,7 @@ fn render_tab_placeholder(frame: &mut Frame, app: &App, area: Rect, border_style
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(border_style),
         )
         .style(Style::default().fg(Color::Gray));
@@ -605,6 +607,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" Date range ")
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(date_border_style),
     );
 
@@ -773,6 +776,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(format!(" Log events ({}) ", visible_events.len()))
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(border_style),
         )
         .column_spacing(1)

@@ -55,6 +55,7 @@ pub fn render_query_editor(frame: &mut Frame, config: QueryEditorConfig) {
             Block::default()
                 .title(config.title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(border_style)
                 .border_type(border_type),
         )

@@ -347,7 +347,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let overview_block = Block::default()
             .title(" Function overview ")
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default());
 
         let overview_inner = overview_block.inner(chunks[0]);
@@ -389,7 +389,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_block = Block::default()
                     .title(" Code properties ")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Plain);
+                    .border_type(BorderType::Rounded);
 
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
@@ -414,7 +414,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let runtime_block = Block::default()
                     .title(" Runtime settings ")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Plain);
+                    .border_type(BorderType::Rounded);
 
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
@@ -484,7 +484,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let config_block = Block::default()
                     .title(" General configuration ")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Plain)
+                    .border_type(BorderType::Rounded)
                     .border_style(Style::default());
 
                 let config_inner = config_block.inner(chunks[2]);
@@ -737,7 +737,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             "{} tab content (coming soon)",
             app.lambda_state.detail_tab.name()
         ))
-        .block(Block::default().borders(Borders::ALL));
+        .block(crate::ui::rounded_block());
         frame.render_widget(content, chunks[2]);
     }
 }
@@ -856,7 +856,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let overview_block = Block::default()
                         .title(" Function overview ")
                         .borders(Borders::ALL)
-                        .border_type(BorderType::Plain)
+                        .border_type(BorderType::Rounded)
                         .border_style(Style::default());
 
                     let overview_inner = overview_block.inner(chunks[0]);
@@ -873,7 +873,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
         let config_block = Block::default()
             .title(" General configuration ")
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain);
+            .border_type(BorderType::Rounded);
 
         let config_inner = config_block.inner(chunks[1]);
         frame.render_widget(config_block, chunks[1]);
@@ -931,7 +931,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
         let overview_block = Block::default()
             .title(" Function overview ")
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default());
 
         let overview_inner = overview_block.inner(chunks[0]);
@@ -970,7 +970,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_block = Block::default()
                     .title(" Code properties ")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Plain);
+                    .border_type(BorderType::Rounded);
 
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
@@ -987,7 +987,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let runtime_block = Block::default()
                     .title(" Runtime settings ")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Plain);
+                    .border_type(BorderType::Rounded);
 
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
@@ -1065,7 +1065,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let config_block = Block::default()
                         .title(" General configuration ")
                         .borders(Borders::ALL)
-                        .border_type(BorderType::Plain)
+                        .border_type(BorderType::Rounded)
                         .border_style(Style::default());
 
                     let config_inner = config_block.inner(chunks_content[0]);

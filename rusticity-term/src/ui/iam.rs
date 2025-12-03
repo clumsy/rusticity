@@ -931,7 +931,7 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
             let summary_block = Block::default()
                 .title(" Summary ")
                 .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
+                .border_type(BorderType::Rounded)
                 .border_style(active_border());
 
             let summary_inner = summary_block.inner(chunks[1]);

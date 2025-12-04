@@ -5,6 +5,7 @@ mod expanded_view;
 pub mod filter;
 pub mod iam;
 pub mod lambda;
+pub mod monitoring;
 mod pagination;
 pub mod prefs;
 mod query_editor;
@@ -51,6 +52,16 @@ pub fn labeled_field(label: &str, value: impl Into<String>) -> Line<'static> {
         ),
         Span::raw(display),
     ])
+}
+
+/// Calculate the height needed for a block containing lines (lines + 2 for borders)
+pub fn block_height(lines: &[Line]) -> u16 {
+    lines.len() as u16 + 2
+}
+
+/// Calculate the height needed for a block with a given number of lines (lines + 2 for borders)
+pub fn block_height_for(line_count: usize) -> u16 {
+    line_count as u16 + 2
 }
 
 pub fn section_header(text: &str, width: u16) -> Line<'static> {
@@ -4018,6 +4029,12 @@ mod tests {
         app.current_service = Service::LambdaFunctions;
         app.lambda_state.current_function = Some("test-function".to_string());
         app.lambda_state.detail_tab = crate::app::LambdaDetailTab::Code;
+
+        app.handle_action(crate::keymap::Action::NextDetailTab);
+        assert_eq!(
+            app.lambda_state.detail_tab,
+            crate::app::LambdaDetailTab::Monitor
+        );
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
         assert_eq!(

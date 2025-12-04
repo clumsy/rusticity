@@ -429,6 +429,25 @@ async fn main() -> Result<()> {
                             app.lambda_state.alias_table.loading = false;
                         }
 
+                        // Load Lambda metrics when entering Monitoring tab
+                        if app.current_service == Service::LambdaFunctions
+                            && app.lambda_state.current_function.is_some()
+                            && app.lambda_state.detail_tab == rusticity_term::app::LambdaDetailTab::Monitor
+                            && app.lambda_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(function) = app.lambda_state.table.items.iter().find(|f| Some(&f.name) == app.lambda_state.current_function.as_ref()) {
+                                let function_name = function.name.clone();
+                                let version = app.lambda_state.current_version.clone();
+                                if let Err(e) = rusticity_term::ui::lambda::load_lambda_metrics(&mut app, &function_name, version.as_deref()).await {
+                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.lambda_state.metrics_loading = false;
+                        }
+
                         // Load tags when switching to Tags tab
                         if app.current_service == Service::IamRoles
                             && app.iam_state.current_role.is_some()

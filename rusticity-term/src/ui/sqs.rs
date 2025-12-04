@@ -1,5 +1,5 @@
 use crate::aws::Region;
-use crate::common::{render_dropdown, render_vertical_scrollbar, InputFocus};
+use crate::common::{render_dropdown, InputFocus};
 use crate::keymap::Mode::FilterInput;
 use crate::sqs::pipe::{Column as PipeColumn, EventBridgePipe};
 use crate::sqs::queue::{Column as SqsColumn, Queue};
@@ -11,6 +11,7 @@ use crate::ui::filter::{
     render_filter_bar, render_simple_filter, FilterConfig, FilterControl, SimpleFilterConfig,
 };
 use crate::ui::{labeled_field, render_tabs};
+use ratatui::widgets::*;
 
 pub const FILTER_CONTROLS: &[InputFocus] = &[InputFocus::Filter, InputFocus::Pagination];
 pub const SUBSCRIPTION_REGION: InputFocus = InputFocus::Dropdown("SubscriptionRegion");
@@ -180,6 +181,38 @@ impl State {
             metrics_loading: false,
             monitoring_scroll: 0,
         }
+    }
+}
+
+use crate::ui::monitoring::MonitoringState;
+
+impl MonitoringState for State {
+    fn is_metrics_loading(&self) -> bool {
+        self.metrics_loading
+    }
+
+    fn set_metrics_loading(&mut self, loading: bool) {
+        self.metrics_loading = loading;
+    }
+
+    fn monitoring_scroll(&self) -> usize {
+        self.monitoring_scroll
+    }
+
+    fn set_monitoring_scroll(&mut self, scroll: usize) {
+        self.monitoring_scroll = scroll;
+    }
+
+    fn clear_metrics(&mut self) {
+        self.metric_data.clear();
+        self.metric_data_delayed.clear();
+        self.metric_data_not_visible.clear();
+        self.metric_data_visible.clear();
+        self.metric_data_empty_receives.clear();
+        self.metric_data_messages_deleted.clear();
+        self.metric_data_messages_received.clear();
+        self.metric_data_messages_sent.clear();
+        self.metric_data_sent_message_size.clear();
     }
 }
 
@@ -506,7 +539,98 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &crate::App, area: ratat
             render_queue_policies_tab(frame, app, chunks[3]);
         }
         QueueDetailTab::Monitoring => {
-            render_monitoring_tab(frame, app, chunks[3]);
+            if app.sqs_state.metrics_loading {
+                let loading_block = Block::default()
+                    .title(" Monitoring ")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded);
+                let loading_text = Paragraph::new("Loading metrics...")
+                    .block(loading_block)
+                    .alignment(ratatui::layout::Alignment::Center);
+                frame.render_widget(loading_text, chunks[3]);
+            } else {
+                use crate::ui::monitoring::{render_monitoring_tab, MetricChart};
+
+                let age_max: f64 = app
+                    .sqs_state
+                    .metric_data
+                    .iter()
+                    .map(|(_, v)| v)
+                    .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let age_label = format!(
+                    "Age [max: {}]",
+                    if age_max.is_finite() {
+                        format!("{:.0}s", age_max)
+                    } else {
+                        "--".to_string()
+                    }
+                );
+
+                render_monitoring_tab(
+                    frame,
+                    chunks[3],
+                    &[
+                        MetricChart {
+                            title: "Approximate age of oldest message",
+                            data: &app.sqs_state.metric_data,
+                            y_axis_label: "Seconds",
+                            x_axis_label: Some(age_label),
+                        },
+                        MetricChart {
+                            title: "Approximate number of messages delayed",
+                            data: &app.sqs_state.metric_data_delayed,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Approximate number of messages not visible",
+                            data: &app.sqs_state.metric_data_not_visible,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Approximate number of messages visible",
+                            data: &app.sqs_state.metric_data_visible,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Number of empty receives",
+                            data: &app.sqs_state.metric_data_empty_receives,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Number of messages deleted",
+                            data: &app.sqs_state.metric_data_messages_deleted,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Number of messages received",
+                            data: &app.sqs_state.metric_data_messages_received,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Number of messages sent",
+                            data: &app.sqs_state.metric_data_messages_sent,
+                            y_axis_label: "Count",
+                            x_axis_label: None,
+                        },
+                        MetricChart {
+                            title: "Sent message size",
+                            data: &app.sqs_state.metric_data_sent_message_size,
+                            y_axis_label: "Bytes",
+                            x_axis_label: None,
+                        },
+                    ],
+                    &[],
+                    &[],
+                    &[],
+                    app.sqs_state.monitoring_scroll,
+                );
+            }
         }
         QueueDetailTab::SnsSubscriptions => {
             render_subscriptions_tab(frame, app, chunks[3]);
@@ -651,1077 +775,6 @@ fn render_queue_policies_tab(
         app.sqs_state.policy_scroll,
         " Access policy ",
     );
-}
-
-fn render_monitoring_tab(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-
-    let available_height = area.height as usize;
-
-    // Determine which page we're on (0-5)
-    let current_page = app.sqs_state.monitoring_scroll;
-
-    if current_page == 0 {
-        // Page 0: Show first chart, and second chart if 10+ lines remain
-        let chart1_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_age_chart(frame, app, chart1_rect);
-
-        // If 14+ lines remain after first chart, show second chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart2_height = remaining.min(20);
-            let chart2_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart2_height as u16,
-            };
-            render_delayed_chart(frame, app, chart2_rect);
-        }
-    } else if current_page == 1 {
-        // Page 1: Show second chart, and third chart if 14+ lines remain
-        let chart2_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_delayed_chart(frame, app, chart2_rect);
-
-        // If 14+ lines remain after second chart, show third chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart3_height = remaining.min(20);
-            let chart3_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart3_height as u16,
-            };
-            render_not_visible_chart(frame, app, chart3_rect);
-        }
-    } else if current_page == 2 {
-        // Page 2: Show third chart, and fourth chart if 14+ lines remain
-        let chart3_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_not_visible_chart(frame, app, chart3_rect);
-
-        // If 14+ lines remain after third chart, show fourth chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart4_height = remaining.min(20);
-            let chart4_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart4_height as u16,
-            };
-            render_visible_chart(frame, app, chart4_rect);
-        }
-    } else if current_page == 3 {
-        // Page 3: Show fourth chart, and fifth chart if 14+ lines remain
-        let chart4_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_visible_chart(frame, app, chart4_rect);
-
-        // If 14+ lines remain after fourth chart, show fifth chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart5_height = remaining.min(20);
-            let chart5_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart5_height as u16,
-            };
-            render_empty_receives_chart(frame, app, chart5_rect);
-        }
-    } else if current_page == 4 {
-        // Page 4: Show fifth chart, and sixth chart if 14+ lines remain
-        let chart5_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_empty_receives_chart(frame, app, chart5_rect);
-
-        // If 14+ lines remain after fifth chart, show sixth chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart6_height = remaining.min(20);
-            let chart6_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart6_height as u16,
-            };
-            render_messages_deleted_chart(frame, app, chart6_rect);
-        }
-    } else if current_page == 5 {
-        // Page 5: Show sixth chart, and seventh chart if 14+ lines remain
-        let chart6_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_messages_deleted_chart(frame, app, chart6_rect);
-
-        // If 14+ lines remain after sixth chart, show seventh chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart7_height = remaining.min(20);
-            let chart7_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart7_height as u16,
-            };
-            render_messages_received_chart(frame, app, chart7_rect);
-        }
-    } else if current_page == 6 {
-        // Page 6: Show seventh chart, and eighth chart if 14+ lines remain
-        let chart7_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_messages_received_chart(frame, app, chart7_rect);
-
-        // If 14+ lines remain after seventh chart, show eighth chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart8_height = remaining.min(20);
-            let chart8_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart8_height as u16,
-            };
-            render_messages_sent_chart(frame, app, chart8_rect);
-        }
-    } else if current_page == 7 {
-        // Page 7: Show eighth chart, and ninth chart if 14+ lines remain
-        let chart8_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_messages_sent_chart(frame, app, chart8_rect);
-
-        // If 14+ lines remain after eighth chart, show ninth chart
-        let remaining = available_height.saturating_sub(20);
-        if remaining >= 14 {
-            let chart9_height = remaining.min(20);
-            let chart9_rect = Rect {
-                x: area.x,
-                y: area.y + 20,
-                width: area.width,
-                height: chart9_height as u16,
-            };
-            render_sent_message_size_chart(frame, app, chart9_rect);
-        }
-    } else if current_page == 8 {
-        // Page 8: Show ninth chart
-        let chart9_rect = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 20.min(available_height as u16),
-        };
-        render_sent_message_size_chart(frame, app, chart9_rect);
-    }
-
-    // Always show scrollbar
-    let total_charts = 9;
-    let total_height = total_charts * 20;
-    let scroll_offset = current_page * 20;
-    render_vertical_scrollbar(frame, area, total_height, scroll_offset);
-}
-
-fn render_age_chart(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Approximate Age Of Oldest Message ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    // Convert metric data to chart points
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    // Calculate bounds
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0); // Use at least 1 for better visualization
-
-    let dataset = Dataset::default()
-        .name("ApproximateAgeOfOldestMessage")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    // X-axis with HH:MM labels every 30 minutes
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800; // 30 minutes in seconds
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    // Y-axis with 0.5 step labels
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let step = 0.5;
-        let max = (max_y * 1.1).ceil();
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Seconds")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_delayed_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Approximate Number Of Messages Delayed ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_delayed.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    // Convert metric data to chart points
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_delayed
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    // Calculate bounds
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("ApproximateNumberOfMessagesDelayed")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    // X-axis with HH:MM labels every 30 minutes
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    // Y-axis with 0.5 step labels
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let step = 0.5;
-        let max = (max_y * 1.1).ceil();
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_not_visible_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Approximate Number Of Messages Not Visible ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_not_visible.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    // Convert metric data to chart points
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_not_visible
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    // Calculate bounds
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("ApproximateNumberOfMessagesNotVisible")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    // X-axis with HH:MM labels every 30 minutes
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    // Y-axis with 0.5 step labels
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let step = 0.5;
-        let max = (max_y * 1.1).ceil();
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_visible_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Approximate Number Of Messages Visible ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_visible.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_visible
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("ApproximateNumberOfMessagesVisible")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let step = 0.5;
-        let max = (max_y * 1.1).ceil();
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_empty_receives_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Number Of Empty Receives ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_empty_receives.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_empty_receives
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("NumberOfEmptyReceives")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let max = max_y * 1.1;
-        let step = if max <= 10.0 {
-            1.0
-        } else {
-            (max / 10.0).ceil()
-        };
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_messages_deleted_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Number Of Messages Deleted ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_messages_deleted.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_messages_deleted
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("NumberOfMessagesDeleted")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let max = max_y * 1.1;
-        let step = if max <= 10.0 {
-            1.0
-        } else {
-            (max / 10.0).ceil()
-        };
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_messages_received_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Number Of Messages Received ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_messages_received.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_messages_received
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("NumberOfMessagesReceived")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let max = max_y * 1.1;
-        let step = if max <= 10.0 {
-            1.0
-        } else {
-            (max / 10.0).ceil()
-        };
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_messages_sent_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Number Of Messages Sent ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_messages_sent.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_messages_sent
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("NumberOfMessagesSent")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let max = max_y * 1.1;
-        let step = if max <= 10.0 {
-            1.0
-        } else {
-            (max / 10.0).ceil()
-        };
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Count")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
-}
-
-fn render_sent_message_size_chart(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use ratatui::prelude::*;
-    use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType};
-
-    let block = Block::default()
-        .title(" Sent Message Size ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Gray));
-
-    if app.sqs_state.metric_data_sent_message_size.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let paragraph = ratatui::widgets::Paragraph::new("No data available.");
-        frame.render_widget(paragraph, inner);
-        return;
-    }
-
-    let data: Vec<(f64, f64)> = app
-        .sqs_state
-        .metric_data_sent_message_size
-        .iter()
-        .map(|(timestamp, value)| (*timestamp as f64, *value))
-        .collect();
-
-    let min_x = data.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
-    let max_x = data
-        .iter()
-        .map(|(x, _)| *x)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_y = data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
-
-    let dataset = Dataset::default()
-        .name("SentMessageSize")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&data);
-
-    let x_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(ratatui::text::Span::raw(time));
-            current += step;
-        }
-        labels
-    };
-
-    let x_axis = Axis::default()
-        .style(Style::default().fg(Color::Gray))
-        .bounds([min_x, max_x])
-        .labels(x_labels);
-
-    let y_labels: Vec<ratatui::text::Span> = {
-        let mut labels = Vec::new();
-        let mut current = 0.0;
-        let max = max_y * 1.1;
-        let step = if max <= 10.0 {
-            1.0
-        } else {
-            (max / 10.0).ceil()
-        };
-        while current <= max {
-            labels.push(ratatui::text::Span::raw(format!("{:.1}", current)));
-            current += step;
-        }
-        labels
-    };
-
-    let y_axis = Axis::default()
-        .title("Bytes")
-        .style(Style::default().fg(Color::Gray))
-        .bounds([0.0, max_y * 1.1])
-        .labels(y_labels);
-
-    let chart = Chart::new(vec![dataset])
-        .block(block)
-        .x_axis(x_axis)
-        .y_axis(y_axis);
-
-    frame.render_widget(chart, area);
 }
 
 fn render_lambda_triggers_tab(

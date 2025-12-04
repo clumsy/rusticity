@@ -12,7 +12,7 @@ use crate::lambda::{
 };
 use crate::table::TableState;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
-use crate::ui::{labeled_field, render_tabs, section_header, vertical};
+use crate::ui::{block_height, labeled_field, render_tabs, section_header, vertical};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -23,6 +23,7 @@ pub struct State {
     pub current_version: Option<String>,
     pub current_alias: Option<String>,
     pub detail_tab: DetailTab,
+    pub version_detail_tab: VersionDetailTab,
     pub function_visible_column_ids: Vec<ColumnId>,
     pub function_column_ids: Vec<ColumnId>,
     pub version_table: TableState<Version>,
@@ -38,6 +39,25 @@ pub struct State {
     pub alias_input_focus: InputFocus,
     pub layer_selected: usize,
     pub layer_expanded: Option<usize>,
+    pub monitoring_scroll: usize,
+    pub metric_data_invocations: Vec<(i64, f64)>,
+    pub metric_data_duration_min: Vec<(i64, f64)>,
+    pub metric_data_duration_avg: Vec<(i64, f64)>,
+    pub metric_data_duration_max: Vec<(i64, f64)>,
+    pub metric_data_errors: Vec<(i64, f64)>,
+    pub metric_data_success_rate: Vec<(i64, f64)>,
+    pub metric_data_throttles: Vec<(i64, f64)>,
+    pub metric_data_concurrent_executions: Vec<(i64, f64)>,
+    pub metric_data_recursive_invocations_dropped: Vec<(i64, f64)>,
+    pub metric_data_async_event_age_min: Vec<(i64, f64)>,
+    pub metric_data_async_event_age_avg: Vec<(i64, f64)>,
+    pub metric_data_async_event_age_max: Vec<(i64, f64)>,
+    pub metric_data_async_events_received: Vec<(i64, f64)>,
+    pub metric_data_async_events_dropped: Vec<(i64, f64)>,
+    pub metric_data_destination_delivery_failures: Vec<(i64, f64)>,
+    pub metric_data_dead_letter_errors: Vec<(i64, f64)>,
+    pub metric_data_iterator_age: Vec<(i64, f64)>,
+    pub metrics_loading: bool,
 }
 
 impl Default for State {
@@ -54,6 +74,7 @@ impl State {
             current_version: None,
             current_alias: None,
             detail_tab: DetailTab::Code,
+            version_detail_tab: VersionDetailTab::Code,
             function_visible_column_ids: LambdaColumn::visible(),
             function_column_ids: LambdaColumn::ids(),
             version_table: TableState::new(),
@@ -87,13 +108,73 @@ impl State {
             alias_input_focus: InputFocus::Filter,
             layer_selected: 0,
             layer_expanded: None,
+            monitoring_scroll: 0,
+            metric_data_invocations: Vec::new(),
+            metric_data_duration_min: Vec::new(),
+            metric_data_duration_avg: Vec::new(),
+            metric_data_duration_max: Vec::new(),
+            metric_data_errors: Vec::new(),
+            metric_data_success_rate: Vec::new(),
+            metric_data_throttles: Vec::new(),
+            metric_data_concurrent_executions: Vec::new(),
+            metric_data_recursive_invocations_dropped: Vec::new(),
+            metric_data_async_event_age_min: Vec::new(),
+            metric_data_async_event_age_avg: Vec::new(),
+            metric_data_async_event_age_max: Vec::new(),
+            metric_data_async_events_received: Vec::new(),
+            metric_data_async_events_dropped: Vec::new(),
+            metric_data_destination_delivery_failures: Vec::new(),
+            metric_data_dead_letter_errors: Vec::new(),
+            metric_data_iterator_age: Vec::new(),
+            metrics_loading: false,
         }
+    }
+}
+
+use crate::ui::monitoring::MonitoringState;
+
+impl MonitoringState for State {
+    fn is_metrics_loading(&self) -> bool {
+        self.metrics_loading
+    }
+
+    fn set_metrics_loading(&mut self, loading: bool) {
+        self.metrics_loading = loading;
+    }
+
+    fn monitoring_scroll(&self) -> usize {
+        self.monitoring_scroll
+    }
+
+    fn set_monitoring_scroll(&mut self, scroll: usize) {
+        self.monitoring_scroll = scroll;
+    }
+
+    fn clear_metrics(&mut self) {
+        self.metric_data_invocations.clear();
+        self.metric_data_duration_min.clear();
+        self.metric_data_duration_avg.clear();
+        self.metric_data_duration_max.clear();
+        self.metric_data_errors.clear();
+        self.metric_data_success_rate.clear();
+        self.metric_data_throttles.clear();
+        self.metric_data_concurrent_executions.clear();
+        self.metric_data_recursive_invocations_dropped.clear();
+        self.metric_data_async_event_age_min.clear();
+        self.metric_data_async_event_age_avg.clear();
+        self.metric_data_async_event_age_max.clear();
+        self.metric_data_async_events_received.clear();
+        self.metric_data_async_events_dropped.clear();
+        self.metric_data_destination_delivery_failures.clear();
+        self.metric_data_dead_letter_errors.clear();
+        self.metric_data_iterator_age.clear();
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DetailTab {
     Code,
+    Monitor,
     Configuration,
     Aliases,
     Versions,
@@ -102,6 +183,7 @@ pub enum DetailTab {
 impl CyclicEnum for DetailTab {
     const ALL: &'static [Self] = &[
         Self::Code,
+        Self::Monitor,
         Self::Configuration,
         Self::Aliases,
         Self::Versions,
@@ -109,12 +191,52 @@ impl CyclicEnum for DetailTab {
 }
 
 impl DetailTab {
+    pub const VERSION_TABS: &'static [Self] = &[Self::Code, Self::Monitor, Self::Configuration];
+
     pub fn name(&self) -> &'static str {
         match self {
             DetailTab::Code => "Code",
+            DetailTab::Monitor => "Monitor",
             DetailTab::Configuration => "Configuration",
             DetailTab::Aliases => "Aliases",
             DetailTab::Versions => "Versions",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VersionDetailTab {
+    Code,
+    Monitor,
+    Configuration,
+}
+
+impl CyclicEnum for VersionDetailTab {
+    const ALL: &'static [Self] = &[Self::Code, Self::Monitor, Self::Configuration];
+}
+
+impl VersionDetailTab {
+    pub fn name(&self) -> &'static str {
+        match self {
+            VersionDetailTab::Code => "Code",
+            VersionDetailTab::Monitor => "Monitor",
+            VersionDetailTab::Configuration => "Configuration",
+        }
+    }
+
+    pub fn to_detail_tab(&self) -> DetailTab {
+        match self {
+            VersionDetailTab::Code => DetailTab::Code,
+            VersionDetailTab::Monitor => DetailTab::Monitor,
+            VersionDetailTab::Configuration => DetailTab::Configuration,
+        }
+    }
+
+    pub fn from_detail_tab(tab: DetailTab) -> Self {
+        match tab {
+            DetailTab::Code => VersionDetailTab::Code,
+            DetailTab::Monitor => VersionDetailTab::Monitor,
+            _ => VersionDetailTab::Configuration,
         }
     }
 }
@@ -374,12 +496,42 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .find(|f| f.name == *func_name)
             {
+                // Build lines first to calculate heights
+                let code_lines = vec![
+                    labeled_field("Package size", format_bytes(func.code_size)),
+                    labeled_field("SHA256 hash", &func.code_sha256),
+                    labeled_field("Last modified", &func.last_modified),
+                    section_header(
+                        "Encryption with AWS KMS customer managed KMS key",
+                        chunks[2].width.saturating_sub(2),
+                    ),
+                    Line::from(Span::styled(
+                        "To edit customer managed key encryption, you must upload a new .zip deployment package.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    labeled_field("AWS KMS key ARN", ""),
+                    labeled_field("Key alias", ""),
+                    labeled_field("Status", ""),
+                ];
+
+                let runtime_lines = vec![
+                    labeled_field("Runtime", format_runtime(&func.runtime)),
+                    labeled_field("Handler", ""),
+                    labeled_field("Architecture", format_architecture(&func.architecture)),
+                    section_header(
+                        "Runtime management configuration",
+                        chunks[2].width.saturating_sub(2),
+                    ),
+                    labeled_field("Runtime version ARN", ""),
+                    labeled_field("Update runtime version", "Auto"),
+                ];
+
                 let chunks_content = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(10), // Code properties (includes KMS)
-                        Constraint::Length(8),  // Runtime settings (includes Runtime management)
-                        Constraint::Min(0),     // Layers
+                        Constraint::Length(block_height(&code_lines)),
+                        Constraint::Length(block_height(&runtime_lines)),
+                        Constraint::Min(0), // Layers
                     ])
                     .split(chunks[2]);
 
@@ -392,20 +544,6 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
 
-                let code_lines = vec![
-                    labeled_field("Package size", format_bytes(func.code_size)),
-                    labeled_field("SHA256 hash", &func.code_sha256),
-                    labeled_field("Last modified", &func.last_modified),
-                    section_header("Encryption with AWS KMS customer managed KMS key", code_inner.width),
-                    Line::from(Span::styled(
-                        "To edit customer managed key encryption, you must upload a new .zip deployment package.",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    labeled_field("AWS KMS key ARN", ""),
-                    labeled_field("Key alias", ""),
-                    labeled_field("Status", ""),
-                ];
-
                 frame.render_widget(Paragraph::new(code_lines), code_inner);
 
                 // Runtime settings section
@@ -416,15 +554,6 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
-
-                let runtime_lines = vec![
-                    labeled_field("Runtime", format_runtime(&func.runtime)),
-                    labeled_field("Handler", ""),
-                    labeled_field("Architecture", format_architecture(&func.architecture)),
-                    section_header("Runtime management configuration", runtime_inner.width),
-                    labeled_field("Runtime version ARN", ""),
-                    labeled_field("Update runtime version", "Auto"),
-                ];
 
                 frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
 
@@ -469,6 +598,20 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 render_table(frame, config);
             }
         }
+    } else if app.lambda_state.detail_tab == DetailTab::Monitor {
+        if app.lambda_state.metrics_loading {
+            let loading_block = Block::default()
+                .title(" Monitoring ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded);
+            let loading_text = Paragraph::new("Loading metrics...")
+                .block(loading_block)
+                .alignment(ratatui::layout::Alignment::Center);
+            frame.render_widget(loading_text, chunks[2]);
+            return;
+        }
+
+        render_lambda_monitoring_charts(frame, app, chunks[2]);
     } else if app.lambda_state.detail_tab == DetailTab::Configuration {
         // Configuration tab
         if let Some(func_name) = &app.lambda_state.current_function {
@@ -479,15 +622,6 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .find(|f| f.name == *func_name)
             {
-                let config_block = Block::default()
-                    .title(" General configuration ")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default());
-
-                let config_inner = config_block.inner(chunks[2]);
-                frame.render_widget(config_block, chunks[2]);
-
                 let config_lines = vec![
                     labeled_field("Description", &func.description),
                     labeled_field("Revision", &func.last_modified),
@@ -496,6 +630,23 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                     labeled_field("Timeout", format_duration_seconds(func.timeout_seconds)),
                     labeled_field("SnapStart", "None"),
                 ];
+
+                let config_chunks = vertical(
+                    [
+                        Constraint::Length(block_height(&config_lines)),
+                        Constraint::Min(0),
+                    ],
+                    chunks[2],
+                );
+
+                let config_block = Block::default()
+                    .title(" General configuration ")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default());
+
+                let config_inner = config_block.inner(config_chunks[0]);
+                frame.render_widget(config_block, config_chunks[0]);
 
                 frame.render_widget(Paragraph::new(config_lines), config_inner);
             }
@@ -937,13 +1088,18 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Paragraph::new(overview_lines), overview_inner);
     }
 
-    // Tabs - only Code and Configuration
-    let tabs: Vec<(&str, DetailTab)> = DetailTab::ALL
+    // Tabs - only Code, Monitor, and Configuration
+    let tabs: Vec<(&str, VersionDetailTab)> = VersionDetailTab::ALL
         .iter()
         .map(|tab| (tab.name(), *tab))
         .collect();
 
-    render_tabs(frame, chunks[1], &tabs, &app.lambda_state.detail_tab);
+    render_tabs(
+        frame,
+        chunks[1],
+        &tabs,
+        &app.lambda_state.version_detail_tab,
+    );
 
     // Content area - reuse same rendering as function detail
     if app.lambda_state.detail_tab == DetailTab::Code {
@@ -955,11 +1111,24 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .find(|f| f.name == *func_name)
             {
+                // Build lines first to calculate heights
+                let code_lines = vec![
+                    labeled_field("Package size", format_bytes(func.code_size)),
+                    labeled_field("SHA256 hash", &func.code_sha256),
+                    labeled_field("Last modified", &func.last_modified),
+                ];
+
+                let runtime_lines = vec![
+                    labeled_field("Runtime", format_runtime(&func.runtime)),
+                    labeled_field("Handler", ""),
+                    labeled_field("Architecture", format_architecture(&func.architecture)),
+                ];
+
                 let chunks_content = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(5),
-                        Constraint::Length(5),
+                        Constraint::Length(block_height(&code_lines)),
+                        Constraint::Length(block_height(&runtime_lines)),
                         Constraint::Min(0),
                     ])
                     .split(chunks[2]);
@@ -973,12 +1142,6 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
 
-                let code_lines = vec![
-                    labeled_field("Package size", format_bytes(func.code_size)),
-                    labeled_field("SHA256 hash", &func.code_sha256),
-                    labeled_field("Last modified", &func.last_modified),
-                ];
-
                 frame.render_widget(Paragraph::new(code_lines), code_inner);
 
                 // Runtime settings section
@@ -989,12 +1152,6 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
-
-                let runtime_lines = vec![
-                    labeled_field("Runtime", format_runtime(&func.runtime)),
-                    labeled_field("Handler", ""),
-                    labeled_field("Architecture", format_architecture(&func.architecture)),
-                ];
 
                 frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
 
@@ -1040,6 +1197,22 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 render_table(frame, config);
             }
         }
+    } else if app.lambda_state.detail_tab == DetailTab::Monitor {
+        // Monitor tab - render same charts as function detail
+        if app.lambda_state.metrics_loading {
+            let loading_block = Block::default()
+                .title(" Monitor ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded);
+            let loading_text = Paragraph::new("Loading metrics...")
+                .block(loading_block)
+                .alignment(ratatui::layout::Alignment::Center);
+            frame.render_widget(loading_text, chunks[2]);
+            return;
+        }
+
+        // Reuse the same monitoring rendering logic
+        render_lambda_monitoring_charts(frame, app, chunks[2]);
     } else if app.lambda_state.detail_tab == DetailTab::Configuration {
         if let Some(func_name) = &app.lambda_state.current_function {
             if let Some(func) = app
@@ -1051,10 +1224,16 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
             {
                 if let Some(version_num) = &app.lambda_state.current_version {
                     // Version Configuration: show config + aliases for this version
+                    let config_lines = vec![
+                        labeled_field("Description", &func.description),
+                        labeled_field("Memory", format_memory_mb(func.memory_mb)),
+                        labeled_field("Timeout", format_duration_seconds(func.timeout_seconds)),
+                    ];
+
                     let chunks_content = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
-                            Constraint::Length(5),
+                            Constraint::Length(block_height(&config_lines)),
                             Constraint::Length(3), // Filter
                             Constraint::Min(0),    // Aliases table
                         ])
@@ -1068,12 +1247,6 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                     let config_inner = config_block.inner(chunks_content[0]);
                     frame.render_widget(config_block, chunks_content[0]);
-
-                    let config_lines = vec![
-                        labeled_field("Description", &func.description),
-                        labeled_field("Memory", format_memory_mb(func.memory_mb)),
-                        labeled_field("Timeout", format_duration_seconds(func.timeout_seconds)),
-                    ];
 
                     frame.render_widget(Paragraph::new(config_lines), config_inner);
 
@@ -1419,6 +1592,125 @@ pub async fn load_lambda_aliases(app: &mut App, function_name: &str) -> anyhow::
     Ok(())
 }
 
+pub async fn load_lambda_metrics(
+    app: &mut App,
+    function_name: &str,
+    version: Option<&str>,
+) -> anyhow::Result<()> {
+    use rusticity_core::lambda::Statistic;
+
+    // Build resource string if version is provided (e.g., "function_name:1")
+    let resource = version.map(|v| format!("{}:{}", function_name, v));
+    let resource_ref = resource.as_deref();
+
+    let invocations = app
+        .lambda_client
+        .get_invocations_metric(function_name, resource_ref)
+        .await?;
+    app.lambda_state.metric_data_invocations = invocations.clone();
+
+    let duration_min = app
+        .lambda_client
+        .get_duration_metric(function_name, Statistic::Minimum)
+        .await?;
+    app.lambda_state.metric_data_duration_min = duration_min;
+
+    let duration_avg = app
+        .lambda_client
+        .get_duration_metric(function_name, Statistic::Average)
+        .await?;
+    app.lambda_state.metric_data_duration_avg = duration_avg;
+
+    let duration_max = app
+        .lambda_client
+        .get_duration_metric(function_name, Statistic::Maximum)
+        .await?;
+    app.lambda_state.metric_data_duration_max = duration_max;
+
+    let errors = app.lambda_client.get_errors_metric(function_name).await?;
+    app.lambda_state.metric_data_errors = errors.clone();
+
+    let mut success_rate = Vec::new();
+    for (timestamp, error_count) in &errors {
+        if let Some((_, invocation_count)) = invocations.iter().find(|(ts, _)| ts == timestamp) {
+            let max_val = error_count.max(*invocation_count);
+            if max_val > 0.0 {
+                let rate = 100.0 - 100.0 * error_count / max_val;
+                success_rate.push((*timestamp, rate));
+            }
+        }
+    }
+    app.lambda_state.metric_data_success_rate = success_rate;
+
+    let throttles = app
+        .lambda_client
+        .get_throttles_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_throttles = throttles;
+
+    let concurrent_executions = app
+        .lambda_client
+        .get_concurrent_executions_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_concurrent_executions = concurrent_executions;
+
+    let recursive_invocations_dropped = app
+        .lambda_client
+        .get_recursive_invocations_dropped_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_recursive_invocations_dropped = recursive_invocations_dropped;
+
+    let async_event_age_min = app
+        .lambda_client
+        .get_async_event_age_metric(function_name, Statistic::Minimum)
+        .await?;
+    app.lambda_state.metric_data_async_event_age_min = async_event_age_min;
+
+    let async_event_age_avg = app
+        .lambda_client
+        .get_async_event_age_metric(function_name, Statistic::Average)
+        .await?;
+    app.lambda_state.metric_data_async_event_age_avg = async_event_age_avg;
+
+    let async_event_age_max = app
+        .lambda_client
+        .get_async_event_age_metric(function_name, Statistic::Maximum)
+        .await?;
+    app.lambda_state.metric_data_async_event_age_max = async_event_age_max;
+
+    let async_events_received = app
+        .lambda_client
+        .get_async_events_received_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_async_events_received = async_events_received;
+
+    let async_events_dropped = app
+        .lambda_client
+        .get_async_events_dropped_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_async_events_dropped = async_events_dropped;
+
+    let destination_delivery_failures = app
+        .lambda_client
+        .get_destination_delivery_failures_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_destination_delivery_failures = destination_delivery_failures;
+
+    let dead_letter_errors = app
+        .lambda_client
+        .get_dead_letter_errors_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_dead_letter_errors = dead_letter_errors;
+
+    let iterator_age = app
+        .lambda_client
+        .get_iterator_age_metric(function_name)
+        .await?;
+    app.lambda_state.metric_data_iterator_age = iterator_age;
+
+    Ok(())
+}
+
 pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
@@ -1598,5 +1890,538 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         render_table(frame, config);
+    }
+}
+
+fn render_lambda_monitoring_charts(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::ui::monitoring::{
+        render_monitoring_tab, DualAxisChart, MetricChart, MultiDatasetChart,
+    };
+
+    // Calculate all labels (same logic as inline version)
+    let invocations_sum: f64 = app
+        .lambda_state
+        .metric_data_invocations
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let invocations_label = format!("Invocations [sum: {:.0}]", invocations_sum);
+
+    let duration_min: f64 = app
+        .lambda_state
+        .metric_data_duration_min
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::INFINITY, |a, &b| a.min(b));
+    let duration_avg: f64 = if !app.lambda_state.metric_data_duration_avg.is_empty() {
+        app.lambda_state
+            .metric_data_duration_avg
+            .iter()
+            .map(|(_, v)| v)
+            .sum::<f64>()
+            / app.lambda_state.metric_data_duration_avg.len() as f64
+    } else {
+        0.0
+    };
+    let duration_max: f64 = app
+        .lambda_state
+        .metric_data_duration_max
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let duration_label = format!(
+        "Minimum [{:.0}], Average [{:.0}], Maximum [{:.0}]",
+        if duration_min.is_finite() {
+            duration_min
+        } else {
+            0.0
+        },
+        duration_avg,
+        if duration_max.is_finite() {
+            duration_max
+        } else {
+            0.0
+        }
+    );
+
+    let async_event_age_min: f64 = app
+        .lambda_state
+        .metric_data_async_event_age_min
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::INFINITY, |a, &b| a.min(b));
+    let async_event_age_avg: f64 = if !app.lambda_state.metric_data_async_event_age_avg.is_empty() {
+        app.lambda_state
+            .metric_data_async_event_age_avg
+            .iter()
+            .map(|(_, v)| v)
+            .sum::<f64>()
+            / app.lambda_state.metric_data_async_event_age_avg.len() as f64
+    } else {
+        0.0
+    };
+    let async_event_age_max: f64 = app
+        .lambda_state
+        .metric_data_async_event_age_max
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let async_event_age_label = format!(
+        "Minimum [{:.0}], Average [{:.0}], Maximum [{:.0}]",
+        if async_event_age_min.is_finite() {
+            async_event_age_min
+        } else {
+            0.0
+        },
+        async_event_age_avg,
+        if async_event_age_max.is_finite() {
+            async_event_age_max
+        } else {
+            0.0
+        }
+    );
+
+    let async_events_received_sum: f64 = app
+        .lambda_state
+        .metric_data_async_events_received
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let async_events_dropped_sum: f64 = app
+        .lambda_state
+        .metric_data_async_events_dropped
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let async_events_label = format!(
+        "Received [sum: {:.0}], Dropped [sum: {:.0}]",
+        async_events_received_sum, async_events_dropped_sum
+    );
+
+    let destination_delivery_failures_sum: f64 = app
+        .lambda_state
+        .metric_data_destination_delivery_failures
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let dead_letter_errors_sum: f64 = app
+        .lambda_state
+        .metric_data_dead_letter_errors
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let async_delivery_failures_label = format!(
+        "Destination delivery failures [sum: {:.0}], Dead letter queue failures [sum: {:.0}]",
+        destination_delivery_failures_sum, dead_letter_errors_sum
+    );
+
+    let iterator_age_max: f64 = app
+        .lambda_state
+        .metric_data_iterator_age
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let iterator_age_label = format!(
+        "Maximum [{}]",
+        if iterator_age_max.is_finite() {
+            format!("{:.0}", iterator_age_max)
+        } else {
+            "--".to_string()
+        }
+    );
+
+    let error_max: f64 = app
+        .lambda_state
+        .metric_data_errors
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let success_rate_min: f64 = app
+        .lambda_state
+        .metric_data_success_rate
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::INFINITY, |a, &b| a.min(b));
+    let error_label = format!(
+        "Errors [max: {:.0}] and Success rate [min: {:.0}%]",
+        if error_max.is_finite() {
+            error_max
+        } else {
+            0.0
+        },
+        if success_rate_min.is_finite() {
+            success_rate_min
+        } else {
+            0.0
+        }
+    );
+
+    let throttles_max: f64 = app
+        .lambda_state
+        .metric_data_throttles
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let throttles_label = format!(
+        "Throttles [max: {:.0}]",
+        if throttles_max.is_finite() {
+            throttles_max
+        } else {
+            0.0
+        }
+    );
+
+    let concurrent_max: f64 = app
+        .lambda_state
+        .metric_data_concurrent_executions
+        .iter()
+        .map(|(_, v)| v)
+        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let concurrent_label = format!(
+        "Concurrent executions [max: {}]",
+        if concurrent_max.is_finite() {
+            format!("{:.0}", concurrent_max)
+        } else {
+            "--".to_string()
+        }
+    );
+
+    let recursive_sum: f64 = app
+        .lambda_state
+        .metric_data_recursive_invocations_dropped
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let recursive_label = format!(
+        "Dropped [sum: {}]",
+        if recursive_sum > 0.0 {
+            format!("{:.0}", recursive_sum)
+        } else {
+            "--".to_string()
+        }
+    );
+
+    render_monitoring_tab(
+        frame,
+        area,
+        &[MetricChart {
+            title: "Invocations",
+            data: &app.lambda_state.metric_data_invocations,
+            y_axis_label: "Count",
+            x_axis_label: Some(invocations_label),
+        }],
+        &[MultiDatasetChart {
+            title: "Duration",
+            datasets: vec![
+                ("Minimum", &app.lambda_state.metric_data_duration_min),
+                ("Average", &app.lambda_state.metric_data_duration_avg),
+                ("Maximum", &app.lambda_state.metric_data_duration_max),
+            ],
+            y_axis_label: "Milliseconds",
+            y_axis_step: 1000,
+            x_axis_label: Some(duration_label),
+        }],
+        &[DualAxisChart {
+            title: "Error count and success rate",
+            left_dataset: ("Errors", &app.lambda_state.metric_data_errors),
+            right_dataset: ("Success rate", &app.lambda_state.metric_data_success_rate),
+            left_y_label: "Count",
+            right_y_label: "%",
+            x_axis_label: Some(error_label),
+        }],
+        &[
+            MetricChart {
+                title: "Throttles",
+                data: &app.lambda_state.metric_data_throttles,
+                y_axis_label: "Count",
+                x_axis_label: Some(throttles_label),
+            },
+            MetricChart {
+                title: "Total concurrent executions",
+                data: &app.lambda_state.metric_data_concurrent_executions,
+                y_axis_label: "Count",
+                x_axis_label: Some(concurrent_label),
+            },
+            MetricChart {
+                title: "Recursive invocations",
+                data: &app.lambda_state.metric_data_recursive_invocations_dropped,
+                y_axis_label: "Count",
+                x_axis_label: Some(recursive_label),
+            },
+            MetricChart {
+                title: "Async event age",
+                data: &app.lambda_state.metric_data_async_event_age_avg,
+                y_axis_label: "Milliseconds",
+                x_axis_label: Some(async_event_age_label),
+            },
+            MetricChart {
+                title: "Async events",
+                data: &app.lambda_state.metric_data_async_events_received,
+                y_axis_label: "Count",
+                x_axis_label: Some(async_events_label),
+            },
+            MetricChart {
+                title: "Async delivery failures",
+                data: &app.lambda_state.metric_data_destination_delivery_failures,
+                y_axis_label: "Count",
+                x_axis_label: Some(async_delivery_failures_label),
+            },
+            MetricChart {
+                title: "Iterator age",
+                data: &app.lambda_state.metric_data_iterator_age,
+                y_axis_label: "Milliseconds",
+                x_axis_label: Some(iterator_age_label),
+            },
+        ],
+        app.lambda_state.monitoring_scroll,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detail_tab_monitoring_in_all() {
+        let tabs = DetailTab::ALL;
+        assert_eq!(tabs.len(), 5);
+        assert_eq!(tabs[0], DetailTab::Code);
+        assert_eq!(tabs[1], DetailTab::Monitor);
+        assert_eq!(tabs[2], DetailTab::Configuration);
+        assert_eq!(tabs[3], DetailTab::Aliases);
+        assert_eq!(tabs[4], DetailTab::Versions);
+    }
+
+    #[test]
+    fn test_detail_tab_monitoring_name() {
+        assert_eq!(DetailTab::Monitor.name(), "Monitor");
+    }
+
+    #[test]
+    fn test_detail_tab_monitoring_navigation() {
+        use crate::common::CyclicEnum;
+        let tab = DetailTab::Code;
+        assert_eq!(tab.next(), DetailTab::Monitor);
+
+        let tab = DetailTab::Monitor;
+        assert_eq!(tab.next(), DetailTab::Configuration);
+        assert_eq!(tab.prev(), DetailTab::Code);
+    }
+
+    #[test]
+    fn test_state_monitoring_fields_initialized() {
+        let state = State::new();
+        assert_eq!(state.monitoring_scroll, 0);
+        assert!(state.metric_data_invocations.is_empty());
+        assert!(state.metric_data_duration_min.is_empty());
+        assert!(state.metric_data_duration_avg.is_empty());
+        assert!(state.metric_data_duration_max.is_empty());
+        assert!(state.metric_data_errors.is_empty());
+        assert!(state.metric_data_success_rate.is_empty());
+        assert!(state.metric_data_throttles.is_empty());
+        assert!(state.metric_data_concurrent_executions.is_empty());
+        assert!(state.metric_data_recursive_invocations_dropped.is_empty());
+    }
+
+    #[test]
+    fn test_state_monitoring_scroll() {
+        let mut state = State::new();
+        assert_eq!(state.monitoring_scroll, 0);
+
+        state.monitoring_scroll = 1;
+        assert_eq!(state.monitoring_scroll, 1);
+
+        state.monitoring_scroll = 2;
+        assert_eq!(state.monitoring_scroll, 2);
+    }
+
+    #[test]
+    fn test_state_metric_data() {
+        let mut state = State::new();
+        state.metric_data_invocations = vec![(1700000000, 10.0), (1700000060, 15.0)];
+        state.metric_data_duration_min = vec![(1700000000, 100.0), (1700000060, 150.0)];
+        state.metric_data_duration_avg = vec![(1700000000, 200.0), (1700000060, 250.0)];
+        state.metric_data_duration_max = vec![(1700000000, 300.0), (1700000060, 350.0)];
+        state.metric_data_errors = vec![(1700000000, 1.0), (1700000060, 2.0)];
+        state.metric_data_success_rate = vec![(1700000000, 90.0), (1700000060, 85.0)];
+        state.metric_data_throttles = vec![(1700000000, 0.0), (1700000060, 1.0)];
+        state.metric_data_concurrent_executions = vec![(1700000000, 5.0), (1700000060, 10.0)];
+        state.metric_data_recursive_invocations_dropped =
+            vec![(1700000000, 0.0), (1700000060, 0.0)];
+
+        assert_eq!(state.metric_data_invocations.len(), 2);
+        assert_eq!(state.metric_data_duration_min.len(), 2);
+        assert_eq!(state.metric_data_duration_avg.len(), 2);
+        assert_eq!(state.metric_data_duration_max.len(), 2);
+        assert_eq!(state.metric_data_errors.len(), 2);
+        assert_eq!(state.metric_data_success_rate.len(), 2);
+        assert_eq!(state.metric_data_throttles.len(), 2);
+        assert_eq!(state.metric_data_concurrent_executions.len(), 2);
+        assert_eq!(state.metric_data_recursive_invocations_dropped.len(), 2);
+    }
+
+    #[test]
+    fn test_invocations_sum_calculation() {
+        let data = [(1700000000, 10.0), (1700000060, 15.0), (1700000120, 5.0)];
+        let sum: f64 = data.iter().map(|(_, v)| v).sum();
+        assert_eq!(sum, 30.0);
+    }
+
+    #[test]
+    fn test_invocations_label_format() {
+        let sum = 1234.5;
+        let label = format!("Invocations [sum: {:.0}]", sum);
+        assert_eq!(label, "Invocations [sum: 1234]");
+    }
+
+    #[test]
+    fn test_invocations_sum_empty() {
+        let data: Vec<(i64, f64)> = vec![];
+        let sum: f64 = data.iter().map(|(_, v)| v).sum();
+        assert_eq!(sum, 0.0);
+    }
+
+    #[test]
+    fn test_duration_label_formatting() {
+        let min = 100.5;
+        let avg = 250.7;
+        let max = 450.2;
+        let label = format!(
+            "Minimum [{:.0}], Average [{:.0}], Maximum [{:.0}]",
+            min, avg, max
+        );
+        assert_eq!(label, "Minimum [100], Average [251], Maximum [450]");
+    }
+
+    #[test]
+    fn test_duration_min_with_infinity() {
+        let data: Vec<(i64, f64)> = vec![];
+        let min: f64 = data
+            .iter()
+            .map(|(_, v)| v)
+            .fold(f64::INFINITY, |a, &b| a.min(b));
+        assert!(min.is_infinite());
+        let result = if min.is_finite() { min } else { 0.0 };
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn test_duration_max_with_neg_infinity() {
+        let data: Vec<(i64, f64)> = vec![];
+        let max: f64 = data
+            .iter()
+            .map(|(_, v)| v)
+            .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        assert!(max.is_infinite());
+        let result = if max.is_finite() { max } else { 0.0 };
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn test_duration_avg_empty_data() {
+        let data: Vec<(i64, f64)> = vec![];
+        let avg: f64 = if !data.is_empty() {
+            data.iter().map(|(_, v)| v).sum::<f64>() / data.len() as f64
+        } else {
+            0.0
+        };
+        assert_eq!(avg, 0.0);
+    }
+
+    #[test]
+    fn test_duration_metrics_with_data() {
+        let min_data = [(1700000000, 100.0), (1700000060, 90.0), (1700000120, 110.0)];
+        let avg_data = [
+            (1700000000, 200.0),
+            (1700000060, 210.0),
+            (1700000120, 190.0),
+        ];
+        let max_data = [
+            (1700000000, 300.0),
+            (1700000060, 320.0),
+            (1700000120, 310.0),
+        ];
+
+        let min: f64 = min_data
+            .iter()
+            .map(|(_, v)| v)
+            .fold(f64::INFINITY, |a, &b| a.min(b));
+        let avg: f64 = avg_data.iter().map(|(_, v)| v).sum::<f64>() / avg_data.len() as f64;
+        let max: f64 = max_data
+            .iter()
+            .map(|(_, v)| v)
+            .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+
+        assert_eq!(min, 90.0);
+        assert_eq!(avg, 200.0);
+        assert_eq!(max, 320.0);
+    }
+
+    #[test]
+    fn test_success_rate_calculation() {
+        let errors: f64 = 5.0;
+        let invocations: f64 = 100.0;
+        let max_val = errors.max(invocations);
+        let success_rate = 100.0 - 100.0 * errors / max_val;
+        assert_eq!(success_rate, 95.0);
+    }
+
+    #[test]
+    fn test_success_rate_with_zero_invocations() {
+        let errors: f64 = 0.0;
+        let invocations: f64 = 0.0;
+        let max_val = errors.max(invocations);
+        assert_eq!(max_val, 0.0);
+    }
+
+    #[test]
+    fn test_error_label_format() {
+        let error_max = 10.0;
+        let success_rate_min = 85.5;
+        let label = format!(
+            "Errors [max: {:.0}] and Success rate [min: {:.0}%]",
+            error_max, success_rate_min
+        );
+        assert_eq!(label, "Errors [max: 10] and Success rate [min: 86%]");
+    }
+
+    #[test]
+    fn test_load_lambda_metrics_builds_resource_string() {
+        // Test that version parameter creates correct resource format
+        let function_name = "test-function";
+        let version = Some("1");
+        let resource = version.map(|v| format!("{}:{}", function_name, v));
+        assert_eq!(resource, Some("test-function:1".to_string()));
+
+        // Test without version
+        let version: Option<&str> = None;
+        let resource = version.map(|v| format!("{}:{}", function_name, v));
+        assert_eq!(resource, None);
+    }
+
+    #[test]
+    fn test_detail_tab_next_version_tab() {
+        assert_eq!(VersionDetailTab::Code.next(), VersionDetailTab::Monitor);
+        assert_eq!(
+            VersionDetailTab::Monitor.next(),
+            VersionDetailTab::Configuration
+        );
+        assert_eq!(
+            VersionDetailTab::Configuration.next(),
+            VersionDetailTab::Code
+        );
+    }
+
+    #[test]
+    fn test_detail_tab_prev_version_tab() {
+        assert_eq!(
+            VersionDetailTab::Code.prev(),
+            VersionDetailTab::Configuration
+        );
+        assert_eq!(
+            VersionDetailTab::Configuration.prev(),
+            VersionDetailTab::Monitor
+        );
+        assert_eq!(VersionDetailTab::Monitor.prev(), VersionDetailTab::Code);
     }
 }

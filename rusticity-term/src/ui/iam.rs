@@ -8,9 +8,9 @@ use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::table::Column;
 use crate::ui::{
-    active_border, filter_area, get_cursor, labeled_field, render_json_highlighted,
-    render_last_accessed_section, render_permissions_section, render_tabs, render_tags_section,
-    vertical,
+    active_border, block_height_for, filter_area, get_cursor, labeled_field,
+    render_json_highlighted, render_last_accessed_section, render_permissions_section, render_tabs,
+    render_tags_section, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -304,12 +304,19 @@ pub fn render_user_groups(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
+    // Calculate summary height
+    let summary_height = if app.iam_state.current_group.is_some() {
+        block_height_for(3) // 3 fields
+    } else {
+        0
+    };
+
     let chunks = vertical(
         [
-            Constraint::Length(1), // Group name
-            Constraint::Length(5), // Summary (3 lines + 2 borders)
-            Constraint::Length(1), // Tabs
-            Constraint::Min(0),    // Content
+            Constraint::Length(1),              // Group name
+            Constraint::Length(summary_height), // Summary
+            Constraint::Length(1),              // Tabs
+            Constraint::Min(0),                 // Content
         ],
         area,
     );
@@ -714,12 +721,19 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
+    // Calculate summary height
+    let summary_height = if app.iam_state.current_role.is_some() {
+        block_height_for(5) // 5 fields
+    } else {
+        0
+    };
+
     let chunks = vertical(
         [
-            Constraint::Length(1), // Role name
-            Constraint::Length(7), // Summary (5 lines + 2 borders)
-            Constraint::Length(1), // Tabs
-            Constraint::Min(0),    // Content
+            Constraint::Length(1),              // Role name
+            Constraint::Length(summary_height), // Summary
+            Constraint::Length(1),              // Tabs
+            Constraint::Min(0),                 // Content
         ],
         area,
     );
@@ -887,12 +901,19 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
+    // Calculate summary height
+    let summary_height = if app.iam_state.current_user.is_some() {
+        block_height_for(5) // 5 fields
+    } else {
+        0
+    };
+
     let chunks = vertical(
         [
-            Constraint::Length(1), // User name
-            Constraint::Length(7), // Summary (5 lines + 2 borders)
-            Constraint::Length(1), // Tabs
-            Constraint::Min(0),    // Content
+            Constraint::Length(1),              // User name
+            Constraint::Length(summary_height), // Summary
+            Constraint::Length(1),              // Tabs
+            Constraint::Min(0),                 // Content
         ],
         area,
     );

@@ -28,6 +28,7 @@ pub use crate::ui::lambda::{
     ApplicationDetailTab as LambdaApplicationDetailTab, ApplicationState as LambdaApplicationState,
     DetailTab as LambdaDetailTab, State as LambdaState,
 };
+use crate::ui::monitoring::MonitoringState;
 pub use crate::ui::s3::{BucketType as S3BucketType, ObjectTab as S3ObjectTab, State as S3State};
 pub use crate::ui::sqs::{QueueDetailTab as SqsQueueDetailTab, State as SqsState};
 pub use crate::ui::{
@@ -1894,7 +1895,9 @@ impl App {
                 {
                     self.sqs_state.detail_tab = self.sqs_state.detail_tab.next();
                     if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                        self.sqs_state.metrics_loading = true;
+                        self.sqs_state.set_metrics_loading(true);
+                        self.sqs_state.set_monitoring_scroll(0);
+                        self.sqs_state.clear_metrics();
                     } else if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
                         self.sqs_state.triggers.loading = true;
                     } else if self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes {
@@ -1955,13 +1958,23 @@ impl App {
                     && self.lambda_state.current_function.is_some()
                 {
                     if self.lambda_state.current_version.is_some() {
-                        // Version view: only Code and Configuration tabs
-                        self.lambda_state.detail_tab = match self.lambda_state.detail_tab {
-                            LambdaDetailTab::Code => LambdaDetailTab::Configuration,
-                            _ => LambdaDetailTab::Code,
-                        };
+                        // Version view: use VersionDetailTab enum
+                        self.lambda_state.version_detail_tab =
+                            self.lambda_state.version_detail_tab.next();
+                        self.lambda_state.detail_tab =
+                            self.lambda_state.version_detail_tab.to_detail_tab();
+                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
+                            self.lambda_state.set_metrics_loading(true);
+                            self.lambda_state.set_monitoring_scroll(0);
+                            self.lambda_state.clear_metrics();
+                        }
                     } else {
                         self.lambda_state.detail_tab = self.lambda_state.detail_tab.next();
+                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
+                            self.lambda_state.set_metrics_loading(true);
+                            self.lambda_state.set_monitoring_scroll(0);
+                            self.lambda_state.clear_metrics();
+                        }
                     }
                 } else if self.current_service == Service::CloudFormationStacks
                     && self.cfn_state.current_stack.is_some()
@@ -1975,7 +1988,9 @@ impl App {
                 {
                     self.sqs_state.detail_tab = self.sqs_state.detail_tab.prev();
                     if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                        self.sqs_state.metrics_loading = true;
+                        self.sqs_state.set_metrics_loading(true);
+                        self.sqs_state.set_monitoring_scroll(0);
+                        self.sqs_state.clear_metrics();
                     }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
@@ -2015,13 +2030,23 @@ impl App {
                     && self.lambda_state.current_function.is_some()
                 {
                     if self.lambda_state.current_version.is_some() {
-                        // Version view: only Code and Configuration tabs
-                        self.lambda_state.detail_tab = match self.lambda_state.detail_tab {
-                            LambdaDetailTab::Configuration => LambdaDetailTab::Code,
-                            _ => LambdaDetailTab::Configuration,
-                        };
+                        // Version view: use VersionDetailTab enum
+                        self.lambda_state.version_detail_tab =
+                            self.lambda_state.version_detail_tab.prev();
+                        self.lambda_state.detail_tab =
+                            self.lambda_state.version_detail_tab.to_detail_tab();
+                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
+                            self.lambda_state.set_metrics_loading(true);
+                            self.lambda_state.set_monitoring_scroll(0);
+                            self.lambda_state.clear_metrics();
+                        }
                     } else {
                         self.lambda_state.detail_tab = self.lambda_state.detail_tab.prev();
+                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
+                            self.lambda_state.set_metrics_loading(true);
+                            self.lambda_state.set_monitoring_scroll(0);
+                            self.lambda_state.clear_metrics();
+                        }
                     }
                 } else if self.current_service == Service::CloudFormationStacks
                     && self.cfn_state.current_stack.is_some()
@@ -2428,12 +2453,22 @@ impl App {
             Action::ScrollUp => {
                 if self.mode == Mode::ErrorModal {
                     self.error_scroll = self.error_scroll.saturating_sub(1);
+                } else if self.current_service == Service::LambdaFunctions
+                    && self.lambda_state.current_function.is_some()
+                    && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
+                    && !self.lambda_state.is_metrics_loading()
+                {
+                    self.lambda_state.set_monitoring_scroll(
+                        self.lambda_state.monitoring_scroll().saturating_sub(1),
+                    );
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                    && !self.sqs_state.is_metrics_loading()
                 {
-                    self.sqs_state.monitoring_scroll =
-                        self.sqs_state.monitoring_scroll.saturating_sub(5);
+                    self.sqs_state.set_monitoring_scroll(
+                        self.sqs_state.monitoring_scroll().saturating_sub(1),
+                    );
                 } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
                 } else if self.current_service == Service::IamRoles
@@ -2486,8 +2521,8 @@ impl App {
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
                 {
-                    self.sqs_state.monitoring_scroll =
-                        (self.sqs_state.monitoring_scroll + 1).min(1);
+                    self.sqs_state
+                        .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(1));
                 } else if self.view_mode == ViewMode::PolicyView {
                     let lines = self.iam_state.policy_document.lines().count();
                     let max_scroll = lines.saturating_sub(1);
@@ -3512,12 +3547,20 @@ impl App {
                     let max_scroll = lines.saturating_sub(1);
                     self.sqs_state.policy_scroll =
                         (self.sqs_state.policy_scroll + 1).min(max_scroll);
+                } else if self.current_service == Service::LambdaFunctions
+                    && self.lambda_state.current_function.is_some()
+                    && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
+                    && !self.lambda_state.is_metrics_loading()
+                {
+                    self.lambda_state
+                        .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                    && !self.sqs_state.is_metrics_loading()
                 {
-                    self.sqs_state.monitoring_scroll =
-                        (self.sqs_state.monitoring_scroll + 1).min(8);
+                    self.sqs_state
+                        .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(8));
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
                     if self.log_groups_state.event_scroll_offset >= max_scroll {
@@ -3924,12 +3967,22 @@ impl App {
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
                 {
                     self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(1);
+                } else if self.current_service == Service::LambdaFunctions
+                    && self.lambda_state.current_function.is_some()
+                    && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
+                    && !self.lambda_state.is_metrics_loading()
+                {
+                    self.lambda_state.set_monitoring_scroll(
+                        self.lambda_state.monitoring_scroll().saturating_sub(1),
+                    );
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                    && !self.sqs_state.is_metrics_loading()
                 {
-                    self.sqs_state.monitoring_scroll =
-                        self.sqs_state.monitoring_scroll.saturating_sub(1);
+                    self.sqs_state.set_monitoring_scroll(
+                        self.sqs_state.monitoring_scroll().saturating_sub(1),
+                    );
                 } else if self.view_mode == ViewMode::Events {
                     if self.log_groups_state.event_scroll_offset == 0 {
                         if self.log_groups_state.has_older_events {
@@ -4228,11 +4281,19 @@ impl App {
             let lines = self.iam_state.policy_document.lines().count();
             let max_scroll = lines.saturating_sub(1);
             self.iam_state.policy_scroll = (self.iam_state.policy_scroll + 10).min(max_scroll);
+        } else if self.current_service == Service::LambdaFunctions
+            && self.lambda_state.current_function.is_some()
+            && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
+            && !self.lambda_state.is_metrics_loading()
+        {
+            self.lambda_state
+                .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
             if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                self.sqs_state.monitoring_scroll = (self.sqs_state.monitoring_scroll + 1).min(8);
+                self.sqs_state
+                    .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(8));
             } else {
                 let lines = self.sqs_state.policy_document.lines().count();
                 let max_scroll = lines.saturating_sub(1);
@@ -4520,8 +4581,8 @@ impl App {
             && self.sqs_state.current_queue.is_some()
         {
             if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                self.sqs_state.monitoring_scroll =
-                    self.sqs_state.monitoring_scroll.saturating_sub(1);
+                self.sqs_state
+                    .set_monitoring_scroll(self.sqs_state.monitoring_scroll().saturating_sub(1));
             } else {
                 self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(10);
             }
@@ -11495,7 +11556,10 @@ mod region_latency_tests {
             layers: vec![],
         }];
 
-        // Tab should cycle between Code and Configuration only
+        // Tab should cycle between Code, Monitor, and Configuration
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
+
         app.handle_action(Action::NextDetailTab);
         assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Configuration);
 
@@ -11505,6 +11569,9 @@ mod region_latency_tests {
         // BackTab should cycle backward
         app.handle_action(Action::PrevDetailTab);
         assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Configuration);
+
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
     }
 
     #[test]
@@ -14069,5 +14136,78 @@ mod sqs_tests {
         // Should stay at 0, not wrap to negative
         assert_eq!(app.s3_state.selected_row, 0);
         assert_eq!(app.s3_state.selected_object, 0);
+    }
+}
+
+#[cfg(test)]
+mod lambda_version_tab_tests {
+    use super::*;
+    use test_helpers::*;
+
+    #[test]
+    fn test_lambda_version_tab_cycling_next() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.lambda_state.current_function = Some("test-function".to_string());
+        app.lambda_state.current_version = Some("1".to_string());
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
+
+        // Code -> Monitor
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
+        assert!(app.lambda_state.metrics_loading);
+
+        // Monitor -> Configuration
+        app.lambda_state.metrics_loading = false;
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Configuration);
+
+        // Configuration -> Code
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Code);
+    }
+
+    #[test]
+    fn test_lambda_version_tab_cycling_prev() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.lambda_state.current_function = Some("test-function".to_string());
+        app.lambda_state.current_version = Some("1".to_string());
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
+
+        // Code -> Configuration
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Configuration);
+
+        // Configuration -> Monitor
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
+        assert!(app.lambda_state.metrics_loading);
+
+        // Monitor -> Code
+        app.lambda_state.metrics_loading = false;
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Code);
+    }
+
+    #[test]
+    fn test_lambda_version_monitor_clears_metrics() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.lambda_state.current_function = Some("test-function".to_string());
+        app.lambda_state.current_version = Some("1".to_string());
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
+
+        // Add some fake metric data
+        app.lambda_state.metric_data_invocations = vec![(1, 10.0), (2, 20.0)];
+        app.lambda_state.monitoring_scroll = 5;
+
+        // Switch to Monitor tab
+        app.handle_action(Action::NextDetailTab);
+
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
+        assert!(app.lambda_state.metrics_loading);
+        assert_eq!(app.lambda_state.monitoring_scroll, 0);
+        assert!(app.lambda_state.metric_data_invocations.is_empty());
     }
 }

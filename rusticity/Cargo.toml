@@ -12,8 +12,8 @@ name = "rusticity"
 path = "src/main.rs"
 
 [dependencies]
-rusticity-core = { version = "0.1.1", path = "../rusticity-core" }
-rusticity-term = { version = "0.1.1", path = "../rusticity-term" }
+rusticity-core = { version = "0.1.2", path = "../rusticity-core" }
+rusticity-term = { version = "0.1.2", path = "../rusticity-term" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

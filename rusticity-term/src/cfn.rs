@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_detail_tab_next() {
-        assert_eq!(DetailTab::StackInfo.next(), DetailTab::StackInfo);
+        assert_eq!(DetailTab::StackInfo.next(), DetailTab::Events);
     }
 
     #[test]

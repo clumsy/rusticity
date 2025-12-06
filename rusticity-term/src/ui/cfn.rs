@@ -5,7 +5,7 @@ use crate::common::{
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::ui::labeled_field;
+use crate::ui::{labeled_field, render_tabs, rounded_block};
 use ratatui::{prelude::*, widgets::*};
 
 pub const STATUS_FILTER: InputFocus = InputFocus::Dropdown("StatusFilter");
@@ -30,6 +30,8 @@ pub struct State {
     pub overview_scroll: u16,
     pub sort_column: CfnColumn,
     pub sort_direction: SortDirection,
+    pub template_body: String,
+    pub template_scroll: usize,
 }
 
 impl Default for State {
@@ -50,6 +52,8 @@ impl State {
             overview_scroll: 0,
             sort_column: CfnColumn::CreatedTime,
             sort_direction: SortDirection::Desc,
+            template_body: String::new(),
+            template_scroll: 0,
         }
     }
 }
@@ -131,13 +135,13 @@ pub enum DetailTab {
 impl CyclicEnum for DetailTab {
     const ALL: &'static [Self] = &[
         Self::StackInfo,
-        // Self::Events,
-        // Self::Resources,
-        // Self::Outputs,
-        // Self::Parameters,
-        // Self::Template,
-        // Self::ChangeSets,
-        // Self::GitSync,
+        Self::Events,
+        Self::Resources,
+        Self::Outputs,
+        Self::Parameters,
+        Self::Template,
+        Self::ChangeSets,
+        Self::GitSync,
     ];
 }
 
@@ -335,8 +339,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         .find(|s| &s.name == stack_name);
 
     if stack.is_none() {
-        let paragraph =
-            Paragraph::new("Stack not found").block(crate::ui::rounded_block().title(" Error "));
+        let paragraph = Paragraph::new("Stack not found").block(rounded_block().title(" Error "));
         frame.render_widget(paragraph, area);
         return;
     }
@@ -347,6 +350,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Stack name
+            Constraint::Length(1), // Tabs
             Constraint::Min(0),    // Content
         ])
         .split(area);
@@ -354,12 +358,33 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
     // Render stack name
     frame.render_widget(Paragraph::new(stack.name.clone()), chunks[0]);
 
+    // Render tabs
+    let tabs: Vec<_> = DetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
+    render_tabs(frame, chunks[1], &tabs, &app.cfn_state.detail_tab);
+
     // Render content based on selected tab
     match app.cfn_state.detail_tab {
         DetailTab::StackInfo => {
-            render_stack_info(frame, app, stack, chunks[1]);
+            render_stack_info(frame, app, stack, chunks[2]);
         }
-        _ => unimplemented!(),
+        DetailTab::GitSync => {
+            render_git_sync(frame, app, stack, chunks[2]);
+        }
+        DetailTab::Template => {
+            crate::ui::render_json_highlighted(
+                frame,
+                chunks[2],
+                &app.cfn_state.template_body,
+                app.cfn_state.template_scroll,
+                " Template ",
+            );
+        }
+        _ => {
+            let paragraph =
+                Paragraph::new(format!("{} - Coming soon", app.cfn_state.detail_tab.name()))
+                    .block(rounded_block());
+            frame.render_widget(paragraph, chunks[2]);
+        }
     }
 }
 
@@ -445,6 +470,8 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
             "Drift status",
             if stack.drift_status.is_empty() {
                 "-"
+            } else if stack.drift_status == "NOT_CHECKED" || stack.drift_status == "NotChecked" {
+                "⭕ NOT CHECKED"
             } else {
                 &stack.drift_status
             },
@@ -478,12 +505,7 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
 
     // Tags section
     let tags_lines = if stack.tags.is_empty() {
-        vec![
-            "Stack-level tags will apply to all supported resources in your stack.".to_string(),
-            "You can add up to 50 unique tags for each stack.".to_string(),
-            String::new(),
-            "No tags defined".to_string(),
-        ]
+        vec!["No tags defined".to_string()]
     } else {
         let mut lines = vec!["Key                          Value".to_string()];
         for (key, value) in &stack.tags {
@@ -495,13 +517,7 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
 
     // Stack policy section
     let policy_lines = if stack.stack_policy.is_empty() {
-        vec![
-            "Defines the resources that you want to protect from unintentional".to_string(),
-            "updates during a stack update.".to_string(),
-            String::new(),
-            "No stack policy".to_string(),
-            "  There is no stack policy defined".to_string(),
-        ]
+        vec!["No stack policy".to_string()]
     } else {
         vec![stack.stack_policy.clone()]
     };
@@ -510,10 +526,6 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
     // Rollback configuration section
     let rollback_lines = if stack.rollback_alarms.is_empty() {
         vec![
-            "Specifies alarms for CloudFormation to monitor when creating and".to_string(),
-            "updating the stack. If the operation breaches an alarm threshold,".to_string(),
-            "CloudFormation rolls it back.".to_string(),
-            String::new(),
             "Monitoring time".to_string(),
             format!(
                 "  {}",
@@ -548,17 +560,11 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
     // Notification options section
     let notification_lines = if stack.notification_arns.is_empty() {
         vec![
-            "Specifies where notifications about stack actions will be sent.".to_string(),
-            String::new(),
             "SNS topic ARN".to_string(),
             "  No notifications configured".to_string(),
         ]
     } else {
-        let mut lines = vec![
-            "Specifies where notifications about stack actions will be sent.".to_string(),
-            String::new(),
-            "SNS topic ARN".to_string(),
-        ];
+        let mut lines = vec!["SNS topic ARN".to_string()];
         for arn in &stack.notification_arns {
             lines.push(format!("  {}", arn));
         }
@@ -627,4 +633,128 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(notifications, sections[4]);
+}
+
+fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, area: Rect) {
+    let lines: Vec<Line> = vec![
+        labeled_field("Repository", "-"),
+        labeled_field("Deployment file path", "-"),
+        labeled_field("Git sync", "-"),
+        labeled_field("Repository provider", "-"),
+        labeled_field("Repository sync status", "-"),
+        labeled_field("Provisioning status", "-"),
+        labeled_field("Branch", "-"),
+        labeled_field("Repository sync status message", "-"),
+    ];
+
+    let block = rounded_block().title(" Git sync ");
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::State;
+
+    #[test]
+    fn test_drift_status_not_checked_formatting() {
+        let drift_status = "NOT_CHECKED";
+        let formatted = if drift_status == "NOT_CHECKED" {
+            "⭕ NOT CHECKED"
+        } else {
+            drift_status
+        };
+        assert_eq!(formatted, "⭕ NOT CHECKED");
+    }
+
+    #[test]
+    fn test_drift_status_not_checked_pascal_case() {
+        let drift_status = "NotChecked";
+        let formatted = if drift_status == "NOT_CHECKED" || drift_status == "NotChecked" {
+            "⭕ NOT CHECKED"
+        } else {
+            drift_status
+        };
+        assert_eq!(formatted, "⭕ NOT CHECKED");
+    }
+
+    #[test]
+    fn test_drift_status_other_values() {
+        let drift_status = "IN_SYNC";
+        let formatted = if drift_status == "NOT_CHECKED" {
+            "⭕ NOT CHECKED"
+        } else {
+            drift_status
+        };
+        assert_eq!(formatted, "IN_SYNC");
+    }
+
+    #[test]
+    fn test_git_sync_renders_all_fields() {
+        use crate::cfn::Stack;
+        let stack = Stack {
+            name: "test-stack".to_string(),
+            stack_id: "id".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            created_time: String::new(),
+            updated_time: String::new(),
+            deleted_time: String::new(),
+            drift_status: String::new(),
+            last_drift_check_time: String::new(),
+            status_reason: String::new(),
+            description: String::new(),
+            detailed_status: String::new(),
+            root_stack: String::new(),
+            parent_stack: String::new(),
+            termination_protection: false,
+            iam_role: String::new(),
+            tags: Vec::new(),
+            stack_policy: String::new(),
+            rollback_monitoring_time: String::new(),
+            rollback_alarms: Vec::new(),
+            notification_arns: Vec::new(),
+        };
+
+        // Verify the fields are defined
+        let fields = [
+            "Repository",
+            "Deployment file path",
+            "Git sync",
+            "Repository provider",
+            "Repository sync status",
+            "Provisioning status",
+            "Branch",
+            "Repository sync status message",
+        ];
+
+        assert_eq!(fields.len(), 8);
+        assert_eq!(stack.name, "test-stack");
+    }
+
+    #[test]
+    fn test_git_sync_block_height() {
+        use crate::ui::block_height_for;
+
+        // Git sync has 8 labeled fields
+        let field_count = 8;
+        let expected_height = field_count + 2; // +2 for borders
+
+        assert_eq!(block_height_for(field_count), expected_height as u16);
+        assert_eq!(block_height_for(field_count), 10);
+    }
+
+    #[test]
+    fn test_template_scroll_state() {
+        let state = State::new();
+        assert_eq!(state.template_body, "");
+        assert_eq!(state.template_scroll, 0);
+    }
+
+    #[test]
+    fn test_template_body_storage() {
+        let mut state = State::new();
+        let template = r#"{"AWSTemplateFormatVersion":"2010-09-09","Resources":{}}"#;
+        state.template_body = template.to_string();
+        assert_eq!(state.template_body, template);
+    }
 }

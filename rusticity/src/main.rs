@@ -297,6 +297,20 @@ async fn main() -> Result<()> {
                             app.cfn_state.table.loading = false;
                         }
 
+                        // Load CFN template when stack is selected
+                        if app.service_selected && app.current_service == Service::CloudFormationStacks
+                            && app.cfn_state.current_stack.is_some()
+                            && app.cfn_state.table.loading {
+                            let stack_name = app.cfn_state.current_stack.clone().unwrap();
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_cfn_template(&stack_name).await {
+                                app.error_message = Some(format!("Failed to load template: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.cfn_state.table.loading = false;
+                        }
+
                         // Load IAM users when service is switched to and empty
                         if app.service_selected && app.current_service == Service::IamUsers
                             && (!prev_service_selected || prev_service != Service::IamUsers)

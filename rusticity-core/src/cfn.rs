@@ -177,3 +177,12 @@ pub struct StackDetails {
     pub rollback_alarms: Vec<String>,
     pub notification_arns: Vec<String>,
 }
+
+impl CloudFormationClient {
+    pub async fn get_template(&self, stack_name: &str) -> Result<String> {
+        let client = self.config.cloudformation_client().await;
+        let response = client.get_template().stack_name(stack_name).send().await?;
+
+        Ok(response.template_body().unwrap_or("").to_string())
+    }
+}

@@ -723,9 +723,39 @@ impl App {
                 self.mode = Mode::Normal;
                 self.service_picker.filter.clear();
                 // Reset selection when closing filter to avoid out-of-bounds
-                if self.current_service == Service::S3Buckets {
-                    self.s3_state.selected_row = 0;
-                    self.s3_state.selected_object = 0;
+                match self.current_service {
+                    Service::S3Buckets => {
+                        self.s3_state.selected_row = 0;
+                        self.s3_state.selected_object = 0;
+                    }
+                    Service::CloudFormationStacks => {
+                        self.cfn_state.table.reset();
+                    }
+                    Service::LambdaFunctions => {
+                        self.lambda_state.table.reset();
+                    }
+                    Service::SqsQueues => {
+                        self.sqs_state.queues.reset();
+                    }
+                    Service::IamRoles => {
+                        self.iam_state.roles.reset();
+                    }
+                    Service::IamUsers => {
+                        self.iam_state.users.reset();
+                    }
+                    Service::IamUserGroups => {
+                        self.iam_state.groups.reset();
+                    }
+                    Service::CloudWatchAlarms => {
+                        self.alarms_state.table.reset();
+                    }
+                    Service::EcrRepositories => {
+                        self.ecr_state.repositories.reset();
+                    }
+                    Service::LambdaApplications => {
+                        self.lambda_application_state.table.reset();
+                    }
+                    _ => {}
                 }
             }
             Action::NextTab => {
@@ -2406,9 +2436,11 @@ impl App {
                     match self.cfn_state.input_focus {
                         STATUS_FILTER => {
                             self.cfn_state.status_filter = self.cfn_state.status_filter.next();
+                            self.cfn_state.table.reset();
                         }
                         VIEW_NESTED => {
                             self.cfn_state.view_nested = !self.cfn_state.view_nested;
+                            self.cfn_state.table.reset();
                         }
                         _ => {}
                     }
@@ -3369,6 +3401,7 @@ impl App {
                     use crate::ui::cfn::STATUS_FILTER;
                     if self.cfn_state.input_focus == STATUS_FILTER {
                         self.cfn_state.status_filter = self.cfn_state.status_filter.next();
+                        self.cfn_state.table.reset();
                     }
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
@@ -3377,6 +3410,7 @@ impl App {
                         self.sqs_state.subscription_region_selected =
                             (self.sqs_state.subscription_region_selected + 1)
                                 .min(regions.len() - 1);
+                        self.sqs_state.subscriptions.reset();
                     }
                 }
             }
@@ -3539,6 +3573,14 @@ impl App {
                     let max_scroll = lines.saturating_sub(1);
                     self.iam_state.policy_scroll =
                         (self.iam_state.policy_scroll + 1).min(max_scroll);
+                } else if self.current_service == Service::CloudFormationStacks
+                    && self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+                {
+                    let lines = self.cfn_state.template_body.lines().count();
+                    let max_scroll = lines.saturating_sub(1);
+                    self.cfn_state.template_scroll =
+                        (self.cfn_state.template_scroll + 1).min(max_scroll);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
@@ -3889,6 +3931,7 @@ impl App {
                     use crate::ui::cfn::STATUS_FILTER;
                     if self.cfn_state.input_focus == STATUS_FILTER {
                         self.cfn_state.status_filter = self.cfn_state.status_filter.prev();
+                        self.cfn_state.table.reset();
                     }
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
@@ -3897,6 +3940,7 @@ impl App {
                             .sqs_state
                             .subscription_region_selected
                             .saturating_sub(1);
+                        self.sqs_state.subscriptions.reset();
                     }
                 }
             }
@@ -3962,6 +4006,12 @@ impl App {
                     }
                 } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(1);
+                } else if self.current_service == Service::CloudFormationStacks
+                    && self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+                {
+                    self.cfn_state.template_scroll =
+                        self.cfn_state.template_scroll.saturating_sub(1);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
@@ -4281,6 +4331,13 @@ impl App {
             let lines = self.iam_state.policy_document.lines().count();
             let max_scroll = lines.saturating_sub(1);
             self.iam_state.policy_scroll = (self.iam_state.policy_scroll + 10).min(max_scroll);
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+        {
+            let lines = self.cfn_state.template_body.lines().count();
+            let max_scroll = lines.saturating_sub(1);
+            self.cfn_state.template_scroll = (self.cfn_state.template_scroll + 10).min(max_scroll);
         } else if self.current_service == Service::LambdaFunctions
             && self.lambda_state.current_function.is_some()
             && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
@@ -4577,6 +4634,11 @@ impl App {
             );
         } else if self.view_mode == ViewMode::PolicyView {
             self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+        {
+            self.cfn_state.template_scroll = self.cfn_state.template_scroll.saturating_sub(10);
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
@@ -5907,6 +5969,7 @@ impl App {
                     let filtered_stacks = self.filtered_cloudformation_stacks();
                     if let Some(stack) = self.cfn_state.table.get_selected(&filtered_stacks) {
                         self.cfn_state.current_stack = Some(stack.name.clone());
+                        self.cfn_state.table.loading = true;
                         self.update_current_tab_breadcrumb();
                     }
                 }
@@ -6457,6 +6520,13 @@ impl App {
 
         self.cfn_state.table.items = stacks;
 
+        Ok(())
+    }
+
+    pub async fn load_cfn_template(&mut self, stack_name: &str) -> anyhow::Result<()> {
+        let template = self.cloudformation_client.get_template(stack_name).await?;
+        self.cfn_state.template_body = template;
+        self.cfn_state.template_scroll = 0;
         Ok(())
     }
 
@@ -14094,6 +14164,24 @@ mod sqs_tests {
     }
 
     #[test]
+    fn test_sqs_subscription_region_change_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.current_service = Service::SqsQueues;
+        app.sqs_state.current_queue = Some("test-queue".to_string());
+        app.sqs_state.detail_tab = SqsQueueDetailTab::SnsSubscriptions;
+        app.sqs_state.input_focus = crate::common::InputFocus::Dropdown("SubscriptionRegion");
+        app.sqs_state.subscription_region_selected = 0;
+        app.sqs_state.subscriptions.selected = 5;
+
+        app.handle_action(Action::NextItem);
+
+        assert_eq!(app.sqs_state.subscription_region_selected, 1);
+        assert_eq!(app.sqs_state.subscriptions.selected, 0);
+    }
+
+    #[test]
     fn test_s3_object_filter_resets_selection() {
         let mut app = test_app();
         app.service_selected = true;
@@ -14136,6 +14224,243 @@ mod sqs_tests {
         // Should stay at 0, not wrap to negative
         assert_eq!(app.s3_state.selected_row, 0);
         assert_eq!(app.s3_state.selected_object, 0);
+    }
+
+    #[test]
+    fn test_cfn_filter_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.table.selected = 10;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::CloseMenu);
+
+        assert_eq!(app.cfn_state.table.selected, 0);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_lambda_filter_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::LambdaFunctions;
+        app.lambda_state.table.selected = 8;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::CloseMenu);
+
+        assert_eq!(app.lambda_state.table.selected, 0);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_sqs_filter_resets_selection() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::SqsQueues;
+        app.sqs_state.queues.selected = 7;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::CloseMenu);
+
+        assert_eq!(app.sqs_state.queues.selected, 0);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_cfn_status_filter_change_resets_selection() {
+        use crate::ui::cfn::{StatusFilter, STATUS_FILTER};
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::FilterInput;
+        app.cfn_state.input_focus = STATUS_FILTER;
+        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.table.items = vec![
+            CfnStack {
+                name: "stack1".to_string(),
+                stack_id: "id1".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                created_time: "2024-01-01".to_string(),
+                updated_time: String::new(),
+                deleted_time: String::new(),
+                drift_status: String::new(),
+                last_drift_check_time: String::new(),
+                status_reason: String::new(),
+                description: String::new(),
+                detailed_status: String::new(),
+                root_stack: String::new(),
+                parent_stack: String::new(),
+                termination_protection: false,
+                iam_role: String::new(),
+                tags: Vec::new(),
+                stack_policy: String::new(),
+                rollback_monitoring_time: String::new(),
+                rollback_alarms: Vec::new(),
+                notification_arns: Vec::new(),
+            },
+            CfnStack {
+                name: "stack2".to_string(),
+                stack_id: "id2".to_string(),
+                status: "UPDATE_IN_PROGRESS".to_string(),
+                created_time: "2024-01-02".to_string(),
+                updated_time: String::new(),
+                deleted_time: String::new(),
+                drift_status: String::new(),
+                last_drift_check_time: String::new(),
+                status_reason: String::new(),
+                description: String::new(),
+                detailed_status: String::new(),
+                root_stack: String::new(),
+                parent_stack: String::new(),
+                termination_protection: false,
+                iam_role: String::new(),
+                tags: Vec::new(),
+                stack_policy: String::new(),
+                rollback_monitoring_time: String::new(),
+                rollback_alarms: Vec::new(),
+                notification_arns: Vec::new(),
+            },
+        ];
+        app.cfn_state.table.selected = 1;
+
+        app.handle_action(Action::NextItem);
+
+        assert_eq!(app.cfn_state.status_filter, StatusFilter::Active);
+        assert_eq!(app.cfn_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_cfn_view_nested_toggle_resets_selection() {
+        use crate::ui::cfn::VIEW_NESTED;
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::FilterInput;
+        app.cfn_state.input_focus = VIEW_NESTED;
+        app.cfn_state.view_nested = false;
+        app.cfn_state.table.items = vec![CfnStack {
+            name: "stack1".to_string(),
+            stack_id: "id1".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            created_time: "2024-01-01".to_string(),
+            updated_time: String::new(),
+            deleted_time: String::new(),
+            drift_status: String::new(),
+            last_drift_check_time: String::new(),
+            status_reason: String::new(),
+            description: String::new(),
+            detailed_status: String::new(),
+            root_stack: String::new(),
+            parent_stack: String::new(),
+            termination_protection: false,
+            iam_role: String::new(),
+            tags: Vec::new(),
+            stack_policy: String::new(),
+            rollback_monitoring_time: String::new(),
+            rollback_alarms: Vec::new(),
+            notification_arns: Vec::new(),
+        }];
+        app.cfn_state.table.selected = 5;
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+
+        assert!(app.cfn_state.view_nested);
+        assert_eq!(app.cfn_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_cfn_template_scroll_up() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_scroll = 20;
+
+        app.page_up();
+
+        assert_eq!(app.cfn_state.template_scroll, 10);
+    }
+
+    #[test]
+    fn test_cfn_template_scroll_down() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_body = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15".to_string();
+        app.cfn_state.template_scroll = 0;
+
+        app.page_down();
+
+        assert_eq!(app.cfn_state.template_scroll, 10);
+    }
+
+    #[test]
+    fn test_cfn_template_scroll_down_respects_max() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_body = "line1\nline2\nline3".to_string();
+        app.cfn_state.template_scroll = 0;
+
+        app.page_down();
+
+        // Should not scroll past the last line (3 lines = max scroll of 2)
+        assert_eq!(app.cfn_state.template_scroll, 2);
+    }
+
+    #[test]
+    fn test_cfn_template_arrow_up() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::Normal;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_scroll = 5;
+
+        app.prev_item();
+
+        assert_eq!(app.cfn_state.template_scroll, 4);
+    }
+
+    #[test]
+    fn test_cfn_template_arrow_down() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::Normal;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_body = "line1\nline2\nline3\nline4\nline5".to_string();
+        app.cfn_state.template_scroll = 2;
+
+        app.next_item();
+
+        assert_eq!(app.cfn_state.template_scroll, 3);
+    }
+
+    #[test]
+    fn test_cfn_template_arrow_down_respects_max() {
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::Normal;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.template_body = "line1\nline2".to_string();
+        app.cfn_state.template_scroll = 1;
+
+        app.next_item();
+
+        // Should stay at max (2 lines = max scroll of 1)
+        assert_eq!(app.cfn_state.template_scroll, 1);
     }
 }
 

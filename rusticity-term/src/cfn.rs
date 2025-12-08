@@ -20,6 +20,14 @@ pub fn init(i18n: &mut HashMap<String, String>) {
         i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
+    for col in crate::ui::cfn::ParameterColumn::all() {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
+    for col in crate::ui::cfn::OutputColumn::all() {
+        i18n.entry(col.id().to_string())
+            .or_insert_with(|| col.default_name().to_string());
+    }
 }
 
 pub fn console_url_stacks(region: &str) -> String {

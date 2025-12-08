@@ -185,4 +185,72 @@ impl CloudFormationClient {
 
         Ok(response.template_body().unwrap_or("").to_string())
     }
+
+    pub async fn get_stack_parameters(&self, stack_name: &str) -> Result<Vec<StackParameter>> {
+        let client = self.config.cloudformation_client().await;
+        let response = client
+            .describe_stacks()
+            .stack_name(stack_name)
+            .send()
+            .await?;
+
+        let stack = response
+            .stacks()
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Stack not found"))?;
+
+        let mut parameters = Vec::new();
+        for param in stack.parameters() {
+            parameters.push(StackParameter {
+                key: param.parameter_key().unwrap_or("").to_string(),
+                value: param.parameter_value().unwrap_or("").to_string(),
+                resolved_value: param.resolved_value().unwrap_or("").to_string(),
+            });
+        }
+
+        Ok(parameters)
+    }
+
+    pub async fn get_stack_outputs(&self, stack_name: &str) -> Result<Vec<StackOutput>> {
+        let client = self.config.cloudformation_client().await;
+        let response = client
+            .describe_stacks()
+            .stack_name(stack_name)
+            .send()
+            .await?;
+
+        let stack = response
+            .stacks()
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Stack not found"))?;
+
+        let mut outputs = Vec::new();
+        for output in stack.outputs() {
+            outputs.push(StackOutput {
+                key: output.output_key().unwrap_or("").to_string(),
+                value: output.output_value().unwrap_or("").to_string(),
+                description: output.description().unwrap_or("").to_string(),
+                export_name: output.export_name().unwrap_or("").to_string(),
+            });
+        }
+
+        outputs.sort_by(|a, b| a.key.cmp(&b.key));
+
+        Ok(outputs)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StackParameter {
+    pub key: String,
+    pub value: String,
+    pub resolved_value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackOutput {
+    pub key: String,
+    pub value: String,
+    pub description: String,
+    pub export_name: String,
 }

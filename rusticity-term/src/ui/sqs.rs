@@ -774,6 +774,7 @@ fn render_queue_policies_tab(
         &app.sqs_state.policy_document,
         app.sqs_state.policy_scroll,
         " Access policy ",
+        true,
     );
 }
 

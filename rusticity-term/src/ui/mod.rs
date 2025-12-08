@@ -1057,31 +1057,88 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
 
-        let (header, header_len) = render_section_header("Columns");
-        all_items.push(header);
-        max_len = max_len.max(header_len);
+        // Check if we're in Parameters tab
+        if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
 
-        for col_id in &app.cfn_column_ids {
-            let is_visible = app.cfn_visible_column_ids.contains(col_id);
-            if let Some(col) = CfnColumn::from_id(col_id) {
-                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+            for col_name in &app.cfn_parameter_column_ids {
+                let is_visible = app.cfn_parameter_visible_column_ids.contains(col_name);
+                let (item, len) = render_column_toggle_string(col_name, is_visible);
                 all_items.push(item);
                 max_len = max_len.max(len);
             }
-        }
 
-        all_items.push(ListItem::new(""));
-        let (page_items, page_len) = render_page_size_section(
-            app.cfn_state.table.page_size,
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-                (PageSize::OneHundred, "100"),
-            ],
-        );
-        all_items.extend(page_items);
-        max_len = max_len.max(page_len);
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.cfn_state.parameters.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_name in &app.cfn_output_column_ids {
+                let is_visible = app.cfn_output_visible_column_ids.contains(col_name);
+                let (item, len) = render_column_toggle_string(col_name, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.cfn_state.outputs.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_none() {
+            // Stack list view
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cfn_column_ids {
+                let is_visible = app.cfn_visible_column_ids.contains(col_id);
+                if let Some(col) = CfnColumn::from_id(col_id) {
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.cfn_state.table.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+        // Template tab: no preferences
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::IamUsers {
@@ -1841,6 +1898,7 @@ pub fn render_json_highlighted(
     json_text: &str,
     scroll_offset: usize,
     title: &str,
+    is_active: bool,
 ) {
     let lines: Vec<Line> = json_text
         .lines()
@@ -1884,8 +1942,11 @@ pub fn render_json_highlighted(
                 .title(title)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border()),
+                .border_style(if is_active {
+                    crate::ui::active_border()
+                } else {
+                    Style::default()
+                }),
         ),
         area,
     );

@@ -211,8 +211,27 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     } else if app.current_service == Service::CloudFormationStacks {
         if app.cfn_state.current_stack.is_some() {
-            // In stack detail view
-            common_detail_hotkeys()
+            // In stack detail view - customize hints based on tab
+            if app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+                || app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::GitSync
+            {
+                // Template and GitSync tabs: no preferences
+                let mut hints = vec![];
+                hints.extend(first_hint("↑↓", "scroll"));
+                hints.extend(hint("⎋", "back"));
+                hints.extend(hint("[]", "switch"));
+                hints.extend(hint("⇤⇥", "switch"));
+                hints.extend(hint("^u", "page up"));
+                hints.extend(hint("^d", "page down"));
+                hints.extend(hint("y", "yank"));
+                hints.extend(hint("^o", "console"));
+                hints.extend(hint("^r", "refresh"));
+                hints.extend(hint("^w", "close"));
+                hints.extend(last_hint("q", "quit"));
+                hints
+            } else {
+                common_detail_hotkeys()
+            }
         } else {
             // In stack list view - build custom hints with snapshot
             let mut hints = vec![];

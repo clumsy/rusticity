@@ -106,6 +106,10 @@ pub struct App {
     pub lambda_resource_column_ids: Vec<ColumnId>,
     pub cfn_visible_column_ids: Vec<ColumnId>,
     pub cfn_column_ids: Vec<ColumnId>,
+    pub cfn_parameter_visible_column_ids: Vec<ColumnId>,
+    pub cfn_parameter_column_ids: Vec<ColumnId>,
+    pub cfn_output_visible_column_ids: Vec<ColumnId>,
+    pub cfn_output_column_ids: Vec<ColumnId>,
     pub iam_user_visible_column_ids: Vec<ColumnId>,
     pub iam_user_column_ids: Vec<ColumnId>,
     pub iam_role_visible_column_ids: Vec<String>,
@@ -456,6 +460,10 @@ impl App {
             .map(|c| c.id())
             .collect(),
             cfn_column_ids: CfnColumn::ids(),
+            cfn_parameter_visible_column_ids: crate::ui::cfn::parameter_column_ids(),
+            cfn_parameter_column_ids: crate::ui::cfn::parameter_column_ids(),
+            cfn_output_visible_column_ids: crate::ui::cfn::output_column_ids(),
+            cfn_output_column_ids: crate::ui::cfn::output_column_ids(),
             iam_user_visible_column_ids: UserColumn::visible(),
             iam_user_column_ids: UserColumn::ids(),
             iam_role_visible_column_ids: vec![
@@ -611,6 +619,10 @@ impl App {
             .collect(),
             cfn_column_ids: CfnColumn::ids(),
             iam_user_visible_column_ids: UserColumn::visible(),
+            cfn_parameter_visible_column_ids: crate::ui::cfn::parameter_column_ids(),
+            cfn_parameter_column_ids: crate::ui::cfn::parameter_column_ids(),
+            cfn_output_visible_column_ids: crate::ui::cfn::output_column_ids(),
+            cfn_output_column_ids: crate::ui::cfn::output_column_ids(),
             iam_user_column_ids: UserColumn::ids(),
             iam_role_visible_column_ids: vec![
                 "Role name".to_string(),
@@ -729,7 +741,17 @@ impl App {
                         self.s3_state.selected_object = 0;
                     }
                     Service::CloudFormationStacks => {
-                        self.cfn_state.table.reset();
+                        if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                        {
+                            self.cfn_state.parameters.reset();
+                        } else if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                        {
+                            self.cfn_state.outputs.reset();
+                        } else {
+                            self.cfn_state.table.reset();
+                        }
                     }
                     Service::LambdaFunctions => {
                         self.lambda_state.table.reset();
@@ -1036,7 +1058,21 @@ impl App {
                             }
                         }
                     } else if self.current_service == Service::CloudFormationStacks {
-                        if self.cfn_state.input_focus == InputFocus::Filter {
+                        if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                        {
+                            if self.cfn_state.parameters_input_focus == InputFocus::Filter {
+                                self.cfn_state.parameters.filter.push(c);
+                                self.cfn_state.parameters.selected = 0;
+                            }
+                        } else if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                        {
+                            if self.cfn_state.outputs_input_focus == InputFocus::Filter {
+                                self.cfn_state.outputs.filter.push(c);
+                                self.cfn_state.outputs.selected = 0;
+                            }
+                        } else if self.cfn_state.input_focus == InputFocus::Filter {
                             if let Some(filter) = self.get_active_filter_mut() {
                                 filter.push(c);
                             }
@@ -1170,7 +1206,21 @@ impl App {
                 } else if self.mode == Mode::FilterInput {
                     // Only allow backspace when focus is on the input field
                     if self.current_service == Service::CloudFormationStacks {
-                        if self.cfn_state.input_focus == InputFocus::Filter {
+                        if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                        {
+                            if self.cfn_state.parameters_input_focus == InputFocus::Filter {
+                                self.cfn_state.parameters.filter.pop();
+                                self.cfn_state.parameters.selected = 0;
+                            }
+                        } else if self.cfn_state.current_stack.is_some()
+                            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                        {
+                            if self.cfn_state.outputs_input_focus == InputFocus::Filter {
+                                self.cfn_state.outputs.filter.pop();
+                                self.cfn_state.outputs.selected = 0;
+                            }
+                        } else if self.cfn_state.input_focus == InputFocus::Filter {
                             if let Some(filter) = self.get_active_filter_mut() {
                                 filter.pop();
                             }
@@ -1234,6 +1284,15 @@ impl App {
                 // Not implemented - would need cursor position tracking
             }
             Action::OpenColumnSelector => {
+                // Don't allow opening preferences in Template or GitSync tabs
+                if self.current_service == Service::CloudFormationStacks
+                    && self.cfn_state.current_stack.is_some()
+                    && (self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
+                        || self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::GitSync)
+                {
+                    return;
+                }
+
                 // If we have page input, apply it instead of opening column selector
                 if !self.page_input.is_empty() {
                     if let Ok(page) = self.page_input.parse::<usize>() {
@@ -1632,25 +1691,78 @@ impl App {
                     }
                 } else if self.current_service == Service::CloudFormationStacks {
                     let idx = self.column_selector_index;
-                    if idx > 0 && idx <= self.cfn_column_ids.len() {
-                        if let Some(col) = self.cfn_column_ids.get(idx - 1) {
-                            if let Some(pos) =
-                                self.cfn_visible_column_ids.iter().position(|c| c == col)
-                            {
-                                self.cfn_visible_column_ids.remove(pos);
-                            } else {
-                                self.cfn_visible_column_ids.push(*col);
+                    // Check if we're in Parameters tab
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        if idx > 0 && idx <= self.cfn_parameter_column_ids.len() {
+                            if let Some(col) = self.cfn_parameter_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cfn_parameter_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    self.cfn_parameter_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cfn_parameter_visible_column_ids.push(col);
+                                }
                             }
+                        } else if idx == self.cfn_parameter_column_ids.len() + 3 {
+                            self.cfn_state.parameters.page_size = PageSize::Ten;
+                        } else if idx == self.cfn_parameter_column_ids.len() + 4 {
+                            self.cfn_state.parameters.page_size = PageSize::TwentyFive;
+                        } else if idx == self.cfn_parameter_column_ids.len() + 5 {
+                            self.cfn_state.parameters.page_size = PageSize::Fifty;
+                        } else if idx == self.cfn_parameter_column_ids.len() + 6 {
+                            self.cfn_state.parameters.page_size = PageSize::OneHundred;
                         }
-                    } else if idx == self.cfn_column_ids.len() + 3 {
-                        self.cfn_state.table.page_size = PageSize::Ten;
-                    } else if idx == self.cfn_column_ids.len() + 4 {
-                        self.cfn_state.table.page_size = PageSize::TwentyFive;
-                    } else if idx == self.cfn_column_ids.len() + 5 {
-                        self.cfn_state.table.page_size = PageSize::Fifty;
-                    } else if idx == self.cfn_column_ids.len() + 6 {
-                        self.cfn_state.table.page_size = PageSize::OneHundred;
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        if idx > 0 && idx <= self.cfn_output_column_ids.len() {
+                            if let Some(col) = self.cfn_output_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cfn_output_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    self.cfn_output_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cfn_output_visible_column_ids.push(col);
+                                }
+                            }
+                        } else if idx == self.cfn_output_column_ids.len() + 3 {
+                            self.cfn_state.outputs.page_size = PageSize::Ten;
+                        } else if idx == self.cfn_output_column_ids.len() + 4 {
+                            self.cfn_state.outputs.page_size = PageSize::TwentyFive;
+                        } else if idx == self.cfn_output_column_ids.len() + 5 {
+                            self.cfn_state.outputs.page_size = PageSize::Fifty;
+                        } else if idx == self.cfn_output_column_ids.len() + 6 {
+                            self.cfn_state.outputs.page_size = PageSize::OneHundred;
+                        }
+                    } else if self.cfn_state.current_stack.is_none() {
+                        // Stack list view
+                        if idx > 0 && idx <= self.cfn_column_ids.len() {
+                            if let Some(col) = self.cfn_column_ids.get(idx - 1) {
+                                if let Some(pos) =
+                                    self.cfn_visible_column_ids.iter().position(|c| c == col)
+                                {
+                                    self.cfn_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cfn_visible_column_ids.push(*col);
+                                }
+                            }
+                        } else if idx == self.cfn_column_ids.len() + 3 {
+                            self.cfn_state.table.page_size = PageSize::Ten;
+                        } else if idx == self.cfn_column_ids.len() + 4 {
+                            self.cfn_state.table.page_size = PageSize::TwentyFive;
+                        } else if idx == self.cfn_column_ids.len() + 5 {
+                            self.cfn_state.table.page_size = PageSize::Fifty;
+                        } else if idx == self.cfn_column_ids.len() + 6 {
+                            self.cfn_state.table.page_size = PageSize::OneHundred;
+                        }
                     }
+                    // Template tab: no column toggle
                 } else if self.current_service == Service::IamUsers {
                     let idx = self.column_selector_index;
                     if self.iam_state.current_user.is_some() {
@@ -2139,7 +2251,17 @@ impl App {
                     self.mode = Mode::FilterInput;
                 } else if self.current_service == Service::CloudFormationStacks {
                     self.mode = Mode::FilterInput;
-                    self.cfn_state.input_focus = InputFocus::Filter;
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        self.cfn_state.parameters_input_focus = InputFocus::Filter;
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        self.cfn_state.outputs_input_focus = InputFocus::Filter;
+                    } else {
+                        self.cfn_state.input_focus = InputFocus::Filter;
+                    }
                 } else if self.current_service == Service::SqsQueues {
                     self.mode = Mode::FilterInput;
                     self.sqs_state.input_focus = InputFocus::Filter;
@@ -2222,10 +2344,26 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudFormationStacks
                 {
-                    self.cfn_state.input_focus = self
-                        .cfn_state
-                        .input_focus
-                        .next(&crate::ui::cfn::State::FILTER_CONTROLS);
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        self.cfn_state.parameters_input_focus = self
+                            .cfn_state
+                            .parameters_input_focus
+                            .next(&crate::ui::cfn::State::PARAMETERS_FILTER_CONTROLS);
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        self.cfn_state.outputs_input_focus = self
+                            .cfn_state
+                            .outputs_input_focus
+                            .next(&crate::ui::cfn::State::OUTPUTS_FILTER_CONTROLS);
+                    } else {
+                        self.cfn_state.input_focus = self
+                            .cfn_state
+                            .input_focus
+                            .next(&crate::ui::cfn::State::FILTER_CONTROLS);
+                    }
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::SqsQueues
                 {
@@ -2316,10 +2454,26 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudFormationStacks
                 {
-                    self.cfn_state.input_focus = self
-                        .cfn_state
-                        .input_focus
-                        .prev(&crate::ui::cfn::State::FILTER_CONTROLS);
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        self.cfn_state.parameters_input_focus = self
+                            .cfn_state
+                            .parameters_input_focus
+                            .prev(&crate::ui::cfn::State::PARAMETERS_FILTER_CONTROLS);
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        self.cfn_state.outputs_input_focus = self
+                            .cfn_state
+                            .outputs_input_focus
+                            .prev(&crate::ui::cfn::State::OUTPUTS_FILTER_CONTROLS);
+                    } else {
+                        self.cfn_state.input_focus = self
+                            .cfn_state
+                            .input_focus
+                            .prev(&crate::ui::cfn::State::FILTER_CONTROLS);
+                    }
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::SqsQueues
                 {
@@ -3809,8 +3963,20 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::CloudFormationStacks {
-                    let filtered = self.filtered_cloudformation_stacks();
-                    self.cfn_state.table.next_item(filtered.len());
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        let filtered = crate::ui::cfn::filtered_parameters(self);
+                        self.cfn_state.parameters.next_item(filtered.len());
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        let filtered = crate::ui::cfn::filtered_outputs(self);
+                        self.cfn_state.outputs.next_item(filtered.len());
+                    } else {
+                        let filtered = self.filtered_cloudformation_stacks();
+                        self.cfn_state.table.next_item(filtered.len());
+                    }
                 } else if self.current_service == Service::IamUsers {
                     if self.iam_state.current_user.is_some() {
                         if self.iam_state.user_tab == UserTab::Tags {
@@ -4129,7 +4295,17 @@ impl App {
                         self.lambda_application_state.table.snap_to_page();
                     }
                 } else if self.current_service == Service::CloudFormationStacks {
-                    self.cfn_state.table.prev_item();
+                    if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                    {
+                        self.cfn_state.parameters.prev_item();
+                    } else if self.cfn_state.current_stack.is_some()
+                        && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                    {
+                        self.cfn_state.outputs.prev_item();
+                    } else {
+                        self.cfn_state.table.prev_item();
+                    }
                 } else if self.current_service == Service::IamUsers {
                     self.iam_state.users.prev_item();
                 } else if self.current_service == Service::IamRoles {
@@ -4170,15 +4346,39 @@ impl App {
 
     fn page_down(&mut self) {
         if self.mode == Mode::FilterInput && self.current_service == Service::CloudFormationStacks {
-            use crate::ui::cfn::filtered_cloudformation_stacks;
-            let page_size = self.cfn_state.table.page_size.value();
-            let filtered_count = filtered_cloudformation_stacks(self).len();
-            self.cfn_state.input_focus.handle_page_down(
-                &mut self.cfn_state.table.selected,
-                &mut self.cfn_state.table.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            if self.cfn_state.current_stack.is_some()
+                && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+            {
+                let page_size = self.cfn_state.parameters.page_size.value();
+                let filtered_count = crate::ui::cfn::filtered_parameters(self).len();
+                self.cfn_state.parameters_input_focus.handle_page_down(
+                    &mut self.cfn_state.parameters.selected,
+                    &mut self.cfn_state.parameters.scroll_offset,
+                    page_size,
+                    filtered_count,
+                );
+            } else if self.cfn_state.current_stack.is_some()
+                && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+            {
+                let page_size = self.cfn_state.outputs.page_size.value();
+                let filtered_count = crate::ui::cfn::filtered_outputs(self).len();
+                self.cfn_state.outputs_input_focus.handle_page_down(
+                    &mut self.cfn_state.outputs.selected,
+                    &mut self.cfn_state.outputs.scroll_offset,
+                    page_size,
+                    filtered_count,
+                );
+            } else {
+                use crate::ui::cfn::filtered_cloudformation_stacks;
+                let page_size = self.cfn_state.table.page_size.value();
+                let filtered_count = filtered_cloudformation_stacks(self).len();
+                self.cfn_state.input_focus.handle_page_down(
+                    &mut self.cfn_state.table.selected,
+                    &mut self.cfn_state.table.scroll_offset,
+                    page_size,
+                    filtered_count,
+                );
+            }
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_none()
@@ -4455,8 +4655,20 @@ impl App {
                 let len = crate::ui::lambda::filtered_lambda_applications(self).len();
                 self.lambda_application_state.table.page_down(len);
             } else if self.current_service == Service::CloudFormationStacks {
-                let filtered = self.filtered_cloudformation_stacks();
-                self.cfn_state.table.page_down(filtered.len());
+                if self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                {
+                    let filtered = crate::ui::cfn::filtered_parameters(self);
+                    self.cfn_state.parameters.page_down(filtered.len());
+                } else if self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                {
+                    let filtered = crate::ui::cfn::filtered_outputs(self);
+                    self.cfn_state.outputs.page_down(filtered.len());
+                } else {
+                    let filtered = self.filtered_cloudformation_stacks();
+                    self.cfn_state.table.page_down(filtered.len());
+                }
             } else if self.current_service == Service::IamUsers {
                 let len = crate::ui::iam::filtered_iam_users(self).len();
                 nav_page_down(&mut self.iam_state.users.selected, len, 10);
@@ -4530,12 +4742,32 @@ impl App {
 
     fn page_up(&mut self) {
         if self.mode == Mode::FilterInput && self.current_service == Service::CloudFormationStacks {
-            let page_size = self.cfn_state.table.page_size.value();
-            self.cfn_state.input_focus.handle_page_up(
-                &mut self.cfn_state.table.selected,
-                &mut self.cfn_state.table.scroll_offset,
-                page_size,
-            );
+            if self.cfn_state.current_stack.is_some()
+                && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+            {
+                let page_size = self.cfn_state.parameters.page_size.value();
+                self.cfn_state.parameters_input_focus.handle_page_up(
+                    &mut self.cfn_state.parameters.selected,
+                    &mut self.cfn_state.parameters.scroll_offset,
+                    page_size,
+                );
+            } else if self.cfn_state.current_stack.is_some()
+                && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+            {
+                let page_size = self.cfn_state.outputs.page_size.value();
+                self.cfn_state.outputs_input_focus.handle_page_up(
+                    &mut self.cfn_state.outputs.selected,
+                    &mut self.cfn_state.outputs.scroll_offset,
+                    page_size,
+                );
+            } else {
+                let page_size = self.cfn_state.table.page_size.value();
+                self.cfn_state.input_focus.handle_page_up(
+                    &mut self.cfn_state.table.selected,
+                    &mut self.cfn_state.table.scroll_offset,
+                    page_size,
+                );
+            }
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_none()
@@ -4716,7 +4948,17 @@ impl App {
             } else if self.current_service == Service::LambdaApplications {
                 self.lambda_application_state.table.page_up();
             } else if self.current_service == Service::CloudFormationStacks {
-                self.cfn_state.table.page_up();
+                if self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+                {
+                    self.cfn_state.parameters.page_up();
+                } else if self.cfn_state.current_stack.is_some()
+                    && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+                {
+                    self.cfn_state.outputs.page_up();
+                } else {
+                    self.cfn_state.table.page_up();
+                }
             } else if self.current_service == Service::IamUsers {
                 self.iam_state.users.page_up();
             } else if self.current_service == Service::IamRoles {
@@ -5059,6 +5301,16 @@ impl App {
             && self.cfn_state.current_stack.is_none()
         {
             self.cfn_state.table.toggle_expand();
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+        {
+            self.cfn_state.parameters.toggle_expand();
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+        {
+            self.cfn_state.outputs.toggle_expand();
         } else if self.current_service == Service::IamUsers {
             if self.iam_state.current_user.is_some() {
                 if self.iam_state.user_tab == UserTab::Tags {
@@ -5560,6 +5812,16 @@ impl App {
             && self.cfn_state.current_stack.is_none()
         {
             self.cfn_state.table.collapse();
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+        {
+            self.cfn_state.parameters.collapse();
+        } else if self.current_service == Service::CloudFormationStacks
+            && self.cfn_state.current_stack.is_some()
+            && self.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+        {
+            self.cfn_state.outputs.collapse();
         } else if self.current_service == Service::IamUsers {
             if self.iam_state.users.has_expanded_item() {
                 self.iam_state.users.collapse();
@@ -5968,7 +6230,13 @@ impl App {
                     // Drill into stack detail view
                     let filtered_stacks = self.filtered_cloudformation_stacks();
                     if let Some(stack) = self.cfn_state.table.get_selected(&filtered_stacks) {
-                        self.cfn_state.current_stack = Some(stack.name.clone());
+                        let stack_name = stack.name.clone();
+                        let mut tags = stack.tags.clone();
+                        tags.sort_by(|a, b| a.0.cmp(&b.0));
+
+                        self.cfn_state.current_stack = Some(stack_name);
+                        self.cfn_state.tags.items = tags;
+                        self.cfn_state.tags.reset();
                         self.cfn_state.table.loading = true;
                         self.update_current_tab_breadcrumb();
                     }
@@ -6527,6 +6795,27 @@ impl App {
         let template = self.cloudformation_client.get_template(stack_name).await?;
         self.cfn_state.template_body = template;
         self.cfn_state.template_scroll = 0;
+        Ok(())
+    }
+
+    pub async fn load_cfn_parameters(&mut self, stack_name: &str) -> anyhow::Result<()> {
+        let mut parameters = self
+            .cloudformation_client
+            .get_stack_parameters(stack_name)
+            .await?;
+        parameters.sort_by(|a, b| a.key.cmp(&b.key));
+        self.cfn_state.parameters.items = parameters;
+        self.cfn_state.parameters.reset();
+        Ok(())
+    }
+
+    pub async fn load_cfn_outputs(&mut self, stack_name: &str) -> anyhow::Result<()> {
+        let outputs = self
+            .cloudformation_client
+            .get_stack_outputs(stack_name)
+            .await?;
+        self.cfn_state.outputs.items = outputs;
+        self.cfn_state.outputs.reset();
         Ok(())
     }
 
@@ -14534,5 +14823,180 @@ mod lambda_version_tab_tests {
         assert!(app.lambda_state.metrics_loading);
         assert_eq!(app.lambda_state.monitoring_scroll, 0);
         assert!(app.lambda_state.metric_data_invocations.is_empty());
+    }
+
+    #[test]
+    fn test_cfn_parameters_expand_collapse() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.cfn_state.parameters.items = vec![rusticity_core::cfn::StackParameter {
+            key: "Param1".to_string(),
+            value: "Value1".to_string(),
+            resolved_value: "Resolved1".to_string(),
+        }];
+        app.cfn_state.parameters.reset();
+
+        assert_eq!(app.cfn_state.parameters.expanded_item, None);
+
+        // Right arrow expands
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.cfn_state.parameters.expanded_item, Some(0));
+
+        // Left arrow collapses
+        app.handle_action(Action::PrevPane);
+        assert_eq!(app.cfn_state.parameters.expanded_item, None);
+    }
+
+    #[test]
+    fn test_cfn_parameters_filter_resets_selection() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.cfn_state.parameters.items = vec![
+            rusticity_core::cfn::StackParameter {
+                key: "DatabaseName".to_string(),
+                value: "mydb".to_string(),
+                resolved_value: "mydb".to_string(),
+            },
+            rusticity_core::cfn::StackParameter {
+                key: "InstanceType".to_string(),
+                value: "t2.micro".to_string(),
+                resolved_value: "t2.micro".to_string(),
+            },
+            rusticity_core::cfn::StackParameter {
+                key: "Environment".to_string(),
+                value: "production".to_string(),
+                resolved_value: "production".to_string(),
+            },
+        ];
+        app.cfn_state.parameters.selected = 2; // Select third item
+        app.mode = Mode::FilterInput;
+        app.cfn_state.parameters_input_focus = InputFocus::Filter;
+
+        // Type a filter character - should reset selection
+        app.handle_action(Action::FilterInput('D'));
+        assert_eq!(app.cfn_state.parameters.selected, 0);
+        assert_eq!(app.cfn_state.parameters.filter, "D");
+
+        // Select another item
+        app.cfn_state.parameters.selected = 1;
+
+        // Type another character - should reset again
+        app.handle_action(Action::FilterInput('a'));
+        assert_eq!(app.cfn_state.parameters.selected, 0);
+        assert_eq!(app.cfn_state.parameters.filter, "Da");
+
+        // Select another item
+        app.cfn_state.parameters.selected = 1;
+
+        // Backspace - should also reset
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.cfn_state.parameters.selected, 0);
+        assert_eq!(app.cfn_state.parameters.filter, "D");
+    }
+
+    #[test]
+    fn test_cfn_template_tab_no_preferences() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.mode = Mode::Normal;
+
+        // Try to open preferences - should be ignored
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::Normal); // Should stay in Normal mode
+
+        // GitSync tab should also not allow preferences
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::GitSync;
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::Normal); // Should stay in Normal mode
+
+        // Parameters tab should allow preferences
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::ColumnSelector); // Should open preferences
+
+        // Outputs tab should allow preferences
+        app.mode = Mode::Normal;
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::ColumnSelector); // Should open preferences
+    }
+
+    #[test]
+    fn test_cfn_outputs_expand_collapse() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.cfn_state.outputs.items = vec![rusticity_core::cfn::StackOutput {
+            key: "Output1".to_string(),
+            value: "Value1".to_string(),
+            description: "Description1".to_string(),
+            export_name: "Export1".to_string(),
+        }];
+        app.cfn_state.outputs.reset();
+
+        assert_eq!(app.cfn_state.outputs.expanded_item, None);
+
+        // Right arrow expands
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.cfn_state.outputs.expanded_item, Some(0));
+
+        // Left arrow collapses
+        app.handle_action(Action::PrevPane);
+        assert_eq!(app.cfn_state.outputs.expanded_item, None);
+    }
+
+    #[test]
+    fn test_cfn_outputs_filter_resets_selection() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.cfn_state.outputs.items = vec![
+            rusticity_core::cfn::StackOutput {
+                key: "ApiUrl".to_string(),
+                value: "https://api.example.com".to_string(),
+                description: "API endpoint".to_string(),
+                export_name: "MyApiUrl".to_string(),
+            },
+            rusticity_core::cfn::StackOutput {
+                key: "BucketName".to_string(),
+                value: "my-bucket".to_string(),
+                description: "S3 bucket".to_string(),
+                export_name: "MyBucket".to_string(),
+            },
+        ];
+        app.cfn_state.outputs.reset();
+        app.cfn_state.outputs.selected = 1;
+
+        // Start filter mode
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::FilterInput);
+
+        // Type a character - should reset selection
+        app.handle_action(Action::FilterInput('A'));
+        assert_eq!(app.cfn_state.outputs.selected, 0);
+        assert_eq!(app.cfn_state.outputs.filter, "A");
+
+        // Type more
+        app.cfn_state.outputs.selected = 1;
+        app.handle_action(Action::FilterInput('p'));
+        assert_eq!(app.cfn_state.outputs.selected, 0);
+
+        // Backspace should also reset selection
+        app.cfn_state.outputs.selected = 1;
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.cfn_state.outputs.selected, 0);
     }
 }

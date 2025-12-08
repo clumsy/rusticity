@@ -824,6 +824,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
                 &app.iam_state.trust_policy_document,
                 app.iam_state.trust_policy_scroll,
                 " Trust Policy ",
+                true,
             );
         }
         RoleTab::Tags => {
@@ -884,6 +885,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
                 example_policy,
                 app.iam_state.revoke_sessions_scroll,
                 " Example Policy ",
+                true,
             );
         }
         RoleTab::LastAccessed => {
@@ -1010,6 +1012,7 @@ pub fn render_policy_view(frame: &mut Frame, app: &App, area: Rect) {
         &app.iam_state.policy_document,
         app.iam_state.policy_scroll,
         " Policy Document ",
+        true,
     );
 }
 

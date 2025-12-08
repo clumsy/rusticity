@@ -1,12 +1,15 @@
 use crate::app::App;
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::common::{
-    render_dropdown, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+    render_dropdown, render_pagination_text, translate_column, ColumnId, CyclicEnum, InputFocus,
+    SortDirection,
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
+use crate::ui::table::Column;
 use crate::ui::{labeled_field, render_tabs, rounded_block};
 use ratatui::{prelude::*, widgets::*};
+use rusticity_core::cfn::{StackOutput, StackParameter};
 
 pub const STATUS_FILTER: InputFocus = InputFocus::Dropdown("StatusFilter");
 pub const VIEW_NESTED: InputFocus = InputFocus::Checkbox("ViewNested");
@@ -18,6 +21,12 @@ impl State {
         VIEW_NESTED,
         InputFocus::Pagination,
     ];
+
+    pub const PARAMETERS_FILTER_CONTROLS: [InputFocus; 2] =
+        [InputFocus::Filter, InputFocus::Pagination];
+
+    pub const OUTPUTS_FILTER_CONTROLS: [InputFocus; 2] =
+        [InputFocus::Filter, InputFocus::Pagination];
 }
 
 pub struct State {
@@ -32,6 +41,13 @@ pub struct State {
     pub sort_direction: SortDirection,
     pub template_body: String,
     pub template_scroll: usize,
+    pub parameters: TableState<StackParameter>,
+    pub parameters_input_focus: InputFocus,
+    pub outputs: TableState<StackOutput>,
+    pub outputs_input_focus: InputFocus,
+    pub tags: TableState<(String, String)>,
+    pub policy_scroll: usize,
+    pub expanded_items: std::collections::HashSet<String>,
 }
 
 impl Default for State {
@@ -54,6 +70,13 @@ impl State {
             sort_direction: SortDirection::Desc,
             template_body: String::new(),
             template_scroll: 0,
+            parameters: TableState::new(),
+            parameters_input_focus: InputFocus::Filter,
+            outputs: TableState::new(),
+            outputs_input_focus: InputFocus::Filter,
+            tags: TableState::new(),
+            policy_scroll: 0,
+            expanded_items: std::collections::HashSet::new(),
         }
     }
 }
@@ -196,6 +219,81 @@ pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&crate::cfn::Stack> {
         .into_iter()
         .filter(|s| app.cfn_state.status_filter.matches(&s.status))
         .collect()
+}
+
+pub fn parameter_column_ids() -> Vec<ColumnId> {
+    ParameterColumn::all().iter().map(|c| c.id()).collect()
+}
+
+pub fn output_column_ids() -> Vec<ColumnId> {
+    OutputColumn::all().iter().map(|c| c.id()).collect()
+}
+
+pub fn filtered_parameters(app: &App) -> Vec<&StackParameter> {
+    if app.cfn_state.parameters.filter.is_empty() {
+        app.cfn_state.parameters.items.iter().collect()
+    } else {
+        app.cfn_state
+            .parameters
+            .items
+            .iter()
+            .filter(|p| {
+                p.key
+                    .to_lowercase()
+                    .contains(&app.cfn_state.parameters.filter.to_lowercase())
+                    || p.value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
+                    || p.resolved_value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
+            })
+            .collect()
+    }
+}
+
+pub fn filtered_outputs(app: &App) -> Vec<&StackOutput> {
+    if app.cfn_state.outputs.filter.is_empty() {
+        app.cfn_state.outputs.items.iter().collect()
+    } else {
+        app.cfn_state
+            .outputs
+            .items
+            .iter()
+            .filter(|o| {
+                o.key
+                    .to_lowercase()
+                    .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.description
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.export_name
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+            })
+            .collect()
+    }
+}
+
+pub fn filtered_tags(app: &App) -> Vec<&(String, String)> {
+    if app.cfn_state.tags.filter.is_empty() {
+        app.cfn_state.tags.items.iter().collect()
+    } else {
+        app.cfn_state
+            .tags
+            .items
+            .iter()
+            .filter(|(k, v)| {
+                k.to_lowercase()
+                    .contains(&app.cfn_state.tags.filter.to_lowercase())
+                    || v.to_lowercase()
+                        .contains(&app.cfn_state.tags.filter.to_lowercase())
+            })
+            .collect()
+    }
 }
 
 pub fn render_stacks(frame: &mut Frame, app: &App, area: Rect) {
@@ -377,7 +475,14 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
                 &app.cfn_state.template_body,
                 app.cfn_state.template_scroll,
                 " Template ",
+                true,
             );
+        }
+        DetailTab::Parameters => {
+            render_parameters(frame, app, chunks[2]);
+        }
+        DetailTab::Outputs => {
+            render_outputs(frame, app, chunks[2]);
         }
         _ => {
             let paragraph =
@@ -388,7 +493,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
     }
 }
 
-pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stack, area: Rect) {
+pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &crate::cfn::Stack, area: Rect) {
     let (formatted_status, _status_color) = crate::cfn::format_status(&stack.status);
 
     // Overview section
@@ -503,72 +608,43 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
     ];
     let overview_height = fields.len() as u16 + 2; // +2 for borders
 
-    // Tags section
-    let tags_lines = if stack.tags.is_empty() {
-        vec!["No tags defined".to_string()]
-    } else {
-        let mut lines = vec!["Key                          Value".to_string()];
-        for (key, value) in &stack.tags {
-            lines.push(format!("{}  {}", key, value));
-        }
-        lines
-    };
-    let tags_height = tags_lines.len() as u16 + 2; // +2 for borders
+    // Tags section - use table with filter
+    let tags_height = 12; // Fixed height for tags table
 
-    // Stack policy section
-    let policy_lines = if stack.stack_policy.is_empty() {
-        vec!["No stack policy".to_string()]
-    } else {
-        vec![stack.stack_policy.clone()]
-    };
-    let policy_height = policy_lines.len() as u16 + 2; // +2 for borders
+    // Stack policy section - render with scrolling like template
+    let policy_height = 15; // Fixed height for policy section
 
     // Rollback configuration section
-    let rollback_lines = if stack.rollback_alarms.is_empty() {
-        vec![
-            "Monitoring time".to_string(),
-            format!(
-                "  {}",
-                if stack.rollback_monitoring_time.is_empty() {
-                    "-"
-                } else {
-                    &stack.rollback_monitoring_time
-                }
-            ),
-        ]
-    } else {
-        let mut lines = vec![
-            "Monitoring time".to_string(),
-            format!(
-                "  {}",
-                if stack.rollback_monitoring_time.is_empty() {
-                    "-"
-                } else {
-                    &stack.rollback_monitoring_time
-                }
-            ),
-            String::new(),
-            "CloudWatch alarm ARN".to_string(),
-        ];
-        for alarm in &stack.rollback_alarms {
-            lines.push(format!("  {}", alarm));
+    let rollback_lines: Vec<Line> = {
+        let mut lines = vec![labeled_field(
+            "Monitoring time",
+            if stack.rollback_monitoring_time.is_empty() {
+                "-"
+            } else {
+                &stack.rollback_monitoring_time
+            },
+        )];
+
+        if stack.rollback_alarms.is_empty() {
+            lines.push(Line::from("CloudWatch alarm ARN: No alarms configured"));
+        } else {
+            for alarm in &stack.rollback_alarms {
+                lines.push(Line::from(format!("CloudWatch alarm ARN: {}", alarm)));
+            }
         }
         lines
     };
-    let rollback_height = rollback_lines.len() as u16 + 2; // +2 for borders
+    let rollback_height = rollback_lines.len() as u16 + 2;
 
     // Notification options section
     let notification_lines = if stack.notification_arns.is_empty() {
-        vec![
-            "SNS topic ARN".to_string(),
-            "  No notifications configured".to_string(),
-        ]
+        vec!["SNS topic ARN: No notifications configured".to_string()]
     } else {
-        let mut lines = vec!["SNS topic ARN".to_string()];
-        for arn in &stack.notification_arns {
-            lines.push(format!("  {}", arn));
-        }
-        lines
+        stack
+            .notification_arns
+            .iter()
+            .map(|arn| format!("SNS topic ARN: {}", arn))
+            .collect()
     };
     let notification_height = notification_lines.len() as u16 + 2; // +2 for borders
 
@@ -595,25 +671,26 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
         .wrap(Wrap { trim: true });
     frame.render_widget(overview, sections[0]);
 
-    // Render tags
-    let tags = Paragraph::new(tags_lines.join("\n"))
-        .block(crate::ui::rounded_block().title(" Tags "))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(tags, sections[1]);
+    // Render tags table
+    render_tags(frame, app, sections[1]);
 
-    // Render stack policy
-    let policy = Paragraph::new(policy_lines.join("\n"))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Stack policy "),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(policy, sections[2]);
+    // Render stack policy with scrolling
+    let policy_text = if stack.stack_policy.is_empty() {
+        "No stack policy".to_string()
+    } else {
+        stack.stack_policy.clone()
+    };
+    crate::ui::render_json_highlighted(
+        frame,
+        sections[2],
+        &policy_text,
+        app.cfn_state.policy_scroll,
+        " Stack policy ",
+        true,
+    );
 
     // Render rollback configuration
-    let rollback = Paragraph::new(rollback_lines.join("\n"))
+    let rollback = Paragraph::new(rollback_lines)
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -635,6 +712,62 @@ pub fn render_stack_info(frame: &mut Frame, _app: &App, stack: &crate::cfn::Stac
     frame.render_widget(notifications, sections[4]);
 }
 
+fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered: Vec<&(String, String)> = filtered_tags(app);
+    let filtered_count = filtered.len();
+
+    crate::ui::filter::render_filter_bar(
+        frame,
+        crate::ui::filter::FilterConfig {
+            filter_text: &app.cfn_state.tags.filter,
+            placeholder: "Search tags",
+            mode: app.mode,
+            is_input_focused: false,
+            controls: vec![],
+            area: chunks[0],
+        },
+    );
+
+    let page_size = app.cfn_state.tags.page_size.value();
+    let page_start = app.cfn_state.tags.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_tags: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<(String, String)>>> =
+        vec![Box::new(TagColumn::Key), Box::new(TagColumn::Value)];
+
+    let expanded_index = app.cfn_state.tags.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.tags.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = crate::ui::table::TableConfig {
+        items: page_tags,
+        selected_index: app.cfn_state.tags.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Key",
+        sort_direction: SortDirection::Asc,
+        title: format!(" Tags ({}) ", filtered_count),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|tag: &(String, String)| {
+            crate::ui::table::expanded_from_columns(&columns, tag)
+        })),
+        is_active: true,
+    };
+
+    crate::ui::table::render_table(frame, config);
+}
+
 fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, area: Rect) {
     let lines: Vec<Line> = vec![
         labeled_field("Repository", "-"),
@@ -654,7 +787,12 @@ fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, ar
 
 #[cfg(test)]
 mod tests {
-    use super::State;
+    use super::{filtered_tags, State};
+    use crate::app::App;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
 
     #[test]
     fn test_drift_status_not_checked_formatting() {
@@ -744,6 +882,90 @@ mod tests {
     }
 
     #[test]
+    fn test_notification_arn_format() {
+        use crate::cfn::Stack;
+
+        // Test with notification ARNs
+        let stack_with_notifications = Stack {
+            name: "test-stack".to_string(),
+            stack_id: "id".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            created_time: String::new(),
+            updated_time: String::new(),
+            deleted_time: String::new(),
+            drift_status: String::new(),
+            last_drift_check_time: String::new(),
+            status_reason: String::new(),
+            description: String::new(),
+            detailed_status: String::new(),
+            root_stack: String::new(),
+            parent_stack: String::new(),
+            termination_protection: false,
+            iam_role: String::new(),
+            tags: Vec::new(),
+            stack_policy: String::new(),
+            rollback_monitoring_time: String::new(),
+            rollback_alarms: Vec::new(),
+            notification_arns: vec![
+                "arn:aws:sns:us-east-1:588850195596:CloudFormationNotifications".to_string(),
+            ],
+        };
+
+        let notification_lines: Vec<String> = stack_with_notifications
+            .notification_arns
+            .iter()
+            .map(|arn| format!("SNS topic ARN: {}", arn))
+            .collect();
+
+        assert_eq!(notification_lines.len(), 1);
+        assert_eq!(
+            notification_lines[0],
+            "SNS topic ARN: arn:aws:sns:us-east-1:588850195596:CloudFormationNotifications"
+        );
+
+        // Test with no notifications
+        let stack_without_notifications = Stack {
+            name: "test-stack".to_string(),
+            stack_id: "id".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            created_time: String::new(),
+            updated_time: String::new(),
+            deleted_time: String::new(),
+            drift_status: String::new(),
+            last_drift_check_time: String::new(),
+            status_reason: String::new(),
+            description: String::new(),
+            detailed_status: String::new(),
+            root_stack: String::new(),
+            parent_stack: String::new(),
+            termination_protection: false,
+            iam_role: String::new(),
+            tags: Vec::new(),
+            stack_policy: String::new(),
+            rollback_monitoring_time: String::new(),
+            rollback_alarms: Vec::new(),
+            notification_arns: Vec::new(),
+        };
+
+        let notification_lines: Vec<String> =
+            if stack_without_notifications.notification_arns.is_empty() {
+                vec!["SNS topic ARN: No notifications configured".to_string()]
+            } else {
+                stack_without_notifications
+                    .notification_arns
+                    .iter()
+                    .map(|arn| format!("SNS topic ARN: {}", arn))
+                    .collect()
+            };
+
+        assert_eq!(notification_lines.len(), 1);
+        assert_eq!(
+            notification_lines[0],
+            "SNS topic ARN: No notifications configured"
+        );
+    }
+
+    #[test]
     fn test_template_scroll_state() {
         let state = State::new();
         assert_eq!(state.template_body, "");
@@ -756,5 +978,661 @@ mod tests {
         let template = r#"{"AWSTemplateFormatVersion":"2010-09-09","Resources":{}}"#;
         state.template_body = template.to_string();
         assert_eq!(state.template_body, template);
+    }
+
+    #[test]
+    fn test_rollback_alarm_format() {
+        let alarm_arn = "arn:aws:cloudwatch:us-east-1:123456789012:alarm:MyAlarm";
+        let formatted = format!("CloudWatch alarm ARN: {}", alarm_arn);
+        assert_eq!(
+            formatted,
+            "CloudWatch alarm ARN: arn:aws:cloudwatch:us-east-1:123456789012:alarm:MyAlarm"
+        );
+    }
+
+    #[test]
+    fn test_filtered_tags() {
+        let mut app = test_app();
+        app.cfn_state.tags.items = vec![
+            ("Environment".to_string(), "Production".to_string()),
+            ("Application".to_string(), "WebApp".to_string()),
+            ("Owner".to_string(), "TeamA".to_string()),
+        ];
+
+        // No filter
+        app.cfn_state.tags.filter = String::new();
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 3);
+
+        // Filter by key
+        app.cfn_state.tags.filter = "env".to_string();
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].0, "Environment");
+
+        // Filter by value
+        app.cfn_state.tags.filter = "prod".to_string();
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1, "Production");
+    }
+
+    #[test]
+    fn test_tags_sorted_by_key() {
+        let mut tags = [
+            ("Zebra".to_string(), "value1".to_string()),
+            ("Alpha".to_string(), "value2".to_string()),
+            ("Beta".to_string(), "value3".to_string()),
+        ];
+        tags.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(tags[0].0, "Alpha");
+        assert_eq!(tags[1].0, "Beta");
+        assert_eq!(tags[2].0, "Zebra");
+    }
+
+    #[test]
+    fn test_policy_scroll_state() {
+        let state = State::new();
+        assert_eq!(state.policy_scroll, 0);
+    }
+}
+
+pub fn render_parameters(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered: Vec<&StackParameter> = if app.cfn_state.parameters.filter.is_empty() {
+        app.cfn_state.parameters.items.iter().collect()
+    } else {
+        app.cfn_state
+            .parameters
+            .items
+            .iter()
+            .filter(|p| {
+                p.key
+                    .to_lowercase()
+                    .contains(&app.cfn_state.parameters.filter.to_lowercase())
+                    || p.value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
+                    || p.resolved_value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
+            })
+            .collect()
+    };
+
+    let filtered_count = filtered.len();
+    let page_size = app.cfn_state.parameters.page_size.value();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page = if filtered_count > 0
+        && app.cfn_state.parameters.scroll_offset + page_size >= filtered_count
+    {
+        total_pages.saturating_sub(1)
+    } else {
+        app.cfn_state.parameters.scroll_offset / page_size
+    };
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    crate::ui::filter::render_filter_bar(
+        frame,
+        crate::ui::filter::FilterConfig {
+            filter_text: &app.cfn_state.parameters.filter,
+            placeholder: "Search parameters",
+            mode: app.mode,
+            is_input_focused: app.cfn_state.parameters_input_focus == InputFocus::Filter,
+            controls: vec![crate::ui::filter::FilterControl {
+                text: pagination,
+                is_focused: app.cfn_state.parameters_input_focus == InputFocus::Pagination,
+            }],
+            area: chunks[0],
+        },
+    );
+
+    let page_start = app.cfn_state.parameters.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_params: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<StackParameter>>> = app
+        .cfn_parameter_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            ParameterColumn::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn Column<StackParameter>>)
+        })
+        .collect();
+
+    let expanded_index = app.cfn_state.parameters.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.parameters.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = crate::ui::table::TableConfig {
+        items: page_params,
+        selected_index: app.cfn_state.parameters.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Key",
+        sort_direction: SortDirection::Asc,
+        title: format!(" Parameters ({}) ", filtered_count),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|param: &StackParameter| {
+            crate::ui::table::expanded_from_columns(&columns, param)
+        })),
+        is_active: app.mode != Mode::FilterInput,
+    };
+
+    crate::ui::table::render_table(frame, config);
+}
+
+pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered: Vec<&StackOutput> = if app.cfn_state.outputs.filter.is_empty() {
+        app.cfn_state.outputs.items.iter().collect()
+    } else {
+        app.cfn_state
+            .outputs
+            .items
+            .iter()
+            .filter(|o| {
+                o.key
+                    .to_lowercase()
+                    .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.value
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.description
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+                    || o.export_name
+                        .to_lowercase()
+                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
+            })
+            .collect()
+    };
+
+    let filtered_count = filtered.len();
+    let page_size = app.cfn_state.outputs.page_size.value();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page = if filtered_count > 0
+        && app.cfn_state.outputs.scroll_offset + page_size >= filtered_count
+    {
+        total_pages.saturating_sub(1)
+    } else {
+        app.cfn_state.outputs.scroll_offset / page_size
+    };
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    crate::ui::filter::render_filter_bar(
+        frame,
+        crate::ui::filter::FilterConfig {
+            filter_text: &app.cfn_state.outputs.filter,
+            placeholder: "Search outputs",
+            mode: app.mode,
+            is_input_focused: app.cfn_state.outputs_input_focus == InputFocus::Filter,
+            controls: vec![crate::ui::filter::FilterControl {
+                text: pagination,
+                is_focused: app.cfn_state.outputs_input_focus == InputFocus::Pagination,
+            }],
+            area: chunks[0],
+        },
+    );
+
+    let page_start = app.cfn_state.outputs.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_outputs: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<StackOutput>>> = app
+        .cfn_output_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            OutputColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<StackOutput>>)
+        })
+        .collect();
+
+    let expanded_index = app.cfn_state.outputs.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.outputs.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = crate::ui::table::TableConfig {
+        items: page_outputs,
+        selected_index: app.cfn_state.outputs.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Key",
+        sort_direction: SortDirection::Asc,
+        title: format!(" Outputs ({}) ", filtered_count),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|output: &StackOutput| {
+            crate::ui::table::expanded_from_columns(&columns, output)
+        })),
+        is_active: app.mode != Mode::FilterInput,
+    };
+
+    crate::ui::table::render_table(frame, config);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParameterColumn {
+    Key,
+    Value,
+    ResolvedValue,
+}
+
+impl ParameterColumn {
+    fn id(&self) -> &'static str {
+        match self {
+            ParameterColumn::Key => "cfn.parameter.key",
+            ParameterColumn::Value => "cfn.parameter.value",
+            ParameterColumn::ResolvedValue => "cfn.parameter.resolved_value",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            ParameterColumn::Key => "Key",
+            ParameterColumn::Value => "Value",
+            ParameterColumn::ResolvedValue => "Resolved value",
+        }
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![Self::Key, Self::Value, Self::ResolvedValue]
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "cfn.parameter.key" => Some(Self::Key),
+            "cfn.parameter.value" => Some(Self::Value),
+            "cfn.parameter.resolved_value" => Some(Self::ResolvedValue),
+            _ => None,
+        }
+    }
+}
+
+impl Column<StackParameter> for ParameterColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
+    }
+
+    fn width(&self) -> u16 {
+        let translated = translate_column(self.id(), self.default_name());
+        translated.len().max(match self {
+            ParameterColumn::Key => 40,
+            ParameterColumn::Value => 50,
+            ParameterColumn::ResolvedValue => 50,
+        }) as u16
+    }
+
+    fn render(&self, item: &StackParameter) -> (String, Style) {
+        match self {
+            ParameterColumn::Key => (item.key.clone(), Style::default()),
+            ParameterColumn::Value => (item.value.clone(), Style::default()),
+            ParameterColumn::ResolvedValue => (item.resolved_value.clone(), Style::default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OutputColumn {
+    Key,
+    Value,
+    Description,
+    ExportName,
+}
+
+impl OutputColumn {
+    fn id(&self) -> &'static str {
+        match self {
+            OutputColumn::Key => "cfn.output.key",
+            OutputColumn::Value => "cfn.output.value",
+            OutputColumn::Description => "cfn.output.description",
+            OutputColumn::ExportName => "cfn.output.export_name",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            OutputColumn::Key => "Key",
+            OutputColumn::Value => "Value",
+            OutputColumn::Description => "Description",
+            OutputColumn::ExportName => "Export name",
+        }
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![Self::Key, Self::Value, Self::Description, Self::ExportName]
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "cfn.output.key" => Some(Self::Key),
+            "cfn.output.value" => Some(Self::Value),
+            "cfn.output.description" => Some(Self::Description),
+            "cfn.output.export_name" => Some(Self::ExportName),
+            _ => None,
+        }
+    }
+}
+
+impl Column<StackOutput> for OutputColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
+    }
+
+    fn width(&self) -> u16 {
+        let translated = translate_column(self.id(), self.default_name());
+        translated.len().max(match self {
+            OutputColumn::Key => 40,
+            OutputColumn::Value => 50,
+            OutputColumn::Description => 50,
+            OutputColumn::ExportName => 40,
+        }) as u16
+    }
+
+    fn render(&self, item: &StackOutput) -> (String, Style) {
+        match self {
+            OutputColumn::Key => (item.key.clone(), Style::default()),
+            OutputColumn::Value => (item.value.clone(), Style::default()),
+            OutputColumn::Description => (item.description.clone(), Style::default()),
+            OutputColumn::ExportName => (item.export_name.clone(), Style::default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TagColumn {
+    Key,
+    Value,
+}
+
+impl Column<(String, String)> for TagColumn {
+    fn name(&self) -> &str {
+        match self {
+            TagColumn::Key => "Key",
+            TagColumn::Value => "Value",
+        }
+    }
+
+    fn width(&self) -> u16 {
+        match self {
+            TagColumn::Key => 40,
+            TagColumn::Value => 60,
+        }
+    }
+
+    fn render(&self, item: &(String, String)) -> (String, Style) {
+        match self {
+            TagColumn::Key => (item.0.clone(), Style::default()),
+            TagColumn::Value => (item.1.clone(), Style::default()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod parameter_tests {
+    use super::*;
+    use crate::app::App;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
+
+    #[test]
+    fn test_filtered_parameters_empty_filter() {
+        let mut app = test_app();
+        app.cfn_state.parameters.items = vec![
+            StackParameter {
+                key: "Param1".to_string(),
+                value: "Value1".to_string(),
+                resolved_value: "Resolved1".to_string(),
+            },
+            StackParameter {
+                key: "Param2".to_string(),
+                value: "Value2".to_string(),
+                resolved_value: "Resolved2".to_string(),
+            },
+        ];
+        app.cfn_state.parameters.filter = String::new();
+
+        let filtered = filtered_parameters(&app);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_parameters_by_key() {
+        let mut app = test_app();
+        app.cfn_state.parameters.items = vec![
+            StackParameter {
+                key: "DatabaseName".to_string(),
+                value: "mydb".to_string(),
+                resolved_value: "mydb".to_string(),
+            },
+            StackParameter {
+                key: "InstanceType".to_string(),
+                value: "t2.micro".to_string(),
+                resolved_value: "t2.micro".to_string(),
+            },
+        ];
+        app.cfn_state.parameters.filter = "database".to_string();
+
+        let filtered = filtered_parameters(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key, "DatabaseName");
+    }
+
+    #[test]
+    fn test_filtered_parameters_by_value() {
+        let mut app = test_app();
+        app.cfn_state.parameters.items = vec![
+            StackParameter {
+                key: "Param1".to_string(),
+                value: "production".to_string(),
+                resolved_value: "production".to_string(),
+            },
+            StackParameter {
+                key: "Param2".to_string(),
+                value: "staging".to_string(),
+                resolved_value: "staging".to_string(),
+            },
+        ];
+        app.cfn_state.parameters.filter = "prod".to_string();
+
+        let filtered = filtered_parameters(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].value, "production");
+    }
+
+    #[test]
+    fn test_parameters_state_initialization() {
+        let state = State::new();
+        assert_eq!(state.parameters.items.len(), 0);
+        assert_eq!(state.parameters.selected, 0);
+        assert_eq!(state.parameters.filter, "");
+        assert_eq!(state.parameters_input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_parameters_expansion() {
+        let mut app = test_app();
+        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Parameters;
+        app.cfn_state.parameters.items = vec![StackParameter {
+            key: "Param1".to_string(),
+            value: "Value1".to_string(),
+            resolved_value: "Resolved1".to_string(),
+        }];
+
+        assert_eq!(app.cfn_state.parameters.expanded_item, None);
+
+        // Expand
+        app.cfn_state.parameters.toggle_expand();
+        assert_eq!(app.cfn_state.parameters.expanded_item, Some(0));
+
+        // Collapse
+        app.cfn_state.parameters.collapse();
+        assert_eq!(app.cfn_state.parameters.expanded_item, None);
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use crate::app::App;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
+
+    #[test]
+    fn test_filtered_outputs_empty_filter() {
+        let mut app = test_app();
+        app.cfn_state.outputs.items = vec![
+            StackOutput {
+                key: "Output1".to_string(),
+                value: "Value1".to_string(),
+                description: "Desc1".to_string(),
+                export_name: "Export1".to_string(),
+            },
+            StackOutput {
+                key: "Output2".to_string(),
+                value: "Value2".to_string(),
+                description: "Desc2".to_string(),
+                export_name: "Export2".to_string(),
+            },
+        ];
+        app.cfn_state.outputs.filter = String::new();
+
+        let filtered = filtered_outputs(&app);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_outputs_by_key() {
+        let mut app = test_app();
+        app.cfn_state.outputs.items = vec![
+            StackOutput {
+                key: "ApiUrl".to_string(),
+                value: "https://api.example.com".to_string(),
+                description: "API endpoint".to_string(),
+                export_name: "MyApiUrl".to_string(),
+            },
+            StackOutput {
+                key: "BucketName".to_string(),
+                value: "my-bucket".to_string(),
+                description: "S3 bucket".to_string(),
+                export_name: "MyBucket".to_string(),
+            },
+        ];
+        app.cfn_state.outputs.filter = "api".to_string();
+
+        let filtered = filtered_outputs(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key, "ApiUrl");
+    }
+
+    #[test]
+    fn test_filtered_outputs_by_value() {
+        let mut app = test_app();
+        app.cfn_state.outputs.items = vec![
+            StackOutput {
+                key: "ApiUrl".to_string(),
+                value: "https://api.example.com".to_string(),
+                description: "API endpoint".to_string(),
+                export_name: "MyApiUrl".to_string(),
+            },
+            StackOutput {
+                key: "BucketName".to_string(),
+                value: "my-bucket".to_string(),
+                description: "S3 bucket".to_string(),
+                export_name: "MyBucket".to_string(),
+            },
+        ];
+        app.cfn_state.outputs.filter = "my-bucket".to_string();
+
+        let filtered = filtered_outputs(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key, "BucketName");
+    }
+
+    #[test]
+    fn test_outputs_state_initialization() {
+        let app = test_app();
+        assert_eq!(app.cfn_state.outputs.items.len(), 0);
+        assert_eq!(app.cfn_state.outputs.filter, "");
+        assert_eq!(app.cfn_state.outputs.selected, 0);
+        assert_eq!(app.cfn_state.outputs.expanded_item, None);
+    }
+
+    #[test]
+    fn test_outputs_expansion() {
+        let mut app = test_app();
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Outputs;
+        app.cfn_state.outputs.items = vec![StackOutput {
+            key: "Output1".to_string(),
+            value: "Value1".to_string(),
+            description: "Desc1".to_string(),
+            export_name: "Export1".to_string(),
+        }];
+
+        assert_eq!(app.cfn_state.outputs.expanded_item, None);
+
+        // Expand
+        app.cfn_state.outputs.toggle_expand();
+        assert_eq!(app.cfn_state.outputs.expanded_item, Some(0));
+
+        // Collapse
+        app.cfn_state.outputs.collapse();
+        assert_eq!(app.cfn_state.outputs.expanded_item, None);
+    }
+
+    #[test]
+    fn test_expanded_items_hierarchical_view() {
+        let mut app = test_app();
+
+        // Initially empty
+        assert!(app.cfn_state.expanded_items.is_empty());
+
+        // Expand a resource
+        app.cfn_state
+            .expanded_items
+            .insert("MyNestedStack".to_string());
+        assert!(app.cfn_state.expanded_items.contains("MyNestedStack"));
+
+        // Expand another resource
+        app.cfn_state
+            .expanded_items
+            .insert("MyNestedStack/ChildResource".to_string());
+        assert_eq!(app.cfn_state.expanded_items.len(), 2);
+
+        // Collapse a resource
+        app.cfn_state.expanded_items.remove("MyNestedStack");
+        assert!(!app.cfn_state.expanded_items.contains("MyNestedStack"));
+        assert_eq!(app.cfn_state.expanded_items.len(), 1);
     }
 }

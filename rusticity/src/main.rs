@@ -308,6 +308,16 @@ async fn main() -> Result<()> {
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
+                            if let Err(e) = app.load_cfn_parameters(&stack_name).await {
+                                app.error_message = Some(format!("Failed to load parameters: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            if let Err(e) = app.load_cfn_outputs(&stack_name).await {
+                                app.error_message = Some(format!("Failed to load outputs: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
                             app.cfn_state.table.loading = false;
                         }
 

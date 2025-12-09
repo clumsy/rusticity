@@ -3,6 +3,7 @@ use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
 use crate::cw::insights::{InsightsFocus, InsightsState};
 pub use crate::cw::{Alarm, AlarmColumn};
+pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
 use crate::iam::{self, UserColumn};
@@ -24,6 +25,7 @@ pub use crate::ui::cfn::{
     State as CfnState, StatusFilter as CfnStatusFilter,
 };
 pub use crate::ui::cw::alarms::{AlarmTab, AlarmViewMode};
+pub use crate::ui::ec2::State as Ec2State;
 pub use crate::ui::ecr::{State as EcrState, Tab as EcrTab};
 use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
 pub use crate::ui::lambda::{
@@ -38,8 +40,8 @@ pub use crate::ui::{
     LogGroupColumn, Preferences, StreamColumn, StreamSort, TimeUnit,
 };
 use rusticity_core::{
-    AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, EcrClient, IamClient,
-    LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
+    AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, Ec2Client, EcrClient,
+    IamClient, LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
 };
 
 #[derive(Clone)]
@@ -57,6 +59,7 @@ pub struct App {
     pub s3_client: S3Client,
     pub sqs_client: SqsClient,
     pub alarms_client: AlarmsClient,
+    pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
     pub iam_client: IamClient,
     pub lambda_client: LambdaClient,
@@ -72,6 +75,7 @@ pub struct App {
     pub alarms_state: CloudWatchAlarmsState,
     pub s3_state: S3State,
     pub sqs_state: SqsState,
+    pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub lambda_state: LambdaState,
     pub lambda_application_state: LambdaApplicationState,
@@ -96,6 +100,8 @@ pub struct App {
     pub s3_bucket_column_ids: Vec<ColumnId>,
     pub sqs_visible_column_ids: Vec<ColumnId>,
     pub sqs_column_ids: Vec<ColumnId>,
+    pub ec2_visible_column_ids: Vec<ColumnId>,
+    pub ec2_column_ids: Vec<ColumnId>,
     pub ecr_repo_visible_column_ids: Vec<ColumnId>,
     pub ecr_repo_column_ids: Vec<ColumnId>,
     pub ecr_image_visible_column_ids: Vec<ColumnId>,
@@ -205,6 +211,7 @@ pub enum Service {
     CloudWatchAlarms,
     S3Buckets,
     SqsQueues,
+    Ec2Instances,
     EcrRepositories,
     LambdaFunctions,
     LambdaApplications,
@@ -222,6 +229,7 @@ impl Service {
             Service::CloudWatchAlarms => "CloudWatch > Alarms",
             Service::S3Buckets => "S3 > Buckets",
             Service::SqsQueues => "SQS > Queues",
+            Service::Ec2Instances => "EC2 > Instances",
             Service::EcrRepositories => "ECR > Repositories",
             Service::LambdaFunctions => "Lambda > Functions",
             Service::LambdaApplications => "Lambda > Applications",
@@ -251,9 +259,15 @@ fn nav_page_down(selected: &mut usize, max: usize, page_size: usize) {
 }
 
 impl App {
+    pub fn get_input_focus(&self) -> InputFocus {
+        InputFocus::Filter
+    }
+
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
         if self.current_service == Service::CloudWatchAlarms {
             Some(&mut self.alarms_state.table.filter)
+        } else if self.current_service == Service::Ec2Instances {
+            Some(&mut self.ec2_state.table.filter)
         } else if self.current_service == Service::S3Buckets {
             if self.s3_state.current_bucket.is_some() {
                 Some(&mut self.s3_state.object_filter)
@@ -378,6 +392,7 @@ impl App {
         let s3_client = S3Client::new(config.clone());
         let sqs_client = SqsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
+        let ec2_client = Ec2Client::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
         let iam_client = IamClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
@@ -392,6 +407,7 @@ impl App {
             s3_client,
             sqs_client,
             alarms_client,
+            ec2_client,
             ecr_client,
             iam_client,
             lambda_client,
@@ -407,6 +423,7 @@ impl App {
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
+            ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -450,6 +467,28 @@ impl App {
             .map(|c| c.id())
             .collect(),
             sqs_column_ids: SqsColumn::ids(),
+            ec2_visible_column_ids: [
+                Ec2Column::Name,
+                Ec2Column::InstanceId,
+                Ec2Column::InstanceState,
+                Ec2Column::InstanceType,
+                Ec2Column::StatusCheck,
+                Ec2Column::AlarmStatus,
+                Ec2Column::AvailabilityZone,
+                Ec2Column::PublicIpv4Dns,
+                Ec2Column::PublicIpv4Address,
+                Ec2Column::ElasticIp,
+                Ec2Column::Ipv6Ips,
+                Ec2Column::Monitoring,
+                Ec2Column::SecurityGroupName,
+                Ec2Column::KeyName,
+                Ec2Column::LaunchTime,
+                Ec2Column::PlatformDetails,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            ec2_column_ids: Ec2Column::ids(),
             ecr_repo_visible_column_ids: EcrColumn::ids(),
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
@@ -551,6 +590,7 @@ impl App {
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
+            ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
             lambda_client: LambdaClient::new(config.clone()),
@@ -566,6 +606,7 @@ impl App {
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
+            ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -610,6 +651,28 @@ impl App {
             .map(|c| c.id())
             .collect(),
             sqs_column_ids: SqsColumn::ids(),
+            ec2_visible_column_ids: [
+                Ec2Column::Name,
+                Ec2Column::InstanceId,
+                Ec2Column::InstanceState,
+                Ec2Column::InstanceType,
+                Ec2Column::StatusCheck,
+                Ec2Column::AlarmStatus,
+                Ec2Column::AvailabilityZone,
+                Ec2Column::PublicIpv4Dns,
+                Ec2Column::PublicIpv4Address,
+                Ec2Column::ElasticIp,
+                Ec2Column::Ipv6Ips,
+                Ec2Column::Monitoring,
+                Ec2Column::SecurityGroupName,
+                Ec2Column::KeyName,
+                Ec2Column::LaunchTime,
+                Ec2Column::PlatformDetails,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            ec2_column_ids: Ec2Column::ids(),
             ecr_repo_visible_column_ids: EcrColumn::ids(),
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
@@ -785,6 +848,9 @@ impl App {
                     Service::CloudWatchAlarms => {
                         self.alarms_state.table.reset();
                     }
+                    Service::Ec2Instances => {
+                        self.ec2_state.table.reset();
+                    }
                     Service::EcrRepositories => {
                         self.ecr_state.repositories.reset();
                     }
@@ -866,6 +932,7 @@ impl App {
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
                             "S3Buckets" => Service::S3Buckets,
                             "SqsQueues" => Service::SqsQueues,
+                            "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
@@ -1408,6 +1475,15 @@ impl App {
                             } else {
                                 self.ecr_repo_visible_column_ids.push(*col);
                             }
+                        }
+                    }
+                } else if self.current_service == Service::Ec2Instances {
+                    if let Some(col) = self.ec2_column_ids.get(self.column_selector_index) {
+                        if let Some(pos) = self.ec2_visible_column_ids.iter().position(|c| c == col)
+                        {
+                            self.ec2_visible_column_ids.remove(pos);
+                        } else {
+                            self.ec2_visible_column_ids.push(*col);
                         }
                     }
                 } else if self.current_service == Service::SqsQueues {
@@ -2357,7 +2433,11 @@ impl App {
                 }
             }
             Action::NextFilterFocus => {
-                if self.mode == Mode::FilterInput
+                if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances
+                {
+                    // EC2 has filter and dropdown, cycle between them
+                    // For now, just keep focus on filter since we handle dropdown with Enter
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
                     use crate::ui::lambda::FILTER_CONTROLS;
@@ -2632,7 +2712,11 @@ impl App {
                 }
             }
             Action::ToggleFilterCheckbox => {
-                if self.mode == Mode::InsightsInput {
+                if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances
+                {
+                    self.ec2_state.state_filter = self.ec2_state.state_filter.next();
+                    self.ec2_state.table.reset();
+                } else if self.mode == Mode::InsightsInput {
                     use crate::app::InsightsFocus;
                     if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
                         && self.insights_state.insights.show_dropdown
@@ -2662,6 +2746,12 @@ impl App {
                             }
                         }
                     }
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::Ec2Instances
+                {
+                    // Cycle through state filter
+                    self.ec2_state.state_filter = self.ec2_state.state_filter.next();
+                    self.ec2_state.table.reset();
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudFormationStacks
                 {
@@ -3451,6 +3541,10 @@ impl App {
                     parts.push(group_name.clone());
                 }
             }
+            Service::Ec2Instances => {
+                parts.push("EC2".to_string());
+                parts.push("Instances".to_string());
+            }
         }
 
         parts.join(" > ")
@@ -3616,6 +3710,9 @@ impl App {
                 }
             }
             Service::IamUserGroups => iam::console_url_groups(&self.config.region),
+            Service::Ec2Instances => {
+                format!("https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:", self.config.region, self.config.region)
+            }
         }
     }
 
@@ -3691,6 +3788,8 @@ impl App {
                 } else if self.current_service == Service::CloudWatchAlarms {
                     // 16 columns + 1 header + 1 empty + 2 view + 1 header + 1 empty + 4 page + 1 header + 1 empty + 1 wrap + 1 header = 30
                     29
+                } else if self.current_service == Service::Ec2Instances {
+                    self.ec2_column_ids.len() - 1
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
                         // Images: N columns + 1 header + 1 empty + 1 header + 4 page sizes = N + 7
@@ -6036,6 +6135,7 @@ impl App {
                     "CloudWatch > Logs Insights" => Service::CloudWatchInsights,
                     "CloudWatch > Alarms" => Service::CloudWatchAlarms,
                     "CloudFormation > Stacks" => Service::CloudFormationStacks,
+                    "EC2 > Instances" => Service::Ec2Instances,
                     "ECR > Repositories" => Service::EcrRepositories,
                     "IAM > Users" => Service::IamUsers,
                     "IAM > Roles" => Service::IamRoles,
@@ -6146,6 +6246,11 @@ impl App {
                         }
                         "S3 > Buckets" => {
                             self.current_service = Service::S3Buckets;
+                            self.view_mode = ViewMode::List;
+                            self.service_selected = true;
+                        }
+                        "EC2 > Instances" => {
+                            self.current_service = Service::Ec2Instances;
                             self.view_mode = ViewMode::List;
                             self.service_selected = true;
                         }
@@ -6822,6 +6927,39 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_ec2_instances(&mut self) -> anyhow::Result<()> {
+        let instances = self.ec2_client.list_instances().await?;
+
+        self.ec2_state.table.items = instances
+            .into_iter()
+            .map(|i| Ec2Instance {
+                instance_id: i.instance_id,
+                name: i.name,
+                state: i.state,
+                instance_type: i.instance_type,
+                availability_zone: i.availability_zone,
+                public_ipv4_dns: i.public_ipv4_dns,
+                public_ipv4_address: i.public_ipv4_address,
+                elastic_ip: i.elastic_ip,
+                ipv6_ips: i.ipv6_ips,
+                monitoring: i.monitoring,
+                security_groups: i.security_groups,
+                key_name: i.key_name,
+                launch_time: i.launch_time,
+                platform_details: i.platform_details,
+                status_checks: i.status_checks,
+                alarm_status: i.alarm_status,
+            })
+            .collect();
+
+        // Sort by launch time descending by default
+        self.ec2_state
+            .table
+            .items
+            .sort_by(|a, b| b.launch_time.cmp(&a.launch_time));
+        Ok(())
+    }
+
     pub async fn load_ecr_images(&mut self) -> anyhow::Result<()> {
         if let Some(repo_name) = &self.ecr_state.current_repository {
             if let Some(repo_uri) = &self.ecr_state.current_repository_uri {
@@ -7289,6 +7427,7 @@ impl ServicePickerState {
                 "CloudWatch > Logs Insights",
                 "CloudWatch > Alarms",
                 "CloudFormation > Stacks",
+                "EC2 > Instances",
                 "ECR > Repositories",
                 "IAM > Users",
                 "IAM > Roles",
@@ -15106,5 +15245,100 @@ mod lambda_version_tab_tests {
         app.cfn_state.outputs.selected = 1;
         app.handle_action(Action::FilterBackspace);
         assert_eq!(app.cfn_state.outputs.selected, 0);
+    }
+
+    #[test]
+    fn test_ec2_service_in_picker() {
+        let app = test_app();
+        assert!(app.service_picker.services.contains(&"EC2 > Instances"));
+    }
+
+    #[test]
+    fn test_ec2_state_filter_cycles() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+
+        let initial = app.ec2_state.state_filter;
+        assert_eq!(initial, crate::ui::ec2::StateFilter::AllStates);
+
+        // Cycle through filters using ToggleFilterCheckbox
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::Running);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::Stopped);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::Terminated);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::Pending);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::ShuttingDown);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::Stopping);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, crate::ui::ec2::StateFilter::AllStates);
+    }
+
+    #[test]
+    fn test_ec2_filter_resets_table() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.table.selected = 5;
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_ec2_columns_visible() {
+        let app = test_app();
+        assert_eq!(app.ec2_visible_column_ids.len(), 16);
+        assert_eq!(app.ec2_column_ids.len(), 16);
+    }
+
+    #[test]
+    fn test_ec2_breadcrumbs() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        let breadcrumb = app.breadcrumbs();
+        assert_eq!(breadcrumb, "EC2 > Instances");
+    }
+
+    #[test]
+    fn test_ec2_console_url() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        let url = app.get_console_url();
+        assert!(url.contains("ec2"));
+        assert!(url.contains("Instances"));
+    }
+
+    #[test]
+    fn test_ec2_filter_handling() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        
+        app.handle_action(Action::FilterInput('t'));
+        app.handle_action(Action::FilterInput('e'));
+        app.handle_action(Action::FilterInput('s'));
+        app.handle_action(Action::FilterInput('t'));
+        
+        assert_eq!(app.ec2_state.table.filter, "test");
+        
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.ec2_state.table.filter, "tes");
     }
 }

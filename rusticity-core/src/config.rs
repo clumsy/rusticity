@@ -268,6 +268,14 @@ impl AwsConfig {
             .await;
         aws_sdk_pipes::Client::new(&config)
     }
+
+    pub async fn ec2_client(&self) -> aws_sdk_ec2::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_ec2::Client::new(&config)
+    }
 }
 
 #[cfg(test)]

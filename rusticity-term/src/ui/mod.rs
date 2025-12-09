@@ -1,5 +1,6 @@
 pub mod cfn;
 pub mod cw;
+pub mod ec2;
 pub mod ecr;
 mod expanded_view;
 pub mod filter;
@@ -623,7 +624,7 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
         .tabs
         .iter()
         .enumerate()
-        .map(|(i, tab)| (tab.title.as_str(), i == app.current_tab))
+        .map(|(i, tab)| (tab.title.as_ref(), i == app.current_tab))
         .collect();
     let spans = render_tab_spans(&tab_data);
 
@@ -684,6 +685,13 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::Ec2Instances => ec2::render_instances(
+            frame,
+            area,
+            &app.ec2_state,
+            &app.ec2_visible_column_ids.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+            app.mode,
+        ),
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -1693,6 +1701,13 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::Ec2Instances => ec2::render_instances(
+            frame,
+            area,
+            &app.ec2_state,
+            &app.ec2_visible_column_ids.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+            app.mode,
+        ),
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -3666,7 +3681,7 @@ mod tests {
             encryption_type: "AES256".to_string(),
         };
 
-        let formatted = match repo.encryption_type.as_str() {
+        let formatted = match repo.encryption_type.as_ref() {
             "AES256" => "AES-256".to_string(),
             "KMS" => "KMS".to_string(),
             other => other.to_string(),
@@ -3685,7 +3700,7 @@ mod tests {
             encryption_type: "KMS".to_string(),
         };
 
-        let formatted = match repo.encryption_type.as_str() {
+        let formatted = match repo.encryption_type.as_ref() {
             "AES256" => "AES-256".to_string(),
             "KMS" => "KMS".to_string(),
             other => other.to_string(),

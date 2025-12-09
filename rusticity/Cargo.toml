@@ -6,6 +6,12 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "A snappy terminal UI for AWS written in Rust"
+readme = "../README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories = ["command-line-interface"]
+keywords = ["aws", "terminal", "tui", "cloud"]
 
 [[bin]]
 name = "rusticity"

@@ -238,6 +238,38 @@ impl CloudFormationClient {
 
         Ok(outputs)
     }
+
+    pub async fn get_stack_resources(&self, stack_name: &str) -> Result<Vec<StackResource>> {
+        let client = self.config.cloudformation_client().await;
+        let response = client
+            .describe_stack_resources()
+            .stack_name(stack_name)
+            .send()
+            .await?;
+
+        let mut resources = Vec::new();
+        for resource in response.stack_resources() {
+            resources.push(StackResource {
+                logical_id: resource.logical_resource_id().unwrap_or("").to_string(),
+                physical_id: resource.physical_resource_id().unwrap_or("").to_string(),
+                resource_type: resource.resource_type().unwrap_or("").to_string(),
+                status: resource
+                    .resource_status()
+                    .map(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                module_info: resource
+                    .module_info()
+                    .and_then(|m| m.logical_id_hierarchy())
+                    .unwrap_or("")
+                    .to_string(),
+            });
+        }
+
+        resources.sort_by(|a, b| a.logical_id.cmp(&b.logical_id));
+
+        Ok(resources)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -253,4 +285,13 @@ pub struct StackOutput {
     pub value: String,
     pub description: String,
     pub export_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackResource {
+    pub logical_id: String,
+    pub physical_id: String,
+    pub resource_type: String,
+    pub status: String,
+    pub module_info: String,
 }

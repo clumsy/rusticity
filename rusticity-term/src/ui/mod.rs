@@ -1057,19 +1057,49 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
 
-        // Check if we're in Parameters tab
+        // Check if we're in StackInfo tab (tags table)
         if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::StackInfo
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            // Tags only have Key and Value columns
+            let tag_columns = ["Key", "Value"];
+            for col_name in &tag_columns {
+                let (item, len) = render_column_toggle_string(col_name, true);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.cfn_state.tags.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_some()
             && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
         {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
             max_len = max_len.max(header_len);
 
-            for col_name in &app.cfn_parameter_column_ids {
-                let is_visible = app.cfn_parameter_visible_column_ids.contains(col_name);
-                let (item, len) = render_column_toggle_string(col_name, is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.cfn_parameter_column_ids {
+                let is_visible = app.cfn_parameter_visible_column_ids.contains(col_id);
+                if let Some(col) = crate::ui::cfn::ParameterColumn::from_id(col_id) {
+                    let name = crate::common::translate_column(col.id(), col.default_name());
+                    let (item, len) = render_column_toggle_string(&name, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
 
             all_items.push(ListItem::new(""));
@@ -1091,16 +1121,48 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(header);
             max_len = max_len.max(header_len);
 
-            for col_name in &app.cfn_output_column_ids {
-                let is_visible = app.cfn_output_visible_column_ids.contains(col_name);
-                let (item, len) = render_column_toggle_string(col_name, is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.cfn_output_column_ids {
+                let is_visible = app.cfn_output_visible_column_ids.contains(col_id);
+                if let Some(col) = crate::ui::cfn::OutputColumn::from_id(col_id) {
+                    let name = crate::common::translate_column(col.id(), col.default_name());
+                    let (item, len) = render_column_toggle_string(&name, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
 
             all_items.push(ListItem::new(""));
             let (page_items, page_len) = render_page_size_section(
                 app.cfn_state.outputs.page_size,
+                &[
+                    (PageSize::Ten, "10"),
+                    (PageSize::TwentyFive, "25"),
+                    (PageSize::Fifty, "50"),
+                    (PageSize::OneHundred, "100"),
+                ],
+            );
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Resources
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cfn_resource_column_ids {
+                let is_visible = app.cfn_resource_visible_column_ids.contains(col_id);
+                if let Some(col) = crate::ui::cfn::ResourceColumn::from_id(col_id) {
+                    let name = crate::common::translate_column(col.id(), col.default_name());
+                    let (item, len) = render_column_toggle_string(&name, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(
+                app.cfn_state.resources.page_size,
                 &[
                     (PageSize::Ten, "10"),
                     (PageSize::TwentyFive, "25"),

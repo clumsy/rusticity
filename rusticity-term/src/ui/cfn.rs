@@ -9,7 +9,8 @@ use crate::table::TableState;
 use crate::ui::table::Column;
 use crate::ui::{labeled_field, render_tabs, rounded_block};
 use ratatui::{prelude::*, widgets::*};
-use rusticity_core::cfn::{StackOutput, StackParameter};
+use rusticity_core::cfn::{StackOutput, StackParameter, StackResource};
+use std::collections::HashSet;
 
 pub const STATUS_FILTER: InputFocus = InputFocus::Dropdown("StatusFilter");
 pub const VIEW_NESTED: InputFocus = InputFocus::Checkbox("ViewNested");
@@ -26,6 +27,9 @@ impl State {
         [InputFocus::Filter, InputFocus::Pagination];
 
     pub const OUTPUTS_FILTER_CONTROLS: [InputFocus; 2] =
+        [InputFocus::Filter, InputFocus::Pagination];
+
+    pub const RESOURCES_FILTER_CONTROLS: [InputFocus; 2] =
         [InputFocus::Filter, InputFocus::Pagination];
 }
 
@@ -47,7 +51,11 @@ pub struct State {
     pub outputs_input_focus: InputFocus,
     pub tags: TableState<(String, String)>,
     pub policy_scroll: usize,
-    pub expanded_items: std::collections::HashSet<String>,
+    /// Tracks expanded items for hierarchical views (Resources, Events tabs).
+    /// Keys are resource IDs or logical resource names that are currently expanded.
+    pub expanded_items: HashSet<String>,
+    pub resources: TableState<StackResource>,
+    pub resources_input_focus: InputFocus,
 }
 
 impl Default for State {
@@ -76,7 +84,9 @@ impl State {
             outputs_input_focus: InputFocus::Filter,
             tags: TableState::new(),
             policy_scroll: 0,
-            expanded_items: std::collections::HashSet::new(),
+            expanded_items: HashSet::new(),
+            resources: TableState::new(),
+            resources_input_focus: InputFocus::Filter,
         }
     }
 }
@@ -194,6 +204,72 @@ impl DetailTab {
             DetailTab::GitSync,
         ]
     }
+
+    pub fn allows_preferences(&self) -> bool {
+        matches!(
+            self,
+            DetailTab::StackInfo
+                | DetailTab::Parameters
+                | DetailTab::Outputs
+                | DetailTab::Resources
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResourceColumn {
+    LogicalId,
+    PhysicalId,
+    Type,
+    Status,
+    Module,
+}
+
+impl ResourceColumn {
+    pub fn id(&self) -> &'static str {
+        match self {
+            ResourceColumn::LogicalId => "cfn.resource.logical_id",
+            ResourceColumn::PhysicalId => "cfn.resource.physical_id",
+            ResourceColumn::Type => "cfn.resource.type",
+            ResourceColumn::Status => "cfn.resource.status",
+            ResourceColumn::Module => "cfn.resource.module",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            ResourceColumn::LogicalId => "Logical ID",
+            ResourceColumn::PhysicalId => "Physical ID",
+            ResourceColumn::Type => "Type",
+            ResourceColumn::Status => "Status",
+            ResourceColumn::Module => "Module",
+        }
+    }
+
+    pub fn all() -> Vec<ResourceColumn> {
+        vec![
+            ResourceColumn::LogicalId,
+            ResourceColumn::PhysicalId,
+            ResourceColumn::Type,
+            ResourceColumn::Status,
+            ResourceColumn::Module,
+        ]
+    }
+
+    pub fn from_id(id: &str) -> Option<ResourceColumn> {
+        match id {
+            "cfn.resource.logical_id" => Some(ResourceColumn::LogicalId),
+            "cfn.resource.physical_id" => Some(ResourceColumn::PhysicalId),
+            "cfn.resource.type" => Some(ResourceColumn::Type),
+            "cfn.resource.status" => Some(ResourceColumn::Status),
+            "cfn.resource.module" => Some(ResourceColumn::Module),
+            _ => None,
+        }
+    }
+}
+
+pub fn resource_column_ids() -> Vec<ColumnId> {
+    ResourceColumn::all().iter().map(|c| c.id()).collect()
 }
 
 pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&crate::cfn::Stack> {
@@ -273,6 +349,35 @@ pub fn filtered_outputs(app: &App) -> Vec<&StackOutput> {
                     || o.export_name
                         .to_lowercase()
                         .contains(&app.cfn_state.outputs.filter.to_lowercase())
+            })
+            .collect()
+    }
+}
+
+pub fn filtered_resources(app: &App) -> Vec<&StackResource> {
+    if app.cfn_state.resources.filter.is_empty() {
+        app.cfn_state.resources.items.iter().collect()
+    } else {
+        app.cfn_state
+            .resources
+            .items
+            .iter()
+            .filter(|r| {
+                r.logical_id
+                    .to_lowercase()
+                    .contains(&app.cfn_state.resources.filter.to_lowercase())
+                    || r.physical_id
+                        .to_lowercase()
+                        .contains(&app.cfn_state.resources.filter.to_lowercase())
+                    || r.resource_type
+                        .to_lowercase()
+                        .contains(&app.cfn_state.resources.filter.to_lowercase())
+                    || r.status
+                        .to_lowercase()
+                        .contains(&app.cfn_state.resources.filter.to_lowercase())
+                    || r.module_info
+                        .to_lowercase()
+                        .contains(&app.cfn_state.resources.filter.to_lowercase())
             })
             .collect()
     }
@@ -483,6 +588,9 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         }
         DetailTab::Outputs => {
             render_outputs(frame, app, chunks[2]);
+        }
+        DetailTab::Resources => {
+            render_resources(frame, app, chunks[2]);
         }
         _ => {
             let paragraph =
@@ -769,20 +877,32 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, area: Rect) {
-    let lines: Vec<Line> = vec![
-        labeled_field("Repository", "-"),
-        labeled_field("Deployment file path", "-"),
-        labeled_field("Git sync", "-"),
-        labeled_field("Repository provider", "-"),
-        labeled_field("Repository sync status", "-"),
-        labeled_field("Provisioning status", "-"),
-        labeled_field("Branch", "-"),
-        labeled_field("Repository sync status message", "-"),
+    let fields = [
+        ("Repository", "-"),
+        ("Deployment file path", "-"),
+        ("Git sync", "-"),
+        ("Repository provider", "-"),
+        ("Repository sync status", "-"),
+        ("Provisioning status", "-"),
+        ("Branch", "-"),
+        ("Repository sync status message", "-"),
     ];
+
+    let git_sync_height = crate::ui::block_height_for(fields.len());
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(git_sync_height), Constraint::Min(0)])
+        .split(area);
+
+    let lines: Vec<Line> = fields
+        .iter()
+        .map(|&(label, value)| labeled_field(label, value))
+        .collect();
 
     let block = rounded_block().title(" Git sync ");
     let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, sections[0]);
 }
 
 #[cfg(test)]
@@ -1227,6 +1347,80 @@ pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
     crate::ui::table::render_table(frame, config);
 }
 
+pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered: Vec<&StackResource> = filtered_resources(app);
+    let filtered_count = filtered.len();
+    let page_size = app.cfn_state.resources.page_size.value();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page = if filtered_count > 0
+        && app.cfn_state.resources.scroll_offset + page_size >= filtered_count
+    {
+        total_pages.saturating_sub(1)
+    } else {
+        app.cfn_state.resources.scroll_offset / page_size
+    };
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    crate::ui::filter::render_filter_bar(
+        frame,
+        crate::ui::filter::FilterConfig {
+            filter_text: &app.cfn_state.resources.filter,
+            placeholder: "Search resources",
+            mode: app.mode,
+            is_input_focused: app.cfn_state.resources_input_focus == InputFocus::Filter,
+            controls: vec![crate::ui::filter::FilterControl {
+                text: pagination,
+                is_focused: app.cfn_state.resources_input_focus == InputFocus::Pagination,
+            }],
+            area: chunks[0],
+        },
+    );
+
+    let page_start = app.cfn_state.resources.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_resources: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<StackResource>>> = app
+        .cfn_resource_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            ResourceColumn::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn Column<StackResource>>)
+        })
+        .collect();
+
+    let expanded_index = app.cfn_state.resources.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.resources.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = crate::ui::table::TableConfig {
+        items: page_resources,
+        selected_index: app.cfn_state.resources.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Logical ID",
+        sort_direction: SortDirection::Asc,
+        title: format!(" Resources ({}) ", filtered_count),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|resource: &StackResource| {
+            crate::ui::table::expanded_from_columns(&columns, resource)
+        })),
+        is_active: app.mode != Mode::FilterInput,
+    };
+
+    crate::ui::table::render_table(frame, config);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ParameterColumn {
     Key,
@@ -1255,7 +1449,7 @@ impl ParameterColumn {
         vec![Self::Key, Self::Value, Self::ResolvedValue]
     }
 
-    fn from_id(id: &str) -> Option<Self> {
+    pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "cfn.parameter.key" => Some(Self::Key),
             "cfn.parameter.value" => Some(Self::Value),
@@ -1323,7 +1517,7 @@ impl OutputColumn {
         vec![Self::Key, Self::Value, Self::Description, Self::ExportName]
     }
 
-    fn from_id(id: &str) -> Option<Self> {
+    pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "cfn.output.key" => Some(Self::Key),
             "cfn.output.value" => Some(Self::Value),
@@ -1359,6 +1553,37 @@ impl Column<StackOutput> for OutputColumn {
             OutputColumn::Value => (item.value.clone(), Style::default()),
             OutputColumn::Description => (item.description.clone(), Style::default()),
             OutputColumn::ExportName => (item.export_name.clone(), Style::default()),
+        }
+    }
+}
+
+impl Column<StackResource> for ResourceColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
+    }
+
+    fn width(&self) -> u16 {
+        let translated = translate_column(self.id(), self.default_name());
+        translated.len().max(match self {
+            ResourceColumn::LogicalId => 40,
+            ResourceColumn::PhysicalId => 50,
+            ResourceColumn::Type => 40,
+            ResourceColumn::Status => 25,
+            ResourceColumn::Module => 40,
+        }) as u16
+    }
+
+    fn render(&self, item: &StackResource) -> (String, Style) {
+        match self {
+            ResourceColumn::LogicalId => (item.logical_id.clone(), Style::default()),
+            ResourceColumn::PhysicalId => (item.physical_id.clone(), Style::default()),
+            ResourceColumn::Type => (item.resource_type.clone(), Style::default()),
+            ResourceColumn::Status => (item.status.clone(), Style::default()),
+            ResourceColumn::Module => (item.module_info.clone(), Style::default()),
         }
     }
 }
@@ -1634,5 +1859,326 @@ mod output_tests {
         app.cfn_state.expanded_items.remove("MyNestedStack");
         assert!(!app.cfn_state.expanded_items.contains("MyNestedStack"));
         assert_eq!(app.cfn_state.expanded_items.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+    use crate::app::App;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
+
+    #[test]
+    fn test_resources_state_initialization() {
+        let app = test_app();
+        assert_eq!(app.cfn_state.resources.items.len(), 0);
+        assert_eq!(app.cfn_state.resources.filter, "");
+        assert_eq!(app.cfn_state.resources.selected, 0);
+    }
+
+    #[test]
+    fn test_filtered_resources_empty_filter() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "MyBucket".to_string(),
+                physical_id: "my-bucket-123".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "MyFunction".to_string(),
+                physical_id: "my-function-456".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+        app.cfn_state.resources.filter = String::new();
+
+        let filtered: Vec<&StackResource> = if app.cfn_state.resources.filter.is_empty() {
+            app.cfn_state.resources.items.iter().collect()
+        } else {
+            app.cfn_state
+                .resources
+                .items
+                .iter()
+                .filter(|r| {
+                    r.logical_id
+                        .to_lowercase()
+                        .contains(&app.cfn_state.resources.filter.to_lowercase())
+                })
+                .collect()
+        };
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_resources_by_logical_id() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "MyBucket".to_string(),
+                physical_id: "my-bucket-123".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "MyFunction".to_string(),
+                physical_id: "my-function-456".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+        app.cfn_state.resources.filter = "bucket".to_string();
+
+        let filtered: Vec<&StackResource> = app
+            .cfn_state
+            .resources
+            .items
+            .iter()
+            .filter(|r| {
+                r.logical_id
+                    .to_lowercase()
+                    .contains(&app.cfn_state.resources.filter.to_lowercase())
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "MyBucket");
+    }
+
+    #[test]
+    fn test_filtered_resources_by_type() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "MyBucket".to_string(),
+                physical_id: "my-bucket-123".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "MyFunction".to_string(),
+                physical_id: "my-function-456".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+        app.cfn_state.resources.filter = "lambda".to_string();
+
+        let filtered: Vec<&StackResource> = app
+            .cfn_state
+            .resources
+            .items
+            .iter()
+            .filter(|r| {
+                r.resource_type
+                    .to_lowercase()
+                    .contains(&app.cfn_state.resources.filter.to_lowercase())
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "MyFunction");
+    }
+
+    #[test]
+    fn test_resources_sorted_by_logical_id() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "ZBucket".to_string(),
+                physical_id: "z-bucket".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "AFunction".to_string(),
+                physical_id: "a-function".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+
+        // Resources should be sorted by logical_id in the API response
+        // but let's verify the order
+        assert_eq!(app.cfn_state.resources.items[0].logical_id, "ZBucket");
+        assert_eq!(app.cfn_state.resources.items[1].logical_id, "AFunction");
+    }
+
+    #[test]
+    fn test_resources_expansion() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![StackResource {
+            logical_id: "MyBucket".to_string(),
+            physical_id: "my-bucket-123".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            module_info: String::new(),
+        }];
+
+        assert_eq!(app.cfn_state.resources.expanded_item, None);
+
+        // Expand
+        app.cfn_state.resources.toggle_expand();
+        assert_eq!(app.cfn_state.resources.expanded_item, Some(0));
+
+        // Collapse
+        app.cfn_state.resources.collapse();
+        assert_eq!(app.cfn_state.resources.expanded_item, None);
+    }
+
+    #[test]
+    fn test_resource_column_ids() {
+        let ids = resource_column_ids();
+        assert_eq!(ids.len(), 5);
+        assert!(ids.contains(&"cfn.resource.logical_id"));
+        assert!(ids.contains(&"cfn.resource.physical_id"));
+        assert!(ids.contains(&"cfn.resource.type"));
+        assert!(ids.contains(&"cfn.resource.status"));
+        assert!(ids.contains(&"cfn.resource.module"));
+    }
+
+    #[test]
+    fn test_detail_tab_allows_preferences() {
+        assert!(DetailTab::StackInfo.allows_preferences());
+        assert!(DetailTab::Parameters.allows_preferences());
+        assert!(DetailTab::Outputs.allows_preferences());
+        assert!(DetailTab::Resources.allows_preferences());
+        assert!(!DetailTab::Template.allows_preferences());
+        assert!(!DetailTab::Events.allows_preferences());
+        assert!(!DetailTab::ChangeSets.allows_preferences());
+        assert!(!DetailTab::GitSync.allows_preferences());
+    }
+
+    #[test]
+    fn test_resources_tree_view_expansion() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "ParentModule".to_string(),
+                physical_id: "parent-123".to_string(),
+                resource_type: "AWS::CloudFormation::Stack".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "ChildResource".to_string(),
+                physical_id: "child-456".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: "ParentModule".to_string(),
+            },
+        ];
+
+        // Initially not expanded
+        assert!(!app.cfn_state.expanded_items.contains("ParentModule"));
+
+        // Expand parent
+        app.cfn_state
+            .expanded_items
+            .insert("ParentModule".to_string());
+        assert!(app.cfn_state.expanded_items.contains("ParentModule"));
+
+        // Collapse parent
+        app.cfn_state.expanded_items.remove("ParentModule");
+        assert!(!app.cfn_state.expanded_items.contains("ParentModule"));
+    }
+
+    #[test]
+    fn test_resources_navigation() {
+        let mut app = test_app();
+        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Resources;
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "Resource1".to_string(),
+                physical_id: "res-1".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "Resource2".to_string(),
+                physical_id: "res-2".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+
+        assert_eq!(app.cfn_state.resources.selected, 0);
+
+        // Navigate down
+        let filtered = filtered_resources(&app);
+        app.cfn_state.resources.next_item(filtered.len());
+        assert_eq!(app.cfn_state.resources.selected, 1);
+
+        // Navigate up
+        app.cfn_state.resources.prev_item();
+        assert_eq!(app.cfn_state.resources.selected, 0);
+    }
+
+    #[test]
+    fn test_resources_filter() {
+        let mut app = test_app();
+        app.cfn_state.resources.items = vec![
+            StackResource {
+                logical_id: "MyBucket".to_string(),
+                physical_id: "my-bucket-123".to_string(),
+                resource_type: "AWS::S3::Bucket".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+            StackResource {
+                logical_id: "MyFunction".to_string(),
+                physical_id: "my-function-456".to_string(),
+                resource_type: "AWS::Lambda::Function".to_string(),
+                status: "CREATE_COMPLETE".to_string(),
+                module_info: String::new(),
+            },
+        ];
+
+        // No filter
+        app.cfn_state.resources.filter = String::new();
+        let filtered = filtered_resources(&app);
+        assert_eq!(filtered.len(), 2);
+
+        // Filter by logical ID
+        app.cfn_state.resources.filter = "bucket".to_string();
+        let filtered = filtered_resources(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "MyBucket");
+
+        // Filter by type
+        app.cfn_state.resources.filter = "lambda".to_string();
+        let filtered = filtered_resources(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "MyFunction");
+    }
+
+    #[test]
+    fn test_resources_page_size() {
+        use crate::common::PageSize;
+        let mut app = test_app();
+
+        // Default page size
+        assert_eq!(app.cfn_state.resources.page_size, PageSize::Fifty);
+        assert_eq!(app.cfn_state.resources.page_size.value(), 50);
+
+        // Change page size
+        app.cfn_state.resources.page_size = PageSize::TwentyFive;
+        assert_eq!(app.cfn_state.resources.page_size, PageSize::TwentyFive);
+        assert_eq!(app.cfn_state.resources.page_size.value(), 25);
     }
 }

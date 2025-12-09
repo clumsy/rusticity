@@ -1,5 +1,6 @@
 pub mod cfn;
 pub mod cw;
+pub mod ec2;
 pub mod ecr;
 mod expanded_view;
 pub mod filter;
@@ -17,6 +18,7 @@ pub mod table;
 
 use crate::cfn::Column as CfnColumn;
 use crate::cw::alarms::AlarmColumn;
+use crate::ec2::Column as Ec2Column;
 use crate::ecr::{image, repo};
 use crate::lambda::{DeploymentColumn, ResourceColumn};
 use crate::sqs::queue::Column as SqsColumn;
@@ -623,7 +625,7 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
         .tabs
         .iter()
         .enumerate()
-        .map(|(i, tab)| (tab.title.as_str(), i == app.current_tab))
+        .map(|(i, tab)| (tab.title.as_ref(), i == app.current_tab))
         .collect();
     let spans = render_tab_spans(&tab_data);
 
@@ -684,6 +686,16 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::Ec2Instances => ec2::render_instances(
+            frame,
+            area,
+            &app.ec2_state,
+            &app.ec2_visible_column_ids
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>(),
+            app.mode,
+        ),
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -854,6 +866,38 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 .collect()
         };
         (items, " Preferences ", max_len)
+    } else if app.current_service == Service::Ec2Instances {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col_id in &app.ec2_column_ids {
+            if let Some(col) = Ec2Column::from_id(col_id) {
+                let is_visible = app.ec2_visible_column_ids.contains(col_id);
+                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+
+        let (page_items, page_len) = render_page_size_section(
+            app.ec2_state.table.page_size,
+            &[
+                (PageSize::Ten, "10"),
+                (PageSize::TwentyFive, "25"),
+                (PageSize::Fifty, "50"),
+                (PageSize::OneHundred, "100"),
+            ],
+        );
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::SqsQueues {
         if app.sqs_state.current_queue.is_some()
             && app.sqs_state.detail_tab == crate::ui::sqs::QueueDetailTab::LambdaTriggers
@@ -1693,6 +1737,16 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::Ec2Instances => ec2::render_instances(
+            frame,
+            area,
+            &app.ec2_state,
+            &app.ec2_visible_column_ids
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>(),
+            app.mode,
+        ),
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -3666,7 +3720,7 @@ mod tests {
             encryption_type: "AES256".to_string(),
         };
 
-        let formatted = match repo.encryption_type.as_str() {
+        let formatted = match repo.encryption_type.as_ref() {
             "AES256" => "AES-256".to_string(),
             "KMS" => "KMS".to_string(),
             other => other.to_string(),
@@ -3685,7 +3739,7 @@ mod tests {
             encryption_type: "KMS".to_string(),
         };
 
-        let formatted = match repo.encryption_type.as_str() {
+        let formatted = match repo.encryption_type.as_ref() {
             "AES256" => "AES-256".to_string(),
             "KMS" => "KMS".to_string(),
             other => other.to_string(),

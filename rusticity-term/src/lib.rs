@@ -3,6 +3,7 @@ pub mod aws;
 pub mod cfn;
 pub mod common;
 pub mod cw;
+pub mod ec2;
 pub mod ecr;
 pub mod event;
 pub mod iam;
@@ -41,6 +42,7 @@ pub fn init() {
 
     // Initialize each service to populate their column defaults
     lambda::init(&mut i18n);
+    ec2::init(&mut i18n);
     ecr::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);

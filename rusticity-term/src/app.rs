@@ -3,6 +3,7 @@ use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
 use crate::cw::insights::{InsightsFocus, InsightsState};
 pub use crate::cw::{Alarm, AlarmColumn};
+pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
 use crate::iam::{self, UserColumn};
@@ -24,6 +25,10 @@ pub use crate::ui::cfn::{
     State as CfnState, StatusFilter as CfnStatusFilter,
 };
 pub use crate::ui::cw::alarms::{AlarmTab, AlarmViewMode};
+use crate::ui::ec2;
+pub use crate::ui::ec2::{
+    State as Ec2State, StateFilter as Ec2StateFilter, STATE_FILTER as EC2_STATE_FILTER,
+};
 pub use crate::ui::ecr::{State as EcrState, Tab as EcrTab};
 use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
 pub use crate::ui::lambda::{
@@ -38,8 +43,8 @@ pub use crate::ui::{
     LogGroupColumn, Preferences, StreamColumn, StreamSort, TimeUnit,
 };
 use rusticity_core::{
-    AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, EcrClient, IamClient,
-    LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
+    AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, Ec2Client, EcrClient,
+    IamClient, LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
 };
 
 #[derive(Clone)]
@@ -57,6 +62,7 @@ pub struct App {
     pub s3_client: S3Client,
     pub sqs_client: SqsClient,
     pub alarms_client: AlarmsClient,
+    pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
     pub iam_client: IamClient,
     pub lambda_client: LambdaClient,
@@ -72,6 +78,7 @@ pub struct App {
     pub alarms_state: CloudWatchAlarmsState,
     pub s3_state: S3State,
     pub sqs_state: SqsState,
+    pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub lambda_state: LambdaState,
     pub lambda_application_state: LambdaApplicationState,
@@ -96,6 +103,8 @@ pub struct App {
     pub s3_bucket_column_ids: Vec<ColumnId>,
     pub sqs_visible_column_ids: Vec<ColumnId>,
     pub sqs_column_ids: Vec<ColumnId>,
+    pub ec2_visible_column_ids: Vec<ColumnId>,
+    pub ec2_column_ids: Vec<ColumnId>,
     pub ecr_repo_visible_column_ids: Vec<ColumnId>,
     pub ecr_repo_column_ids: Vec<ColumnId>,
     pub ecr_image_visible_column_ids: Vec<ColumnId>,
@@ -205,6 +214,7 @@ pub enum Service {
     CloudWatchAlarms,
     S3Buckets,
     SqsQueues,
+    Ec2Instances,
     EcrRepositories,
     LambdaFunctions,
     LambdaApplications,
@@ -222,6 +232,7 @@ impl Service {
             Service::CloudWatchAlarms => "CloudWatch > Alarms",
             Service::S3Buckets => "S3 > Buckets",
             Service::SqsQueues => "SQS > Queues",
+            Service::Ec2Instances => "EC2 > Instances",
             Service::EcrRepositories => "ECR > Repositories",
             Service::LambdaFunctions => "Lambda > Functions",
             Service::LambdaApplications => "Lambda > Applications",
@@ -251,9 +262,15 @@ fn nav_page_down(selected: &mut usize, max: usize, page_size: usize) {
 }
 
 impl App {
+    pub fn get_input_focus(&self) -> InputFocus {
+        InputFocus::Filter
+    }
+
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
         if self.current_service == Service::CloudWatchAlarms {
             Some(&mut self.alarms_state.table.filter)
+        } else if self.current_service == Service::Ec2Instances {
+            Some(&mut self.ec2_state.table.filter)
         } else if self.current_service == Service::S3Buckets {
             if self.s3_state.current_bucket.is_some() {
                 Some(&mut self.s3_state.object_filter)
@@ -378,6 +395,7 @@ impl App {
         let s3_client = S3Client::new(config.clone());
         let sqs_client = SqsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
+        let ec2_client = Ec2Client::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
         let iam_client = IamClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
@@ -392,6 +410,7 @@ impl App {
             s3_client,
             sqs_client,
             alarms_client,
+            ec2_client,
             ecr_client,
             iam_client,
             lambda_client,
@@ -407,6 +426,7 @@ impl App {
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
+            ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -450,6 +470,28 @@ impl App {
             .map(|c| c.id())
             .collect(),
             sqs_column_ids: SqsColumn::ids(),
+            ec2_visible_column_ids: [
+                Ec2Column::Name,
+                Ec2Column::InstanceId,
+                Ec2Column::InstanceState,
+                Ec2Column::InstanceType,
+                Ec2Column::StatusCheck,
+                Ec2Column::AlarmStatus,
+                Ec2Column::AvailabilityZone,
+                Ec2Column::PublicIpv4Dns,
+                Ec2Column::PublicIpv4Address,
+                Ec2Column::ElasticIp,
+                Ec2Column::Ipv6Ips,
+                Ec2Column::Monitoring,
+                Ec2Column::SecurityGroupName,
+                Ec2Column::KeyName,
+                Ec2Column::LaunchTime,
+                Ec2Column::PlatformDetails,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            ec2_column_ids: Ec2Column::ids(),
             ecr_repo_visible_column_ids: EcrColumn::ids(),
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
@@ -551,6 +593,7 @@ impl App {
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
+            ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
             lambda_client: LambdaClient::new(config.clone()),
@@ -566,6 +609,7 @@ impl App {
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
+            ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -610,6 +654,28 @@ impl App {
             .map(|c| c.id())
             .collect(),
             sqs_column_ids: SqsColumn::ids(),
+            ec2_visible_column_ids: [
+                Ec2Column::Name,
+                Ec2Column::InstanceId,
+                Ec2Column::InstanceState,
+                Ec2Column::InstanceType,
+                Ec2Column::StatusCheck,
+                Ec2Column::AlarmStatus,
+                Ec2Column::AvailabilityZone,
+                Ec2Column::PublicIpv4Dns,
+                Ec2Column::PublicIpv4Address,
+                Ec2Column::ElasticIp,
+                Ec2Column::Ipv6Ips,
+                Ec2Column::Monitoring,
+                Ec2Column::SecurityGroupName,
+                Ec2Column::KeyName,
+                Ec2Column::LaunchTime,
+                Ec2Column::PlatformDetails,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            ec2_column_ids: Ec2Column::ids(),
             ecr_repo_visible_column_ids: EcrColumn::ids(),
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
@@ -785,6 +851,9 @@ impl App {
                     Service::CloudWatchAlarms => {
                         self.alarms_state.table.reset();
                     }
+                    Service::Ec2Instances => {
+                        self.ec2_state.table.reset();
+                    }
                     Service::EcrRepositories => {
                         self.ecr_state.repositories.reset();
                     }
@@ -866,6 +935,7 @@ impl App {
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
                             "S3Buckets" => Service::S3Buckets,
                             "SqsQueues" => Service::SqsQueues,
+                            "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
@@ -1017,6 +1087,8 @@ impl App {
                         self.iam_state.policy_input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::CloudWatchAlarms {
                         self.alarms_state.input_focus == InputFocus::Pagination
+                    } else if self.current_service == Service::Ec2Instances {
+                        self.ec2_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::CloudWatchLogGroups {
                         self.log_groups_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::EcrRepositories
@@ -1409,6 +1481,27 @@ impl App {
                                 self.ecr_repo_visible_column_ids.push(*col);
                             }
                         }
+                    }
+                } else if self.current_service == Service::Ec2Instances {
+                    let idx = self.column_selector_index;
+                    if idx > 0 && idx <= self.ec2_column_ids.len() {
+                        if let Some(col) = self.ec2_column_ids.get(idx - 1) {
+                            if let Some(pos) =
+                                self.ec2_visible_column_ids.iter().position(|c| c == col)
+                            {
+                                self.ec2_visible_column_ids.remove(pos);
+                            } else {
+                                self.ec2_visible_column_ids.push(*col);
+                            }
+                        }
+                    } else if idx == self.ec2_column_ids.len() + 3 {
+                        self.ec2_state.table.page_size = PageSize::Ten;
+                    } else if idx == self.ec2_column_ids.len() + 4 {
+                        self.ec2_state.table.page_size = PageSize::TwentyFive;
+                    } else if idx == self.ec2_column_ids.len() + 5 {
+                        self.ec2_state.table.page_size = PageSize::Fifty;
+                    } else if idx == self.ec2_column_ids.len() + 6 {
+                        self.ec2_state.table.page_size = PageSize::OneHundred;
                     }
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some()
@@ -1999,6 +2092,13 @@ impl App {
                     } else {
                         self.column_selector_index = 0;
                     }
+                } else if self.current_service == Service::Ec2Instances {
+                    let page_size_idx = self.ec2_column_ids.len() + 2;
+                    if self.column_selector_index < page_size_idx {
+                        self.column_selector_index = page_size_idx;
+                    } else {
+                        self.column_selector_index = 0;
+                    }
                 } else if self.current_service == Service::IamUsers {
                     if self.iam_state.current_user.is_some() {
                         // Only Permissions tab has column preferences
@@ -2089,6 +2189,116 @@ impl App {
                         self.column_selector_index = page_size_idx;
                     } else {
                         self.column_selector_index = 0;
+                    }
+                }
+            }
+            Action::PrevPreferences => {
+                if self.current_service == Service::CloudWatchAlarms {
+                    // Jump to prev section: Columns(0), ViewAs(18), PageSize(22), WrapLines(28)
+                    if self.column_selector_index >= 28 {
+                        self.column_selector_index = 22;
+                    } else if self.column_selector_index >= 22 {
+                        self.column_selector_index = 18;
+                    } else if self.column_selector_index >= 18 {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = 28;
+                    }
+                } else if self.current_service == Service::EcrRepositories
+                    && self.ecr_state.current_repository.is_some()
+                {
+                    let page_size_idx = self.ecr_image_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::LambdaFunctions {
+                    let page_size_idx = self.lambda_state.function_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::LambdaApplications {
+                    let page_size_idx = self.lambda_application_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::CloudFormationStacks {
+                    let page_size_idx = self.cfn_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::Ec2Instances {
+                    let page_size_idx = self.ec2_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::IamUsers {
+                    if self.iam_state.current_user.is_some()
+                        && self.iam_state.user_tab == UserTab::Permissions
+                    {
+                        let page_size_idx = self.iam_policy_column_ids.len() + 2;
+                        if self.column_selector_index >= page_size_idx {
+                            self.column_selector_index = 0;
+                        } else {
+                            self.column_selector_index = page_size_idx;
+                        }
+                    } else if self.iam_state.current_user.is_none() {
+                        let page_size_idx = self.iam_user_column_ids.len() + 2;
+                        if self.column_selector_index >= page_size_idx {
+                            self.column_selector_index = 0;
+                        } else {
+                            self.column_selector_index = page_size_idx;
+                        }
+                    }
+                } else if self.current_service == Service::IamRoles {
+                    let page_size_idx = if self.iam_state.current_role.is_some() {
+                        self.iam_policy_column_ids.len() + 2
+                    } else {
+                        self.iam_role_column_ids.len() + 2
+                    };
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::IamUserGroups {
+                    let page_size_idx = self.iam_group_column_ids.len() + 2;
+                    if self.column_selector_index >= page_size_idx {
+                        self.column_selector_index = 0;
+                    } else {
+                        self.column_selector_index = page_size_idx;
+                    }
+                } else if self.current_service == Service::SqsQueues
+                    && self.sqs_state.current_queue.is_some()
+                {
+                    let page_size_idx = match self.sqs_state.detail_tab {
+                        SqsQueueDetailTab::LambdaTriggers => {
+                            self.sqs_state.trigger_column_ids.len() + 2
+                        }
+                        SqsQueueDetailTab::EventBridgePipes => {
+                            self.sqs_state.pipe_column_ids.len() + 2
+                        }
+                        SqsQueueDetailTab::Tagging => self.sqs_state.tag_column_ids.len() + 2,
+                        SqsQueueDetailTab::SnsSubscriptions => {
+                            self.sqs_state.subscription_column_ids.len() + 2
+                        }
+                        _ => 0,
+                    };
+                    if page_size_idx > 0 {
+                        if self.column_selector_index >= page_size_idx {
+                            self.column_selector_index = 0;
+                        } else {
+                            self.column_selector_index = page_size_idx;
+                        }
                     }
                 }
             }
@@ -2357,7 +2567,10 @@ impl App {
                 }
             }
             Action::NextFilterFocus => {
-                if self.mode == Mode::FilterInput
+                if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances {
+                    self.ec2_state.input_focus =
+                        self.ec2_state.input_focus.next(&ec2::FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
                     use crate::ui::lambda::FILTER_CONTROLS;
@@ -2499,7 +2712,10 @@ impl App {
                 }
             }
             Action::PrevFilterFocus => {
-                if self.mode == Mode::FilterInput
+                if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances {
+                    self.ec2_state.input_focus =
+                        self.ec2_state.input_focus.prev(&ec2::FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
                     use crate::ui::lambda::FILTER_CONTROLS;
@@ -2632,7 +2848,12 @@ impl App {
                 }
             }
             Action::ToggleFilterCheckbox => {
-                if self.mode == Mode::InsightsInput {
+                if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances {
+                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
+                        self.ec2_state.state_filter = self.ec2_state.state_filter.next();
+                        self.ec2_state.table.reset();
+                    }
+                } else if self.mode == Mode::InsightsInput {
                     use crate::app::InsightsFocus;
                     if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
                         && self.insights_state.insights.show_dropdown
@@ -3195,6 +3416,12 @@ impl App {
                         self.alarms_state.table.collapse();
                     }
                 }
+                // From EC2 instances view -> collapse if expanded
+                else if self.current_service == Service::Ec2Instances {
+                    if self.ec2_state.table.has_expanded_item() {
+                        self.ec2_state.table.collapse();
+                    }
+                }
                 // From events view -> collapse if expanded, otherwise back to detail view
                 else if self.view_mode == ViewMode::Events {
                     if self.log_groups_state.expanded_event.is_some() {
@@ -3451,6 +3678,10 @@ impl App {
                     parts.push(group_name.clone());
                 }
             }
+            Service::Ec2Instances => {
+                parts.push("EC2".to_string());
+                parts.push("Instances".to_string());
+            }
         }
 
         parts.join(" > ")
@@ -3616,6 +3847,12 @@ impl App {
                 }
             }
             Service::IamUserGroups => iam::console_url_groups(&self.config.region),
+            Service::Ec2Instances => {
+                format!(
+                    "https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:",
+                    self.config.region, self.config.region
+                )
+            }
         }
     }
 
@@ -3627,6 +3864,48 @@ impl App {
         crate::ui::s3::calculate_total_object_rows(self)
     }
 
+    fn get_column_selector_max(&self) -> usize {
+        if self.current_service == Service::S3Buckets && self.s3_state.current_bucket.is_none() {
+            self.s3_bucket_column_ids.len() - 1
+        } else if self.view_mode == ViewMode::Events {
+            self.cw_log_event_column_ids.len() - 1
+        } else if self.view_mode == ViewMode::Detail {
+            self.cw_log_stream_column_ids.len() - 1
+        } else if self.current_service == Service::CloudWatchAlarms {
+            29
+        } else if self.current_service == Service::Ec2Instances {
+            self.ec2_column_ids.len() + 6
+        } else if self.current_service == Service::EcrRepositories {
+            if self.ecr_state.current_repository.is_some() {
+                self.ecr_image_column_ids.len() + 6
+            } else {
+                self.ecr_repo_column_ids.len() - 1
+            }
+        } else if self.current_service == Service::SqsQueues {
+            self.sqs_column_ids.len() - 1
+        } else if self.current_service == Service::LambdaFunctions {
+            self.lambda_state.function_column_ids.len() + 6
+        } else if self.current_service == Service::LambdaApplications {
+            self.lambda_application_column_ids.len() + 5
+        } else if self.current_service == Service::CloudFormationStacks {
+            self.cfn_column_ids.len() + 6
+        } else if self.current_service == Service::IamUsers {
+            if self.iam_state.current_user.is_some() {
+                self.iam_policy_column_ids.len() + 5
+            } else {
+                self.iam_user_column_ids.len() + 5
+            }
+        } else if self.current_service == Service::IamRoles {
+            if self.iam_state.current_role.is_some() {
+                self.iam_policy_column_ids.len() + 5
+            } else {
+                self.iam_role_column_ids.len() + 5
+            }
+        } else {
+            self.cw_log_group_column_ids.len() - 1
+        }
+    }
+
     fn next_item(&mut self) {
         match self.mode {
             Mode::FilterInput => {
@@ -3635,6 +3914,11 @@ impl App {
                     if self.cfn_state.input_focus == STATUS_FILTER {
                         self.cfn_state.status_filter = self.cfn_state.status_filter.next();
                         self.cfn_state.table.reset();
+                    }
+                } else if self.current_service == Service::Ec2Instances {
+                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
+                        self.ec2_state.state_filter = self.ec2_state.state_filter.next();
+                        self.ec2_state.table.reset();
                     }
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
@@ -3680,55 +3964,7 @@ impl App {
                 }
             }
             Mode::ColumnSelector => {
-                let max = if self.current_service == Service::S3Buckets
-                    && self.s3_state.current_bucket.is_none()
-                {
-                    self.s3_bucket_column_ids.len() - 1
-                } else if self.view_mode == ViewMode::Events {
-                    self.cw_log_event_column_ids.len() - 1
-                } else if self.view_mode == ViewMode::Detail {
-                    self.cw_log_stream_column_ids.len() - 1
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    // 16 columns + 1 header + 1 empty + 2 view + 1 header + 1 empty + 4 page + 1 header + 1 empty + 1 wrap + 1 header = 30
-                    29
-                } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        // Images: N columns + 1 header + 1 empty + 1 header + 4 page sizes = N + 7
-                        self.ecr_image_column_ids.len() + 6
-                    } else {
-                        // Repositories: just columns
-                        self.ecr_repo_column_ids.len() - 1
-                    }
-                } else if self.current_service == Service::SqsQueues {
-                    self.sqs_column_ids.len() - 1
-                } else if self.current_service == Service::LambdaFunctions {
-                    // Lambda: N columns + 1 header + 1 empty + 1 header + 4 page sizes = N + 7
-                    self.lambda_state.function_column_ids.len() + 6
-                } else if self.current_service == Service::LambdaApplications {
-                    // Lambda Applications: N columns + 1 header + 1 empty + 1 header + 3 page sizes = N + 6
-                    self.lambda_application_column_ids.len() + 5
-                } else if self.current_service == Service::CloudFormationStacks {
-                    // CloudFormation: N columns + 1 header + 1 empty + 1 header + 4 page sizes = N + 7
-                    self.cfn_column_ids.len() + 6
-                } else if self.current_service == Service::IamUsers {
-                    if self.iam_state.current_user.is_some() {
-                        // Policy columns: N columns + 1 header + 1 empty + 1 header + 3 page sizes = N + 6
-                        self.iam_policy_column_ids.len() + 5
-                    } else {
-                        // User columns: N columns + 1 header + 1 empty + 1 header + 3 page sizes = N + 6
-                        self.iam_user_column_ids.len() + 5
-                    }
-                } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        // Policy columns: N columns + 1 header + 1 empty + 1 header + 3 page sizes = N + 6
-                        self.iam_policy_column_ids.len() + 5
-                    } else {
-                        // Role columns: N columns + 1 header + 1 empty + 1 header + 3 page sizes = N + 6
-                        self.iam_role_column_ids.len() + 5
-                    }
-                } else {
-                    self.cw_log_group_column_ids.len() - 1
-                };
+                let max = self.get_column_selector_max();
                 self.column_selector_index = (self.column_selector_index + 1).min(max);
             }
             Mode::ServicePicker => {
@@ -3875,6 +4111,29 @@ impl App {
                     };
                     if filtered_alarms > 0 {
                         self.alarms_state.table.next_item(filtered_alarms);
+                    }
+                } else if self.current_service == Service::Ec2Instances {
+                    let filtered: Vec<_> = self
+                        .ec2_state
+                        .table
+                        .items
+                        .iter()
+                        .filter(|i| self.ec2_state.state_filter.matches(&i.state))
+                        .filter(|i| {
+                            if self.ec2_state.table.filter.is_empty() {
+                                return true;
+                            }
+                            i.name.contains(&self.ec2_state.table.filter)
+                                || i.instance_id.contains(&self.ec2_state.table.filter)
+                                || i.state.contains(&self.ec2_state.table.filter)
+                                || i.instance_type.contains(&self.ec2_state.table.filter)
+                                || i.availability_zone.contains(&self.ec2_state.table.filter)
+                                || i.security_groups.contains(&self.ec2_state.table.filter)
+                                || i.key_name.contains(&self.ec2_state.table.filter)
+                        })
+                        .collect();
+                    if !filtered.is_empty() {
+                        self.ec2_state.table.next_item(filtered.len());
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
@@ -4183,6 +4442,11 @@ impl App {
                         self.cfn_state.status_filter = self.cfn_state.status_filter.prev();
                         self.cfn_state.table.reset();
                     }
+                } else if self.current_service == Service::Ec2Instances {
+                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
+                        self.ec2_state.state_filter = self.ec2_state.state_filter.prev();
+                        self.ec2_state.table.reset();
+                    }
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
                     if self.sqs_state.input_focus == SUBSCRIPTION_REGION {
@@ -4305,6 +4569,8 @@ impl App {
                     }
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.alarms_state.table.prev_item();
+                } else if self.current_service == Service::Ec2Instances {
+                    self.ec2_state.table.prev_item();
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
                         self.ecr_state.images.prev_item();
@@ -4433,7 +4699,12 @@ impl App {
     }
 
     fn page_down(&mut self) {
-        if self.mode == Mode::FilterInput && self.current_service == Service::CloudFormationStacks {
+        if self.mode == Mode::ColumnSelector {
+            let max = self.get_column_selector_max();
+            self.column_selector_index = (self.column_selector_index + 10).min(max);
+        } else if self.mode == Mode::FilterInput
+            && self.current_service == Service::CloudFormationStacks
+        {
             if self.cfn_state.current_stack.is_some()
                 && self.cfn_state.detail_tab == CfnDetailTab::Parameters
             {
@@ -4722,6 +4993,29 @@ impl App {
                 if filtered > 0 {
                     self.alarms_state.table.page_down(filtered);
                 }
+            } else if self.current_service == Service::Ec2Instances {
+                let filtered: Vec<_> = self
+                    .ec2_state
+                    .table
+                    .items
+                    .iter()
+                    .filter(|i| self.ec2_state.state_filter.matches(&i.state))
+                    .filter(|i| {
+                        if self.ec2_state.table.filter.is_empty() {
+                            return true;
+                        }
+                        i.name.contains(&self.ec2_state.table.filter)
+                            || i.instance_id.contains(&self.ec2_state.table.filter)
+                            || i.state.contains(&self.ec2_state.table.filter)
+                            || i.instance_type.contains(&self.ec2_state.table.filter)
+                            || i.availability_zone.contains(&self.ec2_state.table.filter)
+                            || i.security_groups.contains(&self.ec2_state.table.filter)
+                            || i.key_name.contains(&self.ec2_state.table.filter)
+                    })
+                    .collect();
+                if !filtered.is_empty() {
+                    self.ec2_state.table.page_down(filtered.len());
+                }
             } else if self.current_service == Service::EcrRepositories {
                 if self.ecr_state.current_repository.is_some() {
                     let filtered = self.filtered_ecr_images();
@@ -4829,7 +5123,11 @@ impl App {
     }
 
     fn page_up(&mut self) {
-        if self.mode == Mode::FilterInput && self.current_service == Service::CloudFormationStacks {
+        if self.mode == Mode::ColumnSelector {
+            self.column_selector_index = self.column_selector_index.saturating_sub(10);
+        } else if self.mode == Mode::FilterInput
+            && self.current_service == Service::CloudFormationStacks
+        {
             if self.cfn_state.current_stack.is_some()
                 && self.cfn_state.detail_tab == CfnDetailTab::Parameters
             {
@@ -5023,6 +5321,8 @@ impl App {
                     .saturating_sub(10);
             } else if self.current_service == Service::CloudWatchAlarms {
                 self.alarms_state.table.page_up();
+            } else if self.current_service == Service::Ec2Instances {
+                self.ec2_state.table.page_up();
             } else if self.current_service == Service::EcrRepositories {
                 if self.ecr_state.current_repository.is_some() {
                     self.ecr_state.images.page_up();
@@ -5312,6 +5612,10 @@ impl App {
             // Expand selected alarm
             if !self.alarms_state.table.is_expanded() {
                 self.alarms_state.table.toggle_expand();
+            }
+        } else if self.current_service == Service::Ec2Instances {
+            if !self.ec2_state.table.is_expanded() {
+                self.ec2_state.table.toggle_expand();
             }
         } else if self.current_service == Service::EcrRepositories {
             if self.ecr_state.current_repository.is_some() {
@@ -5836,6 +6140,8 @@ impl App {
         } else if self.current_service == Service::CloudWatchAlarms {
             // Collapse expanded alarm
             self.alarms_state.table.collapse();
+        } else if self.current_service == Service::Ec2Instances {
+            self.ec2_state.table.collapse();
         } else if self.current_service == Service::EcrRepositories {
             if self.ecr_state.current_repository.is_some() {
                 // In images view - collapse expanded image
@@ -6036,6 +6342,7 @@ impl App {
                     "CloudWatch > Logs Insights" => Service::CloudWatchInsights,
                     "CloudWatch > Alarms" => Service::CloudWatchAlarms,
                     "CloudFormation > Stacks" => Service::CloudFormationStacks,
+                    "EC2 > Instances" => Service::Ec2Instances,
                     "ECR > Repositories" => Service::EcrRepositories,
                     "IAM > Users" => Service::IamUsers,
                     "IAM > Roles" => Service::IamRoles,
@@ -6146,6 +6453,11 @@ impl App {
                         }
                         "S3 > Buckets" => {
                             self.current_service = Service::S3Buckets;
+                            self.view_mode = ViewMode::List;
+                            self.service_selected = true;
+                        }
+                        "EC2 > Instances" => {
+                            self.current_service = Service::Ec2Instances;
                             self.view_mode = ViewMode::List;
                             self.service_selected = true;
                         }
@@ -6822,6 +7134,75 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_ec2_instances(&mut self) -> anyhow::Result<()> {
+        let instances = self.ec2_client.list_instances().await?;
+
+        self.ec2_state.table.items = instances
+            .into_iter()
+            .map(|i| Ec2Instance {
+                instance_id: i.instance_id,
+                name: i.name,
+                state: i.state,
+                instance_type: i.instance_type,
+                availability_zone: i.availability_zone,
+                public_ipv4_dns: i.public_ipv4_dns,
+                public_ipv4_address: i.public_ipv4_address,
+                elastic_ip: i.elastic_ip,
+                ipv6_ips: i.ipv6_ips,
+                monitoring: i.monitoring,
+                security_groups: i.security_groups,
+                key_name: i.key_name,
+                launch_time: i.launch_time,
+                platform_details: i.platform_details,
+                status_checks: i.status_checks,
+                alarm_status: i.alarm_status,
+                private_dns_name: String::new(),
+                private_ip_address: String::new(),
+                security_group_ids: String::new(),
+                owner_id: String::new(),
+                volume_id: String::new(),
+                root_device_name: String::new(),
+                root_device_type: String::new(),
+                ebs_optimized: String::new(),
+                image_id: String::new(),
+                kernel_id: String::new(),
+                ramdisk_id: String::new(),
+                ami_launch_index: String::new(),
+                reservation_id: String::new(),
+                vpc_id: String::new(),
+                subnet_ids: String::new(),
+                instance_lifecycle: String::new(),
+                architecture: String::new(),
+                virtualization_type: String::new(),
+                platform: String::new(),
+                iam_instance_profile_arn: String::new(),
+                tenancy: String::new(),
+                affinity: String::new(),
+                host_id: String::new(),
+                placement_group: String::new(),
+                partition_number: String::new(),
+                capacity_reservation_id: String::new(),
+                state_transition_reason_code: String::new(),
+                state_transition_reason_message: String::new(),
+                stop_hibernation_behavior: String::new(),
+                outpost_arn: String::new(),
+                product_codes: String::new(),
+                availability_zone_id: String::new(),
+                imdsv2: String::new(),
+                usage_operation: String::new(),
+                managed: String::new(),
+                operator: String::new(),
+            })
+            .collect();
+
+        // Sort by launch time descending by default
+        self.ec2_state
+            .table
+            .items
+            .sort_by(|a, b| b.launch_time.cmp(&a.launch_time));
+        Ok(())
+    }
+
     pub async fn load_ecr_images(&mut self) -> anyhow::Result<()> {
         if let Some(repo_name) = &self.ecr_state.current_repository {
             if let Some(repo_uri) = &self.ecr_state.current_repository_uri {
@@ -7289,6 +7670,7 @@ impl ServicePickerState {
                 "CloudWatch > Logs Insights",
                 "CloudWatch > Alarms",
                 "CloudFormation > Stacks",
+                "EC2 > Instances",
                 "ECR > Repositories",
                 "IAM > Users",
                 "IAM > Roles",
@@ -15106,5 +15488,306 @@ mod lambda_version_tab_tests {
         app.cfn_state.outputs.selected = 1;
         app.handle_action(Action::FilterBackspace);
         assert_eq!(app.cfn_state.outputs.selected, 0);
+    }
+
+    #[test]
+    fn test_ec2_service_in_picker() {
+        let app = test_app();
+        assert!(app.service_picker.services.contains(&"EC2 > Instances"));
+    }
+
+    #[test]
+    fn test_ec2_state_filter_cycles() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.input_focus = EC2_STATE_FILTER;
+
+        let initial = app.ec2_state.state_filter;
+        assert_eq!(initial, Ec2StateFilter::AllStates);
+
+        // Cycle through filters using ToggleFilterCheckbox
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Running);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Stopped);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Terminated);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Pending);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::ShuttingDown);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Stopping);
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::AllStates);
+    }
+
+    #[test]
+    fn test_ec2_filter_resets_table() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.input_focus = EC2_STATE_FILTER;
+        app.ec2_state.table.selected = 5;
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_ec2_columns_visible() {
+        let app = test_app();
+        assert_eq!(app.ec2_visible_column_ids.len(), 16); // Default visible columns
+        assert_eq!(app.ec2_column_ids.len(), 52); // Total available columns
+    }
+
+    #[test]
+    fn test_ec2_breadcrumbs() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        let breadcrumb = app.breadcrumbs();
+        assert_eq!(breadcrumb, "EC2 > Instances");
+    }
+
+    #[test]
+    fn test_ec2_console_url() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        let url = app.get_console_url();
+        assert!(url.contains("ec2"));
+        assert!(url.contains("Instances"));
+    }
+
+    #[test]
+    fn test_ec2_filter_handling() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+
+        app.handle_action(Action::FilterInput('t'));
+        app.handle_action(Action::FilterInput('e'));
+        app.handle_action(Action::FilterInput('s'));
+        app.handle_action(Action::FilterInput('t'));
+
+        assert_eq!(app.ec2_state.table.filter, "test");
+
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.ec2_state.table.filter, "tes");
+    }
+
+    #[test]
+    fn test_column_selector_page_down_ec2() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.column_selector_index, 10);
+
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.column_selector_index, 20);
+    }
+
+    #[test]
+    fn test_column_selector_page_up_ec2() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 30;
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.column_selector_index, 20);
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.column_selector_index, 10);
+    }
+
+    #[test]
+    fn test_ec2_state_filter_dropdown_focus() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+
+        // Tab to state filter
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(app.ec2_state.input_focus, EC2_STATE_FILTER);
+
+        // Dropdown should show when focused (tested in render)
+        // Verify we can cycle the filter
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Running);
+    }
+
+    #[test]
+    fn test_column_selector_ctrl_d_scrolling() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.column_selector_index, 10);
+
+        // Second PageDown should be capped at max
+        let max = app.get_column_selector_max();
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.column_selector_index, max);
+    }
+
+    #[test]
+    fn test_column_selector_ctrl_u_scrolling() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 25;
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.column_selector_index, 15);
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.column_selector_index, 5);
+    }
+
+    #[test]
+    fn test_prev_preferences_lambda() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.mode = Mode::ColumnSelector;
+        let page_size_idx = app.lambda_state.function_column_ids.len() + 2;
+        app.column_selector_index = page_size_idx;
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 0);
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+    }
+
+    #[test]
+    fn test_prev_preferences_cloudformation() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::ColumnSelector;
+        let page_size_idx = app.cfn_column_ids.len() + 2;
+        app.column_selector_index = page_size_idx;
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 0);
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+    }
+
+    #[test]
+    fn test_prev_preferences_alarms() {
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchAlarms;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 28; // WrapLines
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 22); // PageSize
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 18); // ViewAs
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 0); // Columns
+
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 28); // Wrap to WrapLines
+    }
+
+    #[test]
+    fn test_ec2_page_size_in_preferences() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.mode = Mode::ColumnSelector;
+        app.ec2_state.table.page_size = PageSize::Fifty;
+
+        // Navigate to page size section
+        let page_size_idx = app.ec2_column_ids.len() + 3; // First page size option (10)
+        app.column_selector_index = page_size_idx;
+        app.handle_action(Action::ToggleColumn);
+
+        assert_eq!(app.ec2_state.table.page_size, PageSize::Ten);
+    }
+
+    #[test]
+    fn test_ec2_next_preferences_with_page_size() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        let page_size_idx = app.ec2_column_ids.len() + 2;
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, 0);
+    }
+
+    #[test]
+    fn test_ec2_dropdown_next_item() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.input_focus = EC2_STATE_FILTER;
+        app.ec2_state.state_filter = Ec2StateFilter::AllStates;
+
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Running);
+
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Stopped);
+    }
+
+    #[test]
+    fn test_ec2_dropdown_prev_item() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.input_focus = EC2_STATE_FILTER;
+        app.ec2_state.state_filter = Ec2StateFilter::Stopped;
+
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Running);
+
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::AllStates);
+    }
+
+    #[test]
+    fn test_ec2_dropdown_cycles_with_arrows() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.mode = Mode::FilterInput;
+        app.ec2_state.input_focus = EC2_STATE_FILTER;
+        app.ec2_state.state_filter = Ec2StateFilter::Stopping;
+
+        // Next wraps to AllStates
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::AllStates);
+
+        // Prev wraps to Stopping
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Stopping);
     }
 }

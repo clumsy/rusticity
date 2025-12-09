@@ -227,6 +227,21 @@ async fn main() -> Result<()> {
                             app.alarms_state.table.loading = false;
                         }
 
+                        // Load EC2 instances when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::Ec2Instances
+                            && ((!prev_service_selected || prev_service != Service::Ec2Instances)
+                                || app.ec2_state.table.loading)
+                        {
+                            app.ec2_state.table.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_ec2_instances().await {
+                                app.error_message = Some(format!("Failed to load EC2 instances: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.ec2_state.table.loading = false;
+                        }
+
                         // Load ECR repositories when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::EcrRepositories
                             && ((!prev_service_selected || prev_service != Service::EcrRepositories)

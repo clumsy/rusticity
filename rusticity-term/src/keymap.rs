@@ -109,6 +109,13 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Char(' ') | KeyCode::Enter => Some(Action::ToggleColumn),
             KeyCode::Tab => Some(Action::NextPreferences),
+            KeyCode::BackTab => Some(Action::PrevPreferences),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::PageDown)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::PageUp)
+            }
             _ => None,
         },
         Mode::FilterInput => match key.code {
@@ -259,6 +266,7 @@ pub enum Action {
     OpenColumnSelector,
     ToggleColumn,
     NextPreferences,
+    PrevPreferences,
     CloseColumnSelector,
     StartFilter,
     StartEventFilter,

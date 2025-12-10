@@ -1,11 +1,12 @@
 use crate::app::App;
-use crate::common::CyclicEnum;
-use crate::common::{render_pagination_text, InputFocus, SortDirection};
+use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::ecr::image::{self, Image as EcrImage};
 use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
 use crate::table::TableState;
+use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::render_tabs;
+use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -139,10 +140,10 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
     let pagination = render_pagination_text(current_page, total_pages);
 
     // Filter
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[1],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.ecr_state.repositories.filter,
             placeholder: "Search by repository substring",
             pagination: &pagination,
@@ -180,12 +181,11 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" {} repositories ({}) ", tab_label, filtered.len());
 
     // Define columns
-    let columns: Vec<Box<dyn crate::ui::table::Column<EcrRepository>>> = app
+    let columns: Vec<Box<dyn Column<EcrRepository>>> = app
         .ecr_repo_visible_column_ids
         .iter()
         .filter_map(|col_id| {
-            repo::Column::from_id(col_id)
-                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<EcrRepository>>)
+            repo::Column::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<EcrRepository>>)
         })
         .collect();
 
@@ -197,7 +197,7 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: paginated,
         selected_index: app.ecr_state.repositories.selected % page_size,
         expanded_index,
@@ -207,12 +207,12 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         title,
         area: chunks[2],
         get_expanded_content: Some(Box::new(|repo: &EcrRepository| {
-            crate::ui::table::expanded_from_columns(&columns, repo)
+            expanded_from_columns(&columns, repo)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
@@ -248,10 +248,10 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.ecr_state.images.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[0],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.ecr_state.images.filter,
             placeholder: "Search artifacts",
             pagination: &pagination,
@@ -290,16 +290,15 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Images ({}) ", filtered.len());
 
     // Define columns
-    let columns: Vec<Box<dyn crate::ui::table::Column<EcrImage>>> = app
+    let columns: Vec<Box<dyn Column<EcrImage>>> = app
         .ecr_image_visible_column_ids
         .iter()
         .filter_map(|col_id| {
-            image::Column::from_id(col_id)
-                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<EcrImage>>)
+            image::Column::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<EcrImage>>)
         })
         .collect();
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: paginated,
         selected_index: app.ecr_state.images.selected - app.ecr_state.images.scroll_offset,
         expanded_index: app
@@ -313,10 +312,10 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|img: &EcrImage| {
-            crate::ui::table::expanded_from_columns(&columns, img)
+            expanded_from_columns(&columns, img)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }

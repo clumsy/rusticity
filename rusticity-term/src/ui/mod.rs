@@ -16,16 +16,6 @@ mod status;
 pub mod styles;
 pub mod table;
 
-use crate::cfn::Column as CfnColumn;
-use crate::cw::alarms::AlarmColumn;
-use crate::ec2::Column as Ec2Column;
-use crate::ecr::{image, repo};
-use crate::lambda::{DeploymentColumn, ResourceColumn};
-use crate::sqs::queue::Column as SqsColumn;
-use crate::sqs::trigger::Column as SqsTriggerColumn;
-use crate::ui::table::Column as TableColumn;
-use styles::highlight;
-
 pub use cw::insights::{DateRangeType, TimeUnit};
 pub use cw::{
     CloudWatchLogGroupsState, DetailTab, EventColumn, EventFilterFocus, LogGroupColumn,
@@ -38,9 +28,25 @@ pub use query_editor::{render_query_editor, QueryEditorConfig};
 pub use status::{first_hint, hint, last_hint, SPINNER_FRAMES};
 pub use table::{format_expandable, CURSOR_COLLAPSED, CURSOR_EXPANDED};
 
-use crate::app::{AlarmViewMode, App, Service, ViewMode};
-use crate::common::{render_pagination_text, PageSize};
+use self::styles::highlight;
+use crate::app::{AlarmViewMode, App, CalendarField, LambdaDetailTab, Service, ViewMode};
+use crate::cfn::Column as CfnColumn;
+use crate::common::{render_pagination_text, render_scrollbar, translate_column, PageSize};
+use crate::cw::alarms::AlarmColumn;
+use crate::ec2::Column as Ec2Column;
+use crate::ecr::{image, repo};
 use crate::keymap::Mode;
+use crate::lambda::{ApplicationColumn, DeploymentColumn, FunctionColumn, ResourceColumn};
+use crate::s3::BucketColumn;
+use crate::sqs::queue::Column as SqsColumn;
+use crate::sqs::trigger::Column as SqsTriggerColumn;
+use crate::ui::cfn::{
+    DetailTab as CfnDetailTab, OutputColumn, ParameterColumn, ResourceColumn as CfnResourceColumn,
+};
+use crate::ui::iam::UserTab;
+use crate::ui::lambda::ApplicationDetailTab;
+use crate::ui::sqs::QueueDetailTab as SqsQueueDetailTab;
+use crate::ui::table::Column as TableColumn;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -267,7 +273,7 @@ pub fn horizontal(
 
 // Block helpers
 pub fn block(title: &str) -> Block<'_> {
-    crate::ui::rounded_block().title(title)
+    rounded_block().title(title)
 }
 
 pub fn block_with_style(title: &str, style: Style) -> Block<'_> {
@@ -717,7 +723,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             .s3_bucket_column_ids
             .iter()
             .filter_map(|col_id| {
-                crate::s3::BucketColumn::from_id(col_id).map(|col| {
+                BucketColumn::from_id(col_id).map(|col| {
                     let is_visible = app.s3_bucket_visible_column_ids.contains(col_id);
                     let (item, len) = render_column_toggle_string(&col.name(), is_visible);
                     max_len = max_len.max(len);
@@ -900,7 +906,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::SqsQueues {
         if app.sqs_state.current_queue.is_some()
-            && app.sqs_state.detail_tab == crate::ui::sqs::QueueDetailTab::LambdaTriggers
+            && app.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
         {
             // Triggers tab - columns + page size
             let mut all_items: Vec<ListItem> = Vec::new();
@@ -960,7 +966,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
         // Show appropriate columns based on current tab
         if app.lambda_state.current_function.is_some()
-            && app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Code
+            && app.lambda_state.detail_tab == LambdaDetailTab::Code
         {
             // Show layer columns for Code tab
             for col in &app.lambda_state.layer_column_ids {
@@ -969,14 +975,14 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 all_items.push(item);
                 max_len = max_len.max(len);
             }
-        } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
+        } else if app.lambda_state.detail_tab == LambdaDetailTab::Versions {
             for col in &app.lambda_state.version_column_ids {
                 let is_visible = app.lambda_state.version_visible_column_ids.contains(col);
                 let (item, len) = render_column_toggle_string(col, is_visible);
                 all_items.push(item);
                 max_len = max_len.max(len);
             }
-        } else if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Aliases {
+        } else if app.lambda_state.detail_tab == LambdaDetailTab::Aliases {
             for col in &app.lambda_state.alias_column_ids {
                 let is_visible = app.lambda_state.alias_visible_column_ids.contains(col);
                 let (item, len) = render_column_toggle_string(col, is_visible);
@@ -985,7 +991,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
         } else {
             for col_id in &app.lambda_state.function_column_ids {
-                if let Some(col) = crate::lambda::FunctionColumn::from_id(col_id) {
+                if let Some(col) = FunctionColumn::from_id(col_id) {
                     let is_visible = app
                         .lambda_state
                         .function_visible_column_ids
@@ -1000,7 +1006,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         all_items.push(ListItem::new(""));
 
         let (page_items, page_len) = render_page_size_section(
-            if app.lambda_state.detail_tab == crate::app::LambdaDetailTab::Versions {
+            if app.lambda_state.detail_tab == LambdaDetailTab::Versions {
                 app.lambda_state.version_table.page_size
             } else {
                 app.lambda_state.table.page_size
@@ -1026,7 +1032,6 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
         // Show different columns based on current view
         if app.lambda_application_state.current_application.is_some() {
-            use crate::ui::lambda::ApplicationDetailTab;
             if app.lambda_application_state.detail_tab == ApplicationDetailTab::Overview {
                 // Resources columns
                 for col_id in &app.lambda_resource_column_ids {
@@ -1075,7 +1080,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             // Application list columns
             for col_id in &app.lambda_application_column_ids {
-                if let Some(col) = crate::lambda::ApplicationColumn::from_id(col_id) {
+                if let Some(col) = ApplicationColumn::from_id(col_id) {
                     let is_visible = app.lambda_application_visible_column_ids.contains(col_id);
                     let (item, len) = render_column_toggle_string(&col.name(), is_visible);
                     all_items.push(item);
@@ -1103,7 +1108,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
         // Check if we're in StackInfo tab (tags table)
         if app.cfn_state.current_stack.is_some()
-            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::StackInfo
+            && app.cfn_state.detail_tab == CfnDetailTab::StackInfo
         {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
@@ -1130,7 +1135,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
-            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Parameters
+            && app.cfn_state.detail_tab == CfnDetailTab::Parameters
         {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
@@ -1138,8 +1143,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
             for col_id in &app.cfn_parameter_column_ids {
                 let is_visible = app.cfn_parameter_visible_column_ids.contains(col_id);
-                if let Some(col) = crate::ui::cfn::ParameterColumn::from_id(col_id) {
-                    let name = crate::common::translate_column(col.id(), col.default_name());
+                if let Some(col) = ParameterColumn::from_id(col_id) {
+                    let name = translate_column(col.id(), col.default_name());
                     let (item, len) = render_column_toggle_string(&name, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
@@ -1159,7 +1164,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
-            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Outputs
+            && app.cfn_state.detail_tab == CfnDetailTab::Outputs
         {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
@@ -1167,8 +1172,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
             for col_id in &app.cfn_output_column_ids {
                 let is_visible = app.cfn_output_visible_column_ids.contains(col_id);
-                if let Some(col) = crate::ui::cfn::OutputColumn::from_id(col_id) {
-                    let name = crate::common::translate_column(col.id(), col.default_name());
+                if let Some(col) = OutputColumn::from_id(col_id) {
+                    let name = translate_column(col.id(), col.default_name());
                     let (item, len) = render_column_toggle_string(&name, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
@@ -1188,7 +1193,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
-            && app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Resources
+            && app.cfn_state.detail_tab == CfnDetailTab::Resources
         {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
@@ -1196,8 +1201,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
             for col_id in &app.cfn_resource_column_ids {
                 let is_visible = app.cfn_resource_visible_column_ids.contains(col_id);
-                if let Some(col) = crate::ui::cfn::ResourceColumn::from_id(col_id) {
-                    let name = crate::common::translate_column(col.id(), col.default_name());
+                if let Some(col) = CfnResourceColumn::from_id(col_id) {
+                    let name = translate_column(col.id(), col.default_name());
                     let (item, len) = render_column_toggle_string(&name, is_visible);
                     all_items.push(item);
                     max_len = max_len.max(len);
@@ -1252,9 +1257,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         let mut max_len = 0;
 
         // Show policy columns only for Permissions tab in user detail view
-        if app.iam_state.current_user.is_some()
-            && app.iam_state.user_tab == crate::ui::iam::UserTab::Permissions
-        {
+        if app.iam_state.current_user.is_some() && app.iam_state.user_tab == UserTab::Permissions {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
             max_len = max_len.max(header_len);
@@ -1414,7 +1417,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
     // Render scrollbar only if content doesn't fit
     if needs_scrollbar {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             popup_area.inner(Margin {
                 vertical: 1,
@@ -1436,7 +1439,7 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_type(BorderType::Rounded)
-            .border_style(crate::ui::red_text())
+            .border_style(red_text())
             .style(Style::default().bg(Color::Black)),
         popup_area,
     );
@@ -1460,7 +1463,7 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
     // Header
     let header = Paragraph::new("AWS Error")
         .alignment(Alignment::Center)
-        .style(crate::ui::red_text().add_modifier(Modifier::BOLD));
+        .style(red_text().add_modifier(Modifier::BOLD));
     frame.render_widget(header, chunks[0]);
 
     // Scrollable error text with border
@@ -1487,7 +1490,7 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border()),
+                .border_style(active_border()),
         )
         .style(Style::default().fg(Color::White));
 
@@ -1507,7 +1510,7 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
         .sum();
     let visible_lines = chunks[1].height.saturating_sub(2) as usize;
     if total_lines > visible_lines {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             chunks[1].inner(Margin {
                 vertical: 1,
@@ -1693,7 +1696,7 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border()),
+                .border_style(active_border()),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("► ");
@@ -1803,64 +1806,43 @@ fn bottom_right_rect(width: u16, height: u16, r: Rect) -> Rect {
 
 fn render_help_modal(frame: &mut Frame, area: Rect) {
     let help_text = vec![
+        Line::from(vec![Span::styled("⎋  ", red_text()), Span::raw("  Escape")]),
         Line::from(vec![
-            Span::styled("⎋  ", crate::ui::red_text()),
-            Span::raw("  Escape"),
-        ]),
-        Line::from(vec![
-            Span::styled("⏎  ", crate::ui::red_text()),
+            Span::styled("⏎  ", red_text()),
             Span::raw("  Enter/Return"),
         ]),
+        Line::from(vec![Span::styled("⇤⇥ ", red_text()), Span::raw("  Tab")]),
+        Line::from(vec![Span::styled("␣  ", red_text()), Span::raw("  Space")]),
+        Line::from(vec![Span::styled("^r ", red_text()), Span::raw("  Ctrl+r")]),
+        Line::from(vec![Span::styled("^w ", red_text()), Span::raw("  Ctrl+w")]),
+        Line::from(vec![Span::styled("^o ", red_text()), Span::raw("  Ctrl+o")]),
+        Line::from(vec![Span::styled("^p ", red_text()), Span::raw("  Ctrl+p")]),
         Line::from(vec![
-            Span::styled("⇤⇥ ", crate::ui::red_text()),
-            Span::raw("  Tab"),
-        ]),
-        Line::from(vec![
-            Span::styled("␣  ", crate::ui::red_text()),
-            Span::raw("  Space"),
-        ]),
-        Line::from(vec![
-            Span::styled("^r ", crate::ui::red_text()),
-            Span::raw("  Ctrl+r"),
-        ]),
-        Line::from(vec![
-            Span::styled("^w ", crate::ui::red_text()),
-            Span::raw("  Ctrl+w"),
-        ]),
-        Line::from(vec![
-            Span::styled("^o ", crate::ui::red_text()),
-            Span::raw("  Ctrl+o"),
-        ]),
-        Line::from(vec![
-            Span::styled("^p ", crate::ui::red_text()),
-            Span::raw("  Ctrl+p"),
-        ]),
-        Line::from(vec![
-            Span::styled("^u ", crate::ui::red_text()),
+            Span::styled("^u ", red_text()),
             Span::raw("  Ctrl+u (page up)"),
         ]),
         Line::from(vec![
-            Span::styled("^d ", crate::ui::red_text()),
+            Span::styled("^d ", red_text()),
             Span::raw("  Ctrl+d (page down)"),
         ]),
         Line::from(vec![
-            Span::styled("[] ", crate::ui::red_text()),
+            Span::styled("[] ", red_text()),
             Span::raw("  [ and ] (switch tabs)"),
         ]),
         Line::from(vec![
-            Span::styled("↑↓ ", crate::ui::red_text()),
+            Span::styled("↑↓ ", red_text()),
             Span::raw("  Arrow up/down"),
         ]),
         Line::from(vec![
-            Span::styled("←→ ", crate::ui::red_text()),
+            Span::styled("←→ ", red_text()),
             Span::raw("  Arrow left/right"),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("Press ", Style::default()),
-            Span::styled("⎋", crate::ui::red_text()),
+            Span::styled("⎋", red_text()),
             Span::styled(" or ", Style::default()),
-            Span::styled("⏎", crate::ui::red_text()),
+            Span::styled("⏎", red_text()),
             Span::styled(" to close", Style::default()),
         ]),
     ];
@@ -1902,7 +1884,7 @@ fn render_help_modal(frame: &mut Frame, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border())
+                .border_style(active_border())
                 .padding(Padding::horizontal(1)),
         )
         .wrap(Wrap { trim: false });
@@ -1949,7 +1931,7 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border()),
+                .border_style(active_border()),
         )
         .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");
@@ -1981,8 +1963,8 @@ fn render_calendar_picker(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| time::OffsetDateTime::now_utc().date());
 
     let field_name = match app.calendar_selecting {
-        crate::app::CalendarField::StartDate => "Start Date",
-        crate::app::CalendarField::EndDate => "End Date",
+        CalendarField::StartDate => "Start Date",
+        CalendarField::EndDate => "End Date",
     };
 
     let events = CalendarEventStore::today(
@@ -1998,7 +1980,7 @@ fn render_calendar_picker(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(crate::ui::active_border()),
+                .border_style(active_border()),
         )
         .show_weekdays_header(Style::new().bold().yellow())
         .show_month_header(Style::new().bold().green());
@@ -2059,7 +2041,7 @@ pub fn render_json_highlighted(
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(if is_active {
-                    crate::ui::active_border()
+                    active_border()
                 } else {
                     Style::default()
                 }),
@@ -2069,7 +2051,7 @@ pub fn render_json_highlighted(
 
     let total_lines = json_text.lines().count();
     if total_lines > 0 {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             area.inner(Margin {
                 vertical: 1,
@@ -2298,7 +2280,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "✅ UPDATE_COMPLETE");
         assert_eq!(style.fg, Some(Color::Green));
@@ -2315,7 +2297,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "✅ CREATE_COMPLETE");
         assert_eq!(style.fg, Some(Color::Green));
@@ -2332,7 +2314,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "ℹ️  UPDATE_IN_PROGRESS");
         assert_eq!(style.fg, Some(ratatui::style::Color::LightBlue));
@@ -2349,7 +2331,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "✅ UPDATE_COMPLETE");
         assert_eq!(style.fg, Some(ratatui::style::Color::Green));
@@ -2366,7 +2348,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "❌ UPDATE_FAILED");
         assert_eq!(style.fg, Some(ratatui::style::Color::Red));
@@ -2383,7 +2365,7 @@ mod tests {
             last_modified: "2025-10-31 12:00:00 (UTC)".to_string(),
         };
 
-        let col = crate::lambda::ApplicationColumn::Status;
+        let col = ApplicationColumn::Status;
         let (text, style) = col.render(&app);
         assert_eq!(text, "❌ UPDATE_ROLLBACK_IN_PROGRESS");
         assert_eq!(style.fg, Some(ratatui::style::Color::Red));
@@ -2476,7 +2458,7 @@ mod tests {
         let bucket_col_names: Vec<String> = app
             .s3_bucket_column_ids
             .iter()
-            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .filter_map(|id| BucketColumn::from_id(id).map(|c| c.name()))
             .collect();
         let log_col_names: Vec<String> = app
             .cw_log_group_column_ids
@@ -2593,7 +2575,7 @@ mod tests {
         let names: Vec<String> = app
             .s3_bucket_column_ids
             .iter()
-            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .filter_map(|id| BucketColumn::from_id(id).map(|c| c.name()))
             .collect();
         assert_eq!(names, vec!["Name", "Region", "Creation date"]);
     }
@@ -3476,7 +3458,7 @@ mod tests {
         let bucket_col_names: Vec<String> = app
             .s3_bucket_column_ids
             .iter()
-            .filter_map(|id| crate::s3::BucketColumn::from_id(id).map(|c| c.name()))
+            .filter_map(|id| BucketColumn::from_id(id).map(|c| c.name()))
             .collect();
         assert_eq!(bucket_col_names, vec!["Name", "Region", "Creation date"]);
 
@@ -4183,10 +4165,7 @@ mod tests {
             app.lambda_state.current_function,
             Some("test-function".to_string())
         );
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Code
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Code);
     }
 
     #[test]
@@ -4205,37 +4184,22 @@ mod tests {
         let mut app = test_app_no_region();
         app.current_service = Service::LambdaFunctions;
         app.lambda_state.current_function = Some("test-function".to_string());
-        app.lambda_state.detail_tab = crate::app::LambdaDetailTab::Code;
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Monitor
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Monitor);
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Configuration
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Configuration);
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Aliases
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Aliases);
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Versions
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Versions);
 
         app.handle_action(crate::keymap::Action::NextDetailTab);
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Code
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Code);
     }
 
     #[test]
@@ -4481,7 +4445,7 @@ mod tests {
         let mut app = test_app_no_region();
         app.current_service = Service::LambdaFunctions;
         app.lambda_state.current_function = Some("test-function".to_string());
-        app.lambda_state.detail_tab = crate::app::LambdaDetailTab::Code;
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
         app.lambda_state.table.items = vec![crate::app::LambdaFunction {
             arn: "arn:aws:lambda:us-east-1:123456789012:function:test".to_string(),
             application: None,
@@ -4499,10 +4463,7 @@ mod tests {
         }];
 
         // Verify we're in Code tab
-        assert_eq!(
-            app.lambda_state.detail_tab,
-            crate::app::LambdaDetailTab::Code
-        );
+        assert_eq!(app.lambda_state.detail_tab, LambdaDetailTab::Code);
 
         // Verify function exists
         assert!(app.lambda_state.current_function.is_some());

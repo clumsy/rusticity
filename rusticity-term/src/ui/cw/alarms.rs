@@ -257,10 +257,8 @@ mod tests {
     use super::*;
 
     const WIDTH: usize = 100;
-    #[allow(dead_code)]
     const PAGINATION: &str = "[1] 2 3";
-    #[allow(dead_code)]
-    const PAGINATION_LEN: usize = 7;
+    const PAGINATION_LEN: usize = PAGINATION.len();
 
     fn test_spacing(content_len: usize) -> usize {
         WIDTH - content_len - PAGINATION_LEN

@@ -1,5 +1,6 @@
 use crate::app::{App, Service, ViewMode};
 use crate::keymap::Mode;
+use crate::ui::cfn::DetailTab;
 use crate::ui::red_text;
 use ratatui::{prelude::*, widgets::*};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -212,8 +213,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.current_service == Service::CloudFormationStacks {
         if app.cfn_state.current_stack.is_some() {
             // In stack detail view - customize hints based on tab
-            if app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::Template
-                || app.cfn_state.detail_tab == crate::ui::cfn::DetailTab::GitSync
+            if app.cfn_state.detail_tab == DetailTab::Template
+                || app.cfn_state.detail_tab == DetailTab::GitSync
             {
                 // Template and GitSync tabs: no preferences
                 let mut hints = vec![];

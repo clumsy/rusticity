@@ -2,6 +2,7 @@ use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirectio
 use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
 use crate::table::TableState;
+use crate::ui::table::expanded_from_columns;
 use ratatui::prelude::*;
 
 pub const FILTER_CONTROLS: [InputFocus; 3] = [
@@ -190,7 +191,7 @@ pub fn render_instances(
             title,
             area: chunks[1],
             get_expanded_content: Some(Box::new(|instance: &Instance| {
-                crate::ui::table::expanded_from_columns(&columns, instance)
+                expanded_from_columns(&columns, instance)
             })),
             is_active: mode == Mode::Normal,
         },

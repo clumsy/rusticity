@@ -1,16 +1,19 @@
 use crate::app::{App, ViewMode};
-use crate::common::CyclicEnum;
-use crate::common::{render_pagination_text, InputFocus, SortDirection};
+use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::iam::{
-    GroupUser, IamGroup, IamRole, IamUser, LastAccessedService, Policy, RoleTag, UserGroup, UserTag,
+    GroupColumn, GroupUser, GroupUserColumn, IamGroup, IamRole, IamUser, LastAccessedService,
+    Policy, PolicyColumn, RoleColumn, RoleTag, UserColumn, UserGroup, UserTag,
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::ui::table::Column;
+use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+use crate::ui::table::{
+    expanded_from_columns, plain_expanded_content, render_table, Column, TableConfig,
+};
 use crate::ui::{
-    active_border, block_height_for, filter_area, get_cursor, labeled_field,
-    render_json_highlighted, render_last_accessed_section, render_permissions_section, render_tabs,
-    render_tags_section, vertical,
+    active_border, block_height_for, filter_area, format_duration, get_cursor, labeled_field,
+    render_json_highlighted, render_last_accessed_section, render_permissions_section,
+    render_search_filter, render_summary, render_tabs, render_tags_section, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -225,10 +228,10 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(desc, chunks[0]);
 
     // Filter
-    let filtered_users = crate::ui::iam::filtered_iam_users(app);
+    let filtered_users = filtered_iam_users(app);
     let filtered_count = filtered_users.len();
     let page_size = app.iam_state.users.page_size.value();
-    crate::ui::render_search_filter(
+    render_search_filter(
         frame,
         chunks[1],
         &app.iam_state.users.filter,
@@ -246,7 +249,6 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    use crate::iam::UserColumn;
     let columns: Vec<Box<dyn Column<&IamUser>>> = app
         .iam_user_visible_column_ids
         .iter()
@@ -263,7 +265,7 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_users,
         selected_index: app.iam_state.users.selected - app.iam_state.users.scroll_offset,
         expanded_index,
@@ -272,13 +274,13 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         sort_direction: SortDirection::Asc,
         title: format!(" Users ({}) ", filtered_count),
         area: chunks[2],
-        get_expanded_content: Some(Box::new(|user: &&crate::iam::IamUser| {
-            crate::ui::table::expanded_from_columns(&columns, user)
+        get_expanded_content: Some(Box::new(|user: &&IamUser| {
+            expanded_from_columns(&columns, user)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_roles(frame: &mut Frame, app: &App, area: Rect) {
@@ -337,7 +339,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .find(|g| g.group_name == *group_name)
         {
-            crate::ui::render_summary(
+            render_summary(
                 frame,
                 chunks[1],
                 " Summary ",
@@ -428,10 +430,10 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.iam_state.group_users.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[0],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.iam_state.group_users.filter,
             placeholder: "Search",
             pagination: &pagination,
@@ -442,13 +444,12 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     let scroll_offset = app.iam_state.group_users.scroll_offset;
-    let page_users: Vec<&crate::iam::GroupUser> = filtered_users
+    let page_users: Vec<&GroupUser> = filtered_users
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
         .collect();
 
-    use crate::iam::GroupUserColumn;
     let columns: Vec<Box<dyn Column<GroupUser>>> = vec![
         Box::new(GroupUserColumn::UserName),
         Box::new(GroupUserColumn::Groups),
@@ -464,7 +465,7 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_users,
         selected_index: app.iam_state.group_users.selected - scroll_offset,
         expanded_index,
@@ -474,15 +475,15 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Users ({}) ", app.iam_state.group_users.items.len()),
         area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
-        get_expanded_content: Some(Box::new(|user: &crate::iam::GroupUser| {
-            crate::ui::table::plain_expanded_content(format!(
+        get_expanded_content: Some(Box::new(|user: &GroupUser| {
+            plain_expanded_content(format!(
                 "User name: {}\nGroups: {}\nLast activity: {}\nCreation time: {}",
                 user.user_name, user.groups, user.last_activity, user.creation_time
             ))
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_group_access_advisor_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -575,13 +576,12 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(filter, chunks[1]);
 
     let scroll_offset = app.iam_state.groups.scroll_offset;
-    let page_groups: Vec<&crate::iam::IamGroup> = filtered_groups
+    let page_groups: Vec<&IamGroup> = filtered_groups
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
         .collect();
 
-    use crate::iam::GroupColumn;
     let mut columns: Vec<Box<dyn Column<IamGroup>>> = vec![];
     for col_name in &app.iam_group_visible_column_ids {
         let column = match col_name.as_str() {
@@ -605,7 +605,7 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_groups,
         selected_index: app.iam_state.groups.selected - scroll_offset,
         expanded_index,
@@ -615,12 +615,12 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" User groups ({}) ", app.iam_state.groups.items.len()),
         area: chunks[2],
         is_active: app.mode != Mode::ColumnSelector,
-        get_expanded_content: Some(Box::new(|group: &crate::iam::IamGroup| {
-            crate::ui::table::expanded_from_columns(&columns, group)
+        get_expanded_content: Some(Box::new(|group: &IamGroup| {
+            expanded_from_columns(&columns, group)
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -639,7 +639,7 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
 
     // Filter with CFN pattern
     let page_size = app.iam_state.roles.page_size.value();
-    let filtered_count = crate::ui::iam::filtered_iam_roles(app).len();
+    let filtered_count = filtered_iam_roles(app).len();
     let total_pages = if filtered_count == 0 {
         1
     } else {
@@ -652,10 +652,10 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
     };
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[1],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.iam_state.roles.filter,
             placeholder: "Search",
             pagination: &pagination,
@@ -673,7 +673,6 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         .take(page_size)
         .collect();
 
-    use crate::iam::RoleColumn;
     let mut columns: Vec<Box<dyn Column<IamRole>>> = vec![];
     for col in &app.iam_role_visible_column_ids {
         let column = match col.as_str() {
@@ -700,7 +699,7 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_roles,
         selected_index: app.iam_state.roles.selected % page_size,
         expanded_index,
@@ -710,12 +709,12 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Roles ({}) ", filtered_count),
         area: chunks[2],
         is_active: app.mode != Mode::ColumnSelector,
-        get_expanded_content: Some(Box::new(|role: &crate::iam::IamRole| {
-            crate::ui::table::expanded_from_columns(&columns, role)
+        get_expanded_content: Some(Box::new(|role: &IamRole| {
+            expanded_from_columns(&columns, role)
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
@@ -759,10 +758,10 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
         {
             let formatted_duration = role
                 .max_session_duration
-                .map(|d| crate::ui::format_duration(d as u64))
+                .map(|d| format_duration(d as u64))
                 .unwrap_or_default();
 
-            crate::ui::render_summary(
+            render_summary(
                 frame,
                 chunks[1],
                 " Summary ",
@@ -1100,14 +1099,13 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
 
     // Table
     let scroll_offset = app.iam_state.policies.scroll_offset;
-    let page_policies: Vec<&crate::iam::Policy> = filtered_policies
+    let page_policies: Vec<&Policy> = filtered_policies
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
         .collect();
 
     // Define columns
-    use crate::iam::PolicyColumn;
     let mut columns: Vec<Box<dyn Column<Policy>>> = vec![];
     for col in &app.iam_policy_visible_column_ids {
         match col.as_str() {
@@ -1130,7 +1128,7 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_policies,
         selected_index: app.iam_state.policies.selected - scroll_offset,
         expanded_index,
@@ -1140,12 +1138,12 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Permissions policies ({}) ", filtered_count),
         area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
-        get_expanded_content: Some(Box::new(|policy: &crate::iam::Policy| {
-            crate::ui::table::expanded_from_columns(&columns, policy)
+        get_expanded_content: Some(Box::new(|policy: &Policy| {
+            expanded_from_columns(&columns, policy)
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -1219,7 +1217,7 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
 
     // Table using common render_table
     let scroll_offset = app.iam_state.tags.scroll_offset;
-    let page_tags: Vec<&crate::iam::RoleTag> = filtered_tags
+    let page_tags: Vec<&RoleTag> = filtered_tags
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
@@ -1237,7 +1235,7 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_tags,
         selected_index: app.iam_state.tags.selected - scroll_offset,
         expanded_index,
@@ -1247,15 +1245,12 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Tags ({}) ", app.iam_state.tags.items.len()),
         area: chunks[1],
         is_active: true,
-        get_expanded_content: Some(Box::new(|tag: &crate::iam::RoleTag| {
-            crate::ui::table::plain_expanded_content(format!(
-                "Key: {}\nValue: {}",
-                tag.key, tag.value
-            ))
+        get_expanded_content: Some(Box::new(|tag: &RoleTag| {
+            plain_expanded_content(format!("Key: {}\nValue: {}", tag.key, tag.value))
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_user_groups_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1344,7 +1339,7 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(filter, chunks[0]);
 
     let scroll_offset = app.iam_state.user_group_memberships.scroll_offset;
-    let page_groups: Vec<&crate::iam::UserGroup> = filtered_groups
+    let page_groups: Vec<&UserGroup> = filtered_groups
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
@@ -1368,7 +1363,7 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
             }
         });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_groups,
         selected_index: app.iam_state.user_group_memberships.selected - scroll_offset,
         expanded_index,
@@ -1381,15 +1376,15 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
         ),
         area: chunks[1],
         is_active: true,
-        get_expanded_content: Some(Box::new(|group: &crate::iam::UserGroup| {
-            crate::ui::table::plain_expanded_content(format!(
+        get_expanded_content: Some(Box::new(|group: &UserGroup| {
+            plain_expanded_content(format!(
                 "Group: {}\nAttached policies: {}",
                 group.group_name, group.attached_policies
             ))
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_user_last_accessed_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1491,7 +1486,7 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
 
     // Table using common render_table
     let scroll_offset = app.iam_state.user_tags.scroll_offset;
-    let page_tags: Vec<&crate::iam::UserTag> = filtered_tags
+    let page_tags: Vec<&UserTag> = filtered_tags
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
@@ -1509,7 +1504,7 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_tags,
         selected_index: app.iam_state.user_tags.selected - scroll_offset,
         expanded_index,
@@ -1519,15 +1514,12 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Tags ({}) ", app.iam_state.user_tags.items.len()),
         area: chunks[1],
         is_active: true,
-        get_expanded_content: Some(Box::new(|tag: &crate::iam::UserTag| {
-            crate::ui::table::plain_expanded_content(format!(
-                "Key: {}\nValue: {}",
-                tag.key, tag.value
-            ))
+        get_expanded_content: Some(Box::new(|tag: &UserTag| {
+            plain_expanded_content(format!("Key: {}\nValue: {}", tag.key, tag.value))
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -1620,7 +1612,7 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
 
     // Table using common render_table
     let scroll_offset = app.iam_state.last_accessed_services.scroll_offset;
-    let page_services: Vec<&crate::iam::LastAccessedService> = filtered_services
+    let page_services: Vec<&LastAccessedService> = filtered_services
         .into_iter()
         .skip(scroll_offset)
         .take(page_size)
@@ -1645,7 +1637,7 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
             }
         });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_services,
         selected_index: app
             .iam_state
@@ -1662,19 +1654,19 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
         ),
         area: chunks[1],
         is_active: true,
-        get_expanded_content: Some(Box::new(|service: &crate::iam::LastAccessedService| {
-            crate::ui::table::plain_expanded_content(format!(
+        get_expanded_content: Some(Box::new(|service: &LastAccessedService| {
+            plain_expanded_content(format!(
                 "Service: {}\nPolicies granting permissions: {}\nLast accessed: {}",
                 service.service, service.policies_granting, service.last_accessed
             ))
         })),
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 // IAM-specific helper functions
-pub fn filtered_iam_users(app: &App) -> Vec<&crate::iam::IamUser> {
+pub fn filtered_iam_users(app: &App) -> Vec<&IamUser> {
     if app.iam_state.users.filter.is_empty() {
         app.iam_state.users.items.iter().collect()
     } else {
@@ -1691,7 +1683,7 @@ pub fn filtered_iam_users(app: &App) -> Vec<&crate::iam::IamUser> {
     }
 }
 
-pub fn filtered_iam_roles(app: &App) -> Vec<&crate::iam::IamRole> {
+pub fn filtered_iam_roles(app: &App) -> Vec<&IamRole> {
     if app.iam_state.roles.filter.is_empty() {
         app.iam_state.roles.items.iter().collect()
     } else {
@@ -1708,7 +1700,7 @@ pub fn filtered_iam_roles(app: &App) -> Vec<&crate::iam::IamRole> {
     }
 }
 
-pub fn filtered_iam_policies(app: &App) -> Vec<&crate::iam::Policy> {
+pub fn filtered_iam_policies(app: &App) -> Vec<&Policy> {
     app.iam_state
         .policies
         .items
@@ -1731,7 +1723,7 @@ pub fn filtered_iam_policies(app: &App) -> Vec<&crate::iam::Policy> {
         .collect()
 }
 
-pub fn filtered_tags(app: &App) -> Vec<&crate::iam::RoleTag> {
+pub fn filtered_tags(app: &App) -> Vec<&RoleTag> {
     if app.iam_state.tags.filter.is_empty() {
         app.iam_state.tags.items.iter().collect()
     } else {
@@ -1751,7 +1743,7 @@ pub fn filtered_tags(app: &App) -> Vec<&crate::iam::RoleTag> {
     }
 }
 
-pub fn filtered_user_tags(app: &App) -> Vec<&crate::iam::UserTag> {
+pub fn filtered_user_tags(app: &App) -> Vec<&UserTag> {
     if app.iam_state.user_tags.filter.is_empty() {
         app.iam_state.user_tags.items.iter().collect()
     } else {
@@ -1771,7 +1763,7 @@ pub fn filtered_user_tags(app: &App) -> Vec<&crate::iam::UserTag> {
     }
 }
 
-pub fn filtered_last_accessed(app: &App) -> Vec<&crate::iam::LastAccessedService> {
+pub fn filtered_last_accessed(app: &App) -> Vec<&LastAccessedService> {
     app.iam_state
         .last_accessed_services
         .items
@@ -1785,11 +1777,11 @@ pub fn filtered_last_accessed(app: &App) -> Vec<&crate::iam::LastAccessedService
                     .contains(&app.iam_state.last_accessed_filter.to_lowercase())
             };
             let matches_history = match app.iam_state.last_accessed_history_filter {
-                crate::ui::iam::AccessHistoryFilter::NoFilter => true,
-                crate::ui::iam::AccessHistoryFilter::ServicesAccessed => {
+                AccessHistoryFilter::NoFilter => true,
+                AccessHistoryFilter::ServicesAccessed => {
                     !s.last_accessed.is_empty() && s.last_accessed != "Not accessed"
                 }
-                crate::ui::iam::AccessHistoryFilter::ServicesNotAccessed => {
+                AccessHistoryFilter::ServicesNotAccessed => {
                     s.last_accessed.is_empty() || s.last_accessed == "Not accessed"
                 }
             };
@@ -1826,7 +1818,7 @@ pub async fn load_iam_users(app: &mut App) -> anyhow::Result<()> {
             datetime.format("%Y-%m-%d %H:%M:%S (UTC)").to_string()
         };
 
-        iam_users.push(crate::iam::IamUser {
+        iam_users.push(IamUser {
             user_name,
             path: u.path().to_string(),
             groups: String::new(),
@@ -1860,7 +1852,7 @@ pub async fn load_iam_roles(app: &mut App) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let roles: Vec<crate::iam::IamRole> = roles
+    let roles: Vec<IamRole> = roles
         .into_iter()
         .map(|r| {
             let trusted_entities = r
@@ -1934,7 +1926,7 @@ pub async fn load_iam_roles(app: &mut App) -> anyhow::Result<()> {
                 })
                 .unwrap_or_else(|| "-".to_string());
 
-            crate::iam::IamRole {
+            IamRole {
                 role_name: r.role_name().to_string(),
                 path: r.path().to_string(),
                 trusted_entities,
@@ -1977,7 +1969,7 @@ pub async fn load_iam_user_groups(app: &mut App) -> anyhow::Result<()> {
         let group_name = g.group_name().to_string();
         let user_count = app.iam_client.get_group(&group_name).await.unwrap_or(0);
 
-        iam_groups.push(crate::iam::IamGroup {
+        iam_groups.push(IamGroup {
             group_name,
             path: g.path().to_string(),
             users: user_count.to_string(),

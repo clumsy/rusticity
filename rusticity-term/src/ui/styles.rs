@@ -1,8 +1,10 @@
 use ratatui::style::{Color, Modifier, Style};
 
+use super::red_text;
+
 // Foreground colors
 pub fn red() -> Style {
-    crate::ui::red_text()
+    red_text()
 }
 
 pub fn green() -> Style {

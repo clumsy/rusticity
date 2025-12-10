@@ -1,7 +1,7 @@
 use ratatui::{prelude::*, widgets::*};
 
 use super::styles;
-use crate::common::t;
+use crate::common::{render_scrollbar, t, SortDirection};
 
 pub const CURSOR_COLLAPSED: &str = "►";
 pub const CURSOR_EXPANDED: &str = "▼";
@@ -44,7 +44,7 @@ pub struct TableConfig<'a, T> {
     pub expanded_index: Option<usize>,
     pub columns: &'a [Box<dyn Column<T>>],
     pub sort_column: &'a str,
-    pub sort_direction: crate::common::SortDirection,
+    pub sort_direction: SortDirection,
     pub title: String,
     pub area: Rect,
     pub get_expanded_content: Option<ExpandedContentFn<'a, T>>,
@@ -114,7 +114,7 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     let header_cells = config.columns.iter().enumerate().map(|(i, col)| {
         let mut name = col.name().to_string();
         if !config.sort_column.is_empty() && config.sort_column == name {
-            let arrow = if config.sort_direction == crate::common::SortDirection::Asc {
+            let arrow = if config.sort_direction == SortDirection::Asc {
                 " ↑"
             } else {
                 " ↓"
@@ -317,7 +317,7 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         });
         // Only show scrollbar if there are more items than can fit in the viewport
         if config.items.len() > scrollbar_area.height as usize {
-            crate::common::render_scrollbar(
+            render_scrollbar(
                 frame,
                 scrollbar_area,
                 config.items.len(),

@@ -1,18 +1,25 @@
 use crate::app::App;
-use crate::common::CyclicEnum;
 use crate::common::{
     format_bytes, format_duration_seconds, format_memory_mb, render_pagination_text, ColumnId,
-    InputFocus, SortDirection,
+    CyclicEnum, InputFocus, SortDirection,
 };
 use crate::keymap::Mode;
 use crate::lambda::{
-    format_architecture, format_runtime, Alias, AliasColumn, Application as LambdaApplication,
-    Deployment, Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer, LayerColumn,
-    Resource, Version, VersionColumn,
+    format_architecture, format_runtime, parse_layer_arn, Alias, AliasColumn,
+    Application as LambdaApplication, ApplicationColumn, Deployment, DeploymentColumn,
+    Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer, LayerColumn, Resource,
+    ResourceColumn, Version, VersionColumn,
 };
 use crate::table::TableState;
-use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
-use crate::ui::{block_height, labeled_field, render_tabs, section_header, vertical};
+use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+use crate::ui::monitoring::MonitoringState;
+use crate::ui::table::{
+    expanded_from_columns, plain_expanded_content, render_table, Column as TableColumn, TableConfig,
+};
+use crate::ui::{
+    block_height, format_expansion_text, labeled_field, render_tabs, rounded_block, section_header,
+    vertical,
+};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -130,8 +137,6 @@ impl State {
         }
     }
 }
-
-use crate::ui::monitoring::MonitoringState;
 
 impl MonitoringState for State {
     fn is_metrics_loading(&self) -> bool {
@@ -343,10 +348,10 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.lambda_state.table.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[0],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.lambda_state.table.filter,
             placeholder: "Filter by attributes or search by keyword",
             pagination: &pagination,
@@ -580,7 +585,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                     title,
                     area: chunks_content[2],
                     get_expanded_content: Some(Box::new(|layer: &Layer| {
-                        crate::ui::format_expansion_text(&[
+                        format_expansion_text(&[
                             ("Merge order", layer.merge_order.clone()),
                             ("Name", layer.name.clone()),
                             ("Layer version", layer.layer_version.clone()),
@@ -686,10 +691,10 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let current_page = app.lambda_state.version_table.selected / page_size;
         let pagination = render_pagination_text(current_page, total_pages);
 
-        crate::ui::filter::render_simple_filter(
+        render_simple_filter(
             frame,
             version_chunks[0],
-            crate::ui::filter::SimpleFilterConfig {
+            SimpleFilterConfig {
                 filter_text: &app.lambda_state.version_table.filter,
                 placeholder: "Filter by attributes or search by keyword",
                 pagination: &pagination,
@@ -760,7 +765,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             sort_direction: SortDirection::Desc,
             title,
             area: version_chunks[1],
-            get_expanded_content: Some(Box::new(|ver: &crate::lambda::Version| {
+            get_expanded_content: Some(Box::new(|ver: &Version| {
                 expanded_from_columns(&columns, ver)
             })),
             is_active: app.mode != Mode::FilterInput,
@@ -802,10 +807,10 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let current_page = app.lambda_state.alias_table.selected / page_size;
         let pagination = render_pagination_text(current_page, total_pages);
 
-        crate::ui::filter::render_simple_filter(
+        render_simple_filter(
             frame,
             alias_chunks[0],
-            crate::ui::filter::SimpleFilterConfig {
+            SimpleFilterConfig {
                 filter_text: &app.lambda_state.alias_table.filter,
                 placeholder: "Filter by attributes or search by keyword",
                 pagination: &pagination,
@@ -873,7 +878,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             sort_direction: SortDirection::Asc,
             title,
             area: alias_chunks[1],
-            get_expanded_content: Some(Box::new(|alias: &crate::lambda::Alias| {
+            get_expanded_content: Some(Box::new(|alias: &Alias| {
                 expanded_from_columns(&columns, alias)
             })),
             is_active: app.mode != Mode::FilterInput,
@@ -886,7 +891,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             "{} tab content (coming soon)",
             app.lambda_state.detail_tab.name()
         ))
-        .block(crate::ui::rounded_block());
+        .block(rounded_block());
         frame.render_widget(content, chunks[2]);
     }
 }
@@ -1179,7 +1184,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     title,
                     area: chunks_content[2],
                     get_expanded_content: Some(Box::new(|layer: &Layer| {
-                        crate::ui::format_expansion_text(&[
+                        format_expansion_text(&[
                             ("Merge order", layer.merge_order.clone()),
                             ("Name", layer.name.clone()),
                             ("Layer version", layer.layer_version.clone()),
@@ -1276,10 +1281,10 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let current_page = app.lambda_state.alias_table.selected / page_size;
                     let pagination = render_pagination_text(current_page, total_pages);
 
-                    crate::ui::filter::render_simple_filter(
+                    render_simple_filter(
                         frame,
                         chunks_content[1],
-                        crate::ui::filter::SimpleFilterConfig {
+                        SimpleFilterConfig {
                             filter_text: &app.lambda_state.alias_table.filter,
                             placeholder: "Filter by attributes or search by keyword",
                             pagination: &pagination,
@@ -1351,7 +1356,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                         sort_direction: SortDirection::Asc,
                         title,
                         area: chunks_content[2],
-                        get_expanded_content: Some(Box::new(|alias: &crate::lambda::Alias| {
+                        get_expanded_content: Some(Box::new(|alias: &Alias| {
                             expanded_from_columns(&columns, alias)
                         })),
                         is_active: app.mode != Mode::FilterInput,
@@ -1384,10 +1389,10 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.lambda_application_state.table.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_simple_filter(
+    render_simple_filter(
         frame,
         chunks[0],
-        crate::ui::filter::SimpleFilterConfig {
+        SimpleFilterConfig {
             filter_text: &app.lambda_application_state.table.filter,
             placeholder: "Filter by attributes or search by keyword",
             pagination: &pagination,
@@ -1408,7 +1413,7 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaApplication>>> = vec![];
     for col_id in &app.lambda_application_visible_column_ids {
-        if let Some(column) = crate::lambda::ApplicationColumn::from_id(col_id) {
+        if let Some(column) = ApplicationColumn::from_id(col_id) {
             columns.push(Box::new(column));
         }
     }
@@ -1511,7 +1516,7 @@ pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {
                 .into_iter()
                 .enumerate()
                 .map(|(i, l)| {
-                    let (name, version) = crate::lambda::parse_layer_arn(&l.arn);
+                    let (name, version) = parse_layer_arn(&l.arn);
                     Layer {
                         merge_order: (i + 1).to_string(),
                         name,
@@ -1757,10 +1762,10 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
         let current_page = app.lambda_application_state.resources.selected / page_size;
         let pagination = render_pagination_text(current_page, total_pages);
 
-        crate::ui::filter::render_simple_filter(
+        render_simple_filter(
             frame,
             chunks_content[0],
-            crate::ui::filter::SimpleFilterConfig {
+            SimpleFilterConfig {
                 filter_text: &app.lambda_application_state.resources.filter,
                 placeholder: "Filter by attributes or search by keyword",
                 pagination: &pagination,
@@ -1778,12 +1783,12 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             app.lambda_application_state.resources.items.len()
         );
 
-        let columns: Vec<Box<dyn crate::ui::table::Column<Resource>>> = app
+        let columns: Vec<Box<dyn TableColumn<Resource>>> = app
             .lambda_resource_visible_column_ids
             .iter()
             .filter_map(|col_id| {
-                crate::lambda::ResourceColumn::from_id(col_id)
-                    .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<Resource>>)
+                ResourceColumn::from_id(col_id)
+                    .map(|col| Box::new(col) as Box<dyn TableColumn<Resource>>)
             })
             .collect();
         // let columns: Vec<Box<dyn TableColumn<Resource>>> = vec![
@@ -1810,7 +1815,7 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             title,
             area: chunks_content[1],
             get_expanded_content: Some(Box::new(|res: &Resource| {
-                crate::ui::table::plain_expanded_content(format!(
+                plain_expanded_content(format!(
                     "Logical ID: {}\nPhysical ID: {}\nType: {}\nLast modified: {}",
                     res.logical_id, res.physical_id, res.resource_type, res.last_modified
                 ))
@@ -1835,10 +1840,10 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
         let current_page = app.lambda_application_state.deployments.selected / page_size;
         let pagination = render_pagination_text(current_page, total_pages);
 
-        crate::ui::filter::render_simple_filter(
+        render_simple_filter(
             frame,
             chunks_content[0],
-            crate::ui::filter::SimpleFilterConfig {
+            SimpleFilterConfig {
                 filter_text: &app.lambda_application_state.deployments.filter,
                 placeholder: "Filter by attributes or search by keyword",
                 pagination: &pagination,
@@ -1856,7 +1861,6 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             app.lambda_application_state.deployments.items.len()
         );
 
-        use crate::lambda::DeploymentColumn;
         let columns: Vec<Box<dyn TableColumn<Deployment>>> = vec![
             Box::new(DeploymentColumn::Deployment),
             Box::new(DeploymentColumn::ResourceType),
@@ -1881,7 +1885,7 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             title,
             area: chunks_content[1],
             get_expanded_content: Some(Box::new(|dep: &Deployment| {
-                crate::ui::table::plain_expanded_content(format!(
+                plain_expanded_content(format!(
                     "Deployment: {}\nResource type: {}\nLast updated: {}\nStatus: {}",
                     dep.deployment_id, dep.resource_type, dep.last_updated, dep.status
                 ))
@@ -2199,7 +2203,6 @@ mod tests {
 
     #[test]
     fn test_detail_tab_monitoring_navigation() {
-        use crate::common::CyclicEnum;
         let tab = DetailTab::Code;
         assert_eq!(tab.next(), DetailTab::Monitor);
 

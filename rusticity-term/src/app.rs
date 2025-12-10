@@ -1,46 +1,80 @@
-pub use crate::aws::{Profile as AwsProfile, Region as AwsRegion};
+pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
-use crate::cw::insights::{InsightsFocus, InsightsState};
+pub use crate::cw::insights::InsightsFocus;
+use crate::cw::insights::InsightsState;
 pub use crate::cw::{Alarm, AlarmColumn};
 pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
-use crate::iam::{self, UserColumn};
+use crate::iam::{
+    self, GroupUser as IamGroupUser, Policy as IamPolicy, RoleTag as IamRoleTag, UserColumn,
+    UserTag as IamUserTag,
+};
+#[cfg(test)]
+use crate::iam::{IamRole, IamUser, LastAccessedService};
 use crate::keymap::{Action, Mode};
-pub use crate::lambda::DeploymentColumn;
-pub use crate::lambda::ResourceColumn;
 pub use crate::lambda::{
-    Application as LambdaApplication, ApplicationColumn as LambdaApplicationColumn,
-    Function as LambdaFunction, FunctionColumn as LambdaColumn,
+    Alias as LambdaAlias, Application as LambdaApplication,
+    ApplicationColumn as LambdaApplicationColumn, Deployment, DeploymentColumn,
+    Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer as LambdaLayer, Resource,
+    ResourceColumn, Version as LambdaVersion,
 };
 pub use crate::s3::{Bucket as S3Bucket, BucketColumn as S3BucketColumn, Object as S3Object};
 use crate::session::{Session, SessionTab};
 pub use crate::sqs::queue::Column as SqsColumn;
 pub use crate::sqs::trigger::Column as SqsTriggerColumn;
+use crate::sqs::{console_url_queue_detail, console_url_queues};
+#[cfg(test)]
+use crate::sqs::{
+    EventBridgePipe, LambdaTrigger, Queue as SqsQueue, QueueTag as SqsQueueTag, SnsSubscription,
+};
 use crate::table::TableState;
 use crate::ui::cfn::State as CfnStateConstants;
 pub use crate::ui::cfn::{
-    filtered_outputs, filtered_parameters, filtered_resources, DetailTab as CfnDetailTab,
+    filtered_cloudformation_stacks, filtered_outputs, filtered_parameters, filtered_resources,
+    output_column_ids, parameter_column_ids, resource_column_ids, DetailTab as CfnDetailTab,
     State as CfnState, StatusFilter as CfnStatusFilter,
 };
-pub use crate::ui::cw::alarms::{AlarmTab, AlarmViewMode};
+pub use crate::ui::cw::alarms::{
+    AlarmTab, AlarmViewMode, FILTER_CONTROLS as ALARM_FILTER_CONTROLS,
+};
+pub use crate::ui::cw::logs::{
+    filtered_log_events, filtered_log_groups, filtered_log_streams, selected_log_group,
+    DetailTab as CwLogsDetailTab, EventFilterFocus, FILTER_CONTROLS as LOG_FILTER_CONTROLS,
+};
 use crate::ui::ec2;
 pub use crate::ui::ec2::{
     State as Ec2State, StateFilter as Ec2StateFilter, STATE_FILTER as EC2_STATE_FILTER,
 };
-pub use crate::ui::ecr::{State as EcrState, Tab as EcrTab};
-use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
+pub use crate::ui::ecr::{
+    filtered_ecr_images, filtered_ecr_repositories, State as EcrState, Tab as EcrTab,
+    FILTER_CONTROLS as ECR_FILTER_CONTROLS,
+};
+use crate::ui::iam::{
+    filtered_iam_policies, filtered_iam_roles, filtered_iam_users, filtered_last_accessed,
+    filtered_tags as filtered_iam_tags, filtered_user_tags, GroupTab, RoleTab, State as IamState,
+    UserTab,
+};
 pub use crate::ui::lambda::{
+    filtered_lambda_applications, filtered_lambda_functions,
     ApplicationDetailTab as LambdaApplicationDetailTab, ApplicationState as LambdaApplicationState,
-    DetailTab as LambdaDetailTab, State as LambdaState,
+    DetailTab as LambdaDetailTab, State as LambdaState, FILTER_CONTROLS as LAMBDA_FILTER_CONTROLS,
 };
 use crate::ui::monitoring::MonitoringState;
-pub use crate::ui::s3::{BucketType as S3BucketType, ObjectTab as S3ObjectTab, State as S3State};
-pub use crate::ui::sqs::{QueueDetailTab as SqsQueueDetailTab, State as SqsState};
+pub use crate::ui::s3::{
+    calculate_total_bucket_rows, calculate_total_object_rows, BucketType as S3BucketType,
+    ObjectTab as S3ObjectTab, State as S3State,
+};
+pub use crate::ui::sqs::{
+    extract_account_id, extract_region, filtered_eventbridge_pipes, filtered_lambda_triggers,
+    filtered_queues, filtered_subscriptions, filtered_tags, QueueDetailTab as SqsQueueDetailTab,
+    State as SqsState, FILTER_CONTROLS as SQS_FILTER_CONTROLS,
+    SUBSCRIPTION_FILTER_CONTROLS as SQS_SUBSCRIPTION_FILTER_CONTROLS, SUBSCRIPTION_REGION,
+};
 pub use crate::ui::{
-    CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, EventFilterFocus,
-    LogGroupColumn, Preferences, StreamColumn, StreamSort, TimeUnit,
+    CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
+    StreamColumn, StreamSort, TimeUnit,
 };
 use rusticity_core::{
     AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, Ec2Client, EcrClient,
@@ -512,12 +546,12 @@ impl App {
             .map(|c| c.id())
             .collect(),
             cfn_column_ids: CfnColumn::ids(),
-            cfn_parameter_visible_column_ids: crate::ui::cfn::parameter_column_ids(),
-            cfn_parameter_column_ids: crate::ui::cfn::parameter_column_ids(),
-            cfn_output_visible_column_ids: crate::ui::cfn::output_column_ids(),
-            cfn_output_column_ids: crate::ui::cfn::output_column_ids(),
-            cfn_resource_visible_column_ids: crate::ui::cfn::resource_column_ids(),
-            cfn_resource_column_ids: crate::ui::cfn::resource_column_ids(),
+            cfn_parameter_visible_column_ids: parameter_column_ids(),
+            cfn_parameter_column_ids: parameter_column_ids(),
+            cfn_output_visible_column_ids: output_column_ids(),
+            cfn_output_column_ids: output_column_ids(),
+            cfn_resource_visible_column_ids: resource_column_ids(),
+            cfn_resource_column_ids: resource_column_ids(),
             iam_user_visible_column_ids: UserColumn::visible(),
             iam_user_column_ids: UserColumn::ids(),
             iam_role_visible_column_ids: vec![
@@ -697,12 +731,12 @@ impl App {
             .collect(),
             cfn_column_ids: CfnColumn::ids(),
             iam_user_visible_column_ids: UserColumn::visible(),
-            cfn_parameter_visible_column_ids: crate::ui::cfn::parameter_column_ids(),
-            cfn_parameter_column_ids: crate::ui::cfn::parameter_column_ids(),
-            cfn_output_visible_column_ids: crate::ui::cfn::output_column_ids(),
-            cfn_output_column_ids: crate::ui::cfn::output_column_ids(),
-            cfn_resource_visible_column_ids: crate::ui::cfn::resource_column_ids(),
-            cfn_resource_column_ids: crate::ui::cfn::resource_column_ids(),
+            cfn_parameter_visible_column_ids: parameter_column_ids(),
+            cfn_parameter_column_ids: parameter_column_ids(),
+            cfn_output_visible_column_ids: output_column_ids(),
+            cfn_output_column_ids: output_column_ids(),
+            cfn_resource_visible_column_ids: resource_column_ids(),
+            cfn_resource_column_ids: resource_column_ids(),
             iam_user_column_ids: UserColumn::ids(),
             iam_role_visible_column_ids: vec![
                 "Role name".to_string(),
@@ -1025,7 +1059,6 @@ impl App {
                     self.service_picker.filter.push(c);
                     self.service_picker.selected = 0;
                 } else if self.mode == Mode::InsightsInput {
-                    use crate::app::InsightsFocus;
                     match self.insights_state.insights.insights_focus {
                         InsightsFocus::Query => {
                             self.insights_state.insights.query_text.push(c);
@@ -1262,7 +1295,6 @@ impl App {
                     self.session_filter.pop();
                     self.session_picker_selected = 0;
                 } else if self.mode == Mode::InsightsInput {
-                    use crate::app::InsightsFocus;
                     match self.insights_state.insights.insights_focus {
                         InsightsFocus::Query => {
                             self.insights_state.insights.query_text.pop();
@@ -3115,7 +3147,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::LambdaFunctions {
-                    let filtered_functions = crate::ui::lambda::filtered_lambda_functions(self);
+                    let filtered_functions = filtered_lambda_functions(self);
                     if let Some(func) = self.lambda_state.table.get_selected(&filtered_functions) {
                         copy_to_clipboard(&func.arn);
                     }
@@ -3152,7 +3184,7 @@ impl App {
                             }
                         }
                     } else {
-                        let filtered_users = crate::ui::iam::filtered_iam_users(self);
+                        let filtered_users = filtered_iam_users(self);
                         if let Some(user) = self.iam_state.users.get_selected(&filtered_users) {
                             copy_to_clipboard(&user.arn);
                         }
@@ -3171,7 +3203,7 @@ impl App {
                             }
                         }
                     } else {
-                        let filtered_roles = crate::ui::iam::filtered_iam_roles(self);
+                        let filtered_roles = filtered_iam_roles(self);
                         if let Some(role) = self.iam_state.roles.get_selected(&filtered_roles) {
                             copy_to_clipboard(&role.arn);
                         }
@@ -3219,23 +3251,23 @@ impl App {
                         {
                             let arn = format!(
                                 "arn:aws:sqs:{}:{}:{}",
-                                crate::ui::sqs::extract_region(&queue.url),
-                                crate::ui::sqs::extract_account_id(&queue.url),
+                                extract_region(&queue.url),
+                                extract_account_id(&queue.url),
                                 queue.name
                             );
                             copy_to_clipboard(&arn);
                         }
                     } else {
                         // In list view - copy selected queue ARN
-                        let filtered_queues = crate::ui::sqs::filtered_queues(
+                        let filtered_queues = filtered_queues(
                             &self.sqs_state.queues.items,
                             &self.sqs_state.queues.filter,
                         );
                         if let Some(queue) = self.sqs_state.queues.get_selected(&filtered_queues) {
                             let arn = format!(
                                 "arn:aws:sqs:{}:{}:{}",
-                                crate::ui::sqs::extract_region(&queue.url),
-                                crate::ui::sqs::extract_account_id(&queue.url),
+                                extract_region(&queue.url),
+                                extract_account_id(&queue.url),
                                 queue.name
                             );
                             copy_to_clipboard(&arn);
@@ -3255,10 +3287,9 @@ impl App {
             Action::ApplyFilter => {
                 if self.mode == Mode::FilterInput
                     && self.current_service == Service::SqsQueues
-                    && self.sqs_state.input_focus
-                        == crate::common::InputFocus::Dropdown("SubscriptionRegion")
+                    && self.sqs_state.input_focus == InputFocus::Dropdown("SubscriptionRegion")
                 {
-                    let regions = crate::aws::Region::all();
+                    let regions = AwsRegion::all();
                     if let Some(region) = regions.get(self.sqs_state.subscription_region_selected) {
                         self.sqs_state.subscription_region_filter = region.code.to_string();
                     }
@@ -3551,31 +3582,31 @@ impl App {
     }
 
     pub fn selected_log_group(&self) -> Option<&LogGroup> {
-        crate::ui::cw::logs::selected_log_group(self)
+        selected_log_group(self)
     }
 
     pub fn filtered_log_streams(&self) -> Vec<&LogStream> {
-        crate::ui::cw::logs::filtered_log_streams(self)
+        filtered_log_streams(self)
     }
 
     pub fn filtered_log_events(&self) -> Vec<&LogEvent> {
-        crate::ui::cw::logs::filtered_log_events(self)
+        filtered_log_events(self)
     }
 
     pub fn filtered_log_groups(&self) -> Vec<&LogGroup> {
-        crate::ui::cw::logs::filtered_log_groups(self)
+        filtered_log_groups(self)
     }
 
     pub fn filtered_ecr_repositories(&self) -> Vec<&EcrRepository> {
-        crate::ui::ecr::filtered_ecr_repositories(self)
+        filtered_ecr_repositories(self)
     }
 
     pub fn filtered_ecr_images(&self) -> Vec<&EcrImage> {
-        crate::ui::ecr::filtered_ecr_images(self)
+        filtered_ecr_images(self)
     }
 
     pub fn filtered_cloudformation_stacks(&self) -> Vec<&CfnStack> {
-        crate::ui::cfn::filtered_cloudformation_stacks(self)
+        filtered_cloudformation_stacks(self)
     }
 
     pub fn breadcrumbs(&self) -> String {
@@ -3748,9 +3779,9 @@ impl App {
             }
             Service::SqsQueues => {
                 if let Some(queue_url) = &self.sqs_state.current_queue {
-                    crate::sqs::console_url_queue_detail(&self.config.region, queue_url)
+                    console_url_queue_detail(&self.config.region, queue_url)
                 } else {
-                    crate::sqs::console_url_queues(&self.config.region)
+                    console_url_queues(&self.config.region)
                 }
             }
             Service::EcrRepositories => {
@@ -3857,11 +3888,11 @@ impl App {
     }
 
     fn calculate_total_bucket_rows(&self) -> usize {
-        crate::ui::s3::calculate_total_bucket_rows(self)
+        calculate_total_bucket_rows(self)
     }
 
     fn calculate_total_object_rows(&self) -> usize {
-        crate::ui::s3::calculate_total_object_rows(self)
+        calculate_total_object_rows(self)
     }
 
     fn get_column_selector_max(&self) -> usize {
@@ -3923,7 +3954,7 @@ impl App {
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
                     if self.sqs_state.input_focus == SUBSCRIPTION_REGION {
-                        let regions = crate::aws::Region::all();
+                        let regions = AwsRegion::all();
                         self.sqs_state.subscription_region_selected =
                             (self.sqs_state.subscription_region_selected + 1)
                                 .min(regions.len() - 1);
@@ -4154,33 +4185,33 @@ impl App {
                     if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
                     {
-                        let filtered = crate::ui::sqs::filtered_lambda_triggers(self);
+                        let filtered = filtered_lambda_triggers(self);
                         if !filtered.is_empty() {
                             self.sqs_state.triggers.next_item(filtered.len());
                         }
                     } else if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
                     {
-                        let filtered = crate::ui::sqs::filtered_eventbridge_pipes(self);
+                        let filtered = filtered_eventbridge_pipes(self);
                         if !filtered.is_empty() {
                             self.sqs_state.pipes.next_item(filtered.len());
                         }
                     } else if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
                     {
-                        let filtered = crate::ui::sqs::filtered_tags(self);
+                        let filtered = filtered_tags(self);
                         if !filtered.is_empty() {
                             self.sqs_state.tags.next_item(filtered.len());
                         }
                     } else if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
                     {
-                        let filtered = crate::ui::sqs::filtered_subscriptions(self);
+                        let filtered = filtered_subscriptions(self);
                         if !filtered.is_empty() {
                             self.sqs_state.subscriptions.next_item(filtered.len());
                         }
                     } else {
-                        let filtered_queues = crate::ui::sqs::filtered_queues(
+                        let filtered_queues = filtered_queues(
                             &self.sqs_state.queues.items,
                             &self.sqs_state.queues.filter,
                         );
@@ -4270,7 +4301,7 @@ impl App {
                             self.lambda_state.alias_table.snap_to_page();
                         }
                     } else if self.lambda_state.current_function.is_none() {
-                        let filtered = crate::ui::lambda::filtered_lambda_functions(self);
+                        let filtered = filtered_lambda_functions(self);
                         if !filtered.is_empty() {
                             self.lambda_state.table.next_item(filtered.len());
                             self.lambda_state.table.snap_to_page();
@@ -4292,7 +4323,7 @@ impl App {
                             }
                         }
                     } else {
-                        let filtered = crate::ui::lambda::filtered_lambda_applications(self);
+                        let filtered = filtered_lambda_applications(self);
                         if !filtered.is_empty() {
                             self.lambda_application_state.table.selected =
                                 (self.lambda_application_state.table.selected + 1)
@@ -4323,18 +4354,18 @@ impl App {
                 } else if self.current_service == Service::IamUsers {
                     if self.iam_state.current_user.is_some() {
                         if self.iam_state.user_tab == UserTab::Tags {
-                            let filtered = crate::ui::iam::filtered_user_tags(self);
+                            let filtered = filtered_user_tags(self);
                             if !filtered.is_empty() {
                                 self.iam_state.user_tags.next_item(filtered.len());
                             }
                         } else {
-                            let filtered = crate::ui::iam::filtered_iam_policies(self);
+                            let filtered = filtered_iam_policies(self);
                             if !filtered.is_empty() {
                                 self.iam_state.policies.next_item(filtered.len());
                             }
                         }
                     } else {
-                        let filtered = crate::ui::iam::filtered_iam_users(self);
+                        let filtered = filtered_iam_users(self);
                         if !filtered.is_empty() {
                             self.iam_state.users.next_item(filtered.len());
                         }
@@ -4350,25 +4381,25 @@ impl App {
                             self.iam_state.revoke_sessions_scroll =
                                 (self.iam_state.revoke_sessions_scroll + 1).min(19);
                         } else if self.iam_state.role_tab == RoleTab::Tags {
-                            let filtered = crate::ui::iam::filtered_tags(self);
+                            let filtered = filtered_iam_tags(self);
                             if !filtered.is_empty() {
                                 self.iam_state.tags.next_item(filtered.len());
                             }
                         } else if self.iam_state.role_tab == RoleTab::LastAccessed {
-                            let filtered = crate::ui::iam::filtered_last_accessed(self);
+                            let filtered = filtered_last_accessed(self);
                             if !filtered.is_empty() {
                                 self.iam_state
                                     .last_accessed_services
                                     .next_item(filtered.len());
                             }
                         } else {
-                            let filtered = crate::ui::iam::filtered_iam_policies(self);
+                            let filtered = filtered_iam_policies(self);
                             if !filtered.is_empty() {
                                 self.iam_state.policies.next_item(filtered.len());
                             }
                         }
                     } else {
-                        let filtered = crate::ui::iam::filtered_iam_roles(self);
+                        let filtered = filtered_iam_roles(self);
                         if !filtered.is_empty() {
                             self.iam_state.roles.next_item(filtered.len());
                         }
@@ -4395,12 +4426,12 @@ impl App {
                                 self.iam_state.group_users.next_item(filtered.len());
                             }
                         } else if self.iam_state.group_tab == GroupTab::Permissions {
-                            let filtered = crate::ui::iam::filtered_iam_policies(self);
+                            let filtered = filtered_iam_policies(self);
                             if !filtered.is_empty() {
                                 self.iam_state.policies.next_item(filtered.len());
                             }
                         } else if self.iam_state.group_tab == GroupTab::AccessAdvisor {
-                            let filtered = crate::ui::iam::filtered_last_accessed(self);
+                            let filtered = filtered_last_accessed(self);
                             if !filtered.is_empty() {
                                 self.iam_state
                                     .last_accessed_services
@@ -4743,7 +4774,7 @@ impl App {
             && self.iam_state.current_role.is_none()
         {
             let page_size = self.iam_state.roles.page_size.value();
-            let filtered_count = crate::ui::iam::filtered_iam_roles(self).len();
+            let filtered_count = filtered_iam_roles(self).len();
             self.iam_state.role_input_focus.handle_page_down(
                 &mut self.iam_state.roles.selected,
                 &mut self.iam_state.roles.scroll_offset,
@@ -4849,7 +4880,7 @@ impl App {
                     target.min(filtered_count.saturating_sub(1));
             } else if self.lambda_state.current_function.is_none() {
                 let page_size = self.lambda_state.table.page_size.value();
-                let filtered_count = crate::ui::lambda::filtered_lambda_functions(self).len();
+                let filtered_count = filtered_lambda_functions(self).len();
                 self.lambda_state.input_focus.handle_page_down(
                     &mut self.lambda_state.table.selected,
                     &mut self.lambda_state.table.scroll_offset,
@@ -4879,7 +4910,7 @@ impl App {
             );
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
             let page_size = self.iam_state.policies.page_size.value();
-            let filtered_count = crate::ui::iam::filtered_iam_policies(self).len();
+            let filtered_count = filtered_iam_policies(self).len();
             self.iam_state.policy_input_focus.handle_page_down(
                 &mut self.iam_state.policies.selected,
                 &mut self.iam_state.policies.scroll_offset,
@@ -5025,16 +5056,14 @@ impl App {
                     self.ecr_state.repositories.page_down(filtered.len());
                 }
             } else if self.current_service == Service::SqsQueues {
-                let filtered = crate::ui::sqs::filtered_queues(
-                    &self.sqs_state.queues.items,
-                    &self.sqs_state.queues.filter,
-                );
+                let filtered =
+                    filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter);
                 self.sqs_state.queues.page_down(filtered.len());
             } else if self.current_service == Service::LambdaFunctions {
-                let len = crate::ui::lambda::filtered_lambda_functions(self).len();
+                let len = filtered_lambda_functions(self).len();
                 self.lambda_state.table.page_down(len);
             } else if self.current_service == Service::LambdaApplications {
-                let len = crate::ui::lambda::filtered_lambda_applications(self).len();
+                let len = filtered_lambda_applications(self).len();
                 self.lambda_application_state.table.page_down(len);
             } else if self.current_service == Service::CloudFormationStacks {
                 if self.cfn_state.current_stack.is_some()
@@ -5052,16 +5081,16 @@ impl App {
                     self.cfn_state.table.page_down(filtered.len());
                 }
             } else if self.current_service == Service::IamUsers {
-                let len = crate::ui::iam::filtered_iam_users(self).len();
+                let len = filtered_iam_users(self).len();
                 nav_page_down(&mut self.iam_state.users.selected, len, 10);
             } else if self.current_service == Service::IamRoles {
                 if self.iam_state.current_role.is_some() {
-                    let filtered = crate::ui::iam::filtered_iam_policies(self);
+                    let filtered = filtered_iam_policies(self);
                     if !filtered.is_empty() {
                         self.iam_state.policies.page_down(filtered.len());
                     }
                 } else {
-                    let filtered = crate::ui::iam::filtered_iam_roles(self);
+                    let filtered = filtered_iam_roles(self);
                     self.iam_state.roles.page_down(filtered.len());
                 }
             } else if self.current_service == Service::IamUserGroups {
@@ -5086,12 +5115,12 @@ impl App {
                             self.iam_state.group_users.page_down(filtered.len());
                         }
                     } else if self.iam_state.group_tab == GroupTab::Permissions {
-                        let filtered = crate::ui::iam::filtered_iam_policies(self);
+                        let filtered = filtered_iam_policies(self);
                         if !filtered.is_empty() {
                             self.iam_state.policies.page_down(filtered.len());
                         }
                     } else if self.iam_state.group_tab == GroupTab::AccessAdvisor {
-                        let filtered = crate::ui::iam::filtered_last_accessed(self);
+                        let filtered = filtered_last_accessed(self);
                         if !filtered.is_empty() {
                             self.iam_state
                                 .last_accessed_services
@@ -5484,14 +5513,11 @@ impl App {
                             // Recursive function to check nested items at any depth
                             #[allow(clippy::too_many_arguments)]
                             fn check_nested_expansion(
-                                objects: &[crate::s3::Object],
+                                objects: &[S3Object],
                                 row_idx: &mut usize,
                                 target_row: usize,
                                 expanded_prefixes: &mut std::collections::HashSet<String>,
-                                prefix_preview: &std::collections::HashMap<
-                                    String,
-                                    Vec<crate::s3::Object>,
-                                >,
+                                prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
                                 found: &mut bool,
                                 loading: &mut bool,
                                 selected_row: &mut usize,
@@ -5842,11 +5868,9 @@ impl App {
                 }
             }
             Service::SqsQueues => {
-                let filtered_count = crate::ui::sqs::filtered_queues(
-                    &self.sqs_state.queues.items,
-                    &self.sqs_state.queues.filter,
-                )
-                .len();
+                let filtered_count =
+                    filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter)
+                        .len();
                 self.sqs_state.queues.goto_page(page, filtered_count);
             }
             Service::S3Buckets => {
@@ -5888,12 +5912,12 @@ impl App {
                         .version_table
                         .goto_page(page, filtered_count);
                 } else {
-                    let filtered_count = crate::ui::lambda::filtered_lambda_functions(self).len();
+                    let filtered_count = filtered_lambda_functions(self).len();
                     self.lambda_state.table.goto_page(page, filtered_count);
                 }
             }
             Service::LambdaApplications => {
-                let filtered_count = crate::ui::lambda::filtered_lambda_applications(self).len();
+                let filtered_count = filtered_lambda_applications(self).len();
                 self.lambda_application_state
                     .table
                     .goto_page(page, filtered_count);
@@ -5903,11 +5927,11 @@ impl App {
                 self.cfn_state.table.goto_page(page, filtered_count);
             }
             Service::IamUsers => {
-                let filtered_count = crate::ui::iam::filtered_iam_users(self).len();
+                let filtered_count = filtered_iam_users(self).len();
                 self.iam_state.users.goto_page(page, filtered_count);
             }
             Service::IamRoles => {
-                let filtered_count = crate::ui::iam::filtered_iam_roles(self).len();
+                let filtered_count = filtered_iam_roles(self).len();
                 self.iam_state.roles.goto_page(page, filtered_count);
             }
             _ => {}
@@ -6013,14 +6037,11 @@ impl App {
                             // Recursive function to check nested items at any depth
                             #[allow(clippy::too_many_arguments)]
                             fn check_nested_collapse(
-                                objects: &[crate::s3::Object],
+                                objects: &[S3Object],
                                 row_idx: &mut usize,
                                 target_row: usize,
                                 expanded_prefixes: &mut std::collections::HashSet<String>,
-                                prefix_preview: &std::collections::HashMap<
-                                    String,
-                                    Vec<crate::s3::Object>,
-                                >,
+                                prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
                                 found: &mut bool,
                                 selected_row: &mut usize,
                                 parent_row: usize,
@@ -6666,7 +6687,7 @@ impl App {
                 }
             } else if self.current_service == Service::SqsQueues {
                 if self.sqs_state.current_queue.is_none() {
-                    let filtered_queues = crate::ui::sqs::filtered_queues(
+                    let filtered_queues = filtered_queues(
                         &self.sqs_state.queues.items,
                         &self.sqs_state.queues.filter,
                     );
@@ -6690,7 +6711,7 @@ impl App {
                 if self.iam_state.current_user.is_some() {
                     // Open policy view (but not on Tags tab)
                     if self.iam_state.user_tab != UserTab::Tags {
-                        let filtered = crate::ui::iam::filtered_iam_policies(self);
+                        let filtered = filtered_iam_policies(self);
                         if let Some(policy) = self.iam_state.policies.get_selected(&filtered) {
                             self.iam_state.current_policy = Some(policy.policy_name.clone());
                             self.iam_state.policy_scroll = 0;
@@ -6700,7 +6721,7 @@ impl App {
                         }
                     }
                 } else if self.iam_state.current_user.is_none() {
-                    let filtered_users = crate::ui::iam::filtered_iam_users(self);
+                    let filtered_users = filtered_iam_users(self);
                     if let Some(user) = self.iam_state.users.get_selected(&filtered_users) {
                         self.iam_state.current_user = Some(user.user_name.clone());
                         self.iam_state.user_tab = UserTab::Permissions;
@@ -6712,7 +6733,7 @@ impl App {
                 if self.iam_state.current_role.is_some() {
                     // Open policy view (but not on Tags tab)
                     if self.iam_state.role_tab != RoleTab::Tags {
-                        let filtered = crate::ui::iam::filtered_iam_policies(self);
+                        let filtered = filtered_iam_policies(self);
                         if let Some(policy) = self.iam_state.policies.get_selected(&filtered) {
                             self.iam_state.current_policy = Some(policy.policy_name.clone());
                             self.iam_state.policy_scroll = 0;
@@ -6722,7 +6743,7 @@ impl App {
                         }
                     }
                 } else if self.iam_state.current_role.is_none() {
-                    let filtered_roles = crate::ui::iam::filtered_iam_roles(self);
+                    let filtered_roles = filtered_iam_roles(self);
                     if let Some(role) = self.iam_state.roles.get_selected(&filtered_roles) {
                         self.iam_state.current_role = Some(role.role_name.clone());
                         self.iam_state.role_tab = RoleTab::Permissions;
@@ -6818,7 +6839,7 @@ impl App {
                         self.lambda_state.current_alias = Some(alias.name.clone());
                     }
                 } else if self.lambda_state.current_function.is_none() {
-                    let filtered_functions = crate::ui::lambda::filtered_lambda_functions(self);
+                    let filtered_functions = filtered_lambda_functions(self);
                     if let Some(func) = self.lambda_state.table.get_selected(&filtered_functions) {
                         self.lambda_state.current_function = Some(func.name.clone());
                         self.lambda_state.detail_tab = LambdaDetailTab::Code;
@@ -6826,7 +6847,7 @@ impl App {
                     }
                 }
             } else if self.current_service == Service::LambdaApplications {
-                let filtered = crate::ui::lambda::filtered_lambda_applications(self);
+                let filtered = filtered_lambda_applications(self);
                 if let Some(app) = self.lambda_application_state.table.get_selected(&filtered) {
                     let app_name = app.name.clone();
                     self.lambda_application_state.current_application = Some(app_name.clone());
@@ -7316,9 +7337,9 @@ impl App {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let mut policies: Vec<crate::iam::Policy> = attached_policies
+        let mut policies: Vec<IamPolicy> = attached_policies
             .into_iter()
-            .map(|p| crate::iam::Policy {
+            .map(|p| IamPolicy {
                 policy_name: p.policy_name().unwrap_or("").to_string(),
                 policy_type: "Managed".to_string(),
                 attached_via: "Direct".to_string(),
@@ -7338,7 +7359,7 @@ impl App {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         for policy_name in inline_policy_names {
-            policies.push(crate::iam::Policy {
+            policies.push(IamPolicy {
                 policy_name,
                 policy_type: "Inline".to_string(),
                 attached_via: "Direct".to_string(),
@@ -7362,9 +7383,9 @@ impl App {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let mut policies: Vec<crate::iam::Policy> = attached_policies
+        let mut policies: Vec<IamPolicy> = attached_policies
             .into_iter()
-            .map(|p| crate::iam::Policy {
+            .map(|p| IamPolicy {
                 policy_name: p.policy_name().unwrap_or("").to_string(),
                 policy_type: "AWS managed".to_string(),
                 attached_via: "Direct".to_string(),
@@ -7383,7 +7404,7 @@ impl App {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         for policy_name in inline_policy_names {
-            policies.push(crate::iam::Policy {
+            policies.push(IamPolicy {
                 policy_name,
                 policy_type: "Inline".to_string(),
                 attached_via: "Direct".to_string(),
@@ -7407,7 +7428,7 @@ impl App {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let group_users: Vec<crate::iam::GroupUser> = users
+        let group_users: Vec<IamGroupUser> = users
             .into_iter()
             .map(|u| {
                 let creation_time = {
@@ -7418,7 +7439,7 @@ impl App {
                     datetime.format("%Y-%m-%d %H:%M:%S (UTC)").to_string()
                 };
 
-                crate::iam::GroupUser {
+                IamGroupUser {
                     user_name: u.user_name().to_string(),
                     groups: String::new(),
                     last_activity: String::new(),
@@ -7493,7 +7514,7 @@ impl App {
             .map_err(|e| anyhow::anyhow!(e))?;
         self.iam_state.tags.items = tags
             .into_iter()
-            .map(|(k, v)| crate::iam::RoleTag { key: k, value: v })
+            .map(|(k, v)| IamRoleTag { key: k, value: v })
             .collect();
         self.iam_state.tags.reset();
         Ok(())
@@ -7507,7 +7528,7 @@ impl App {
             .map_err(|e| anyhow::anyhow!(e))?;
         self.iam_state.user_tags.items = tags
             .into_iter()
-            .map(|(k, v)| crate::iam::UserTag { key: k, value: v })
+            .map(|(k, v)| IamUserTag { key: k, value: v })
             .collect();
         self.iam_state.user_tags.reset();
         Ok(())
@@ -7544,10 +7565,10 @@ impl App {
                     if let Ok(amount) = self.log_groups_state.relative_amount.parse::<i64>() {
                         let now = chrono::Utc::now().timestamp_millis();
                         let duration_ms = match self.log_groups_state.relative_unit {
-                            crate::app::TimeUnit::Minutes => amount * 60 * 1000,
-                            crate::app::TimeUnit::Hours => amount * 60 * 60 * 1000,
-                            crate::app::TimeUnit::Days => amount * 24 * 60 * 60 * 1000,
-                            crate::app::TimeUnit::Weeks => amount * 7 * 24 * 60 * 60 * 1000,
+                            TimeUnit::Minutes => amount * 60 * 1000,
+                            TimeUnit::Hours => amount * 60 * 60 * 1000,
+                            TimeUnit::Days => amount * 24 * 60 * 60 * 1000,
+                            TimeUnit::Weeks => amount * 7 * 24 * 60 * 60 * 1000,
                         };
                         (Some(now - duration_ms), Some(now))
                     } else {
@@ -7689,37 +7710,12 @@ mod test_helpers {
     use super::*;
 
     // Test helper functions to reduce boilerplate
-    #[allow(dead_code)]
     pub fn test_app() -> App {
         App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
     }
 
-    #[allow(dead_code)]
     pub fn test_app_no_region() -> App {
         App::new_without_client("test".to_string(), None)
-    }
-
-    #[allow(dead_code)]
-    pub fn test_tab(service: Service) -> Tab {
-        Tab {
-            service,
-            title: service.name().to_string(),
-            breadcrumb: service.name().to_string(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn test_iam_role(name: &str) -> crate::iam::IamRole {
-        crate::iam::IamRole {
-            role_name: name.to_string(),
-            path: "/".to_string(),
-            description: format!("Test role {}", name),
-            trusted_entities: "AWS Service: ec2.amazonaws.com".to_string(),
-            creation_time: "2024-01-01 00:00:00".to_string(),
-            arn: format!("arn:aws:iam::123456789012:role/{}", name),
-            max_session_duration: Some(3600),
-            last_activity: "-".to_string(),
-        }
     }
 }
 
@@ -9483,7 +9479,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "stack1".to_string(),
@@ -9545,7 +9541,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "stack1".to_string(),
@@ -9607,7 +9603,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
 
         // Create 20 stacks
         for i in 0..20 {
@@ -9649,7 +9645,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
 
         // Create 20 stacks
         for i in 0..20 {
@@ -9704,7 +9700,7 @@ mod tests {
     fn test_cloudformation_filter_applies() {
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "prod-stack".to_string(),
@@ -9763,7 +9759,7 @@ mod tests {
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![CfnStack {
             name: "test-stack".to_string(),
             stack_id: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
@@ -9800,7 +9796,7 @@ mod tests {
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![CfnStack {
             name: "test-stack".to_string(),
             stack_id: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
@@ -9843,7 +9839,7 @@ mod tests {
             breadcrumb: "CloudFormation > Stacks".to_string(),
         }];
         app.current_tab = 0;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![CfnStack {
             name: "test-stack".to_string(),
             stack_id: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
@@ -9887,7 +9883,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "stack1".to_string(),
@@ -9946,7 +9942,7 @@ mod tests {
     fn test_cloudformation_expansion_shows_all_visible_columns() {
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
-        app.cfn_state.status_filter = crate::ui::cfn::StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![CfnStack {
             name: "test-stack".to_string(),
             stack_id: "arn:aws:cloudformation:us-east-1:123456789012:stack/test-stack/abc123"
@@ -10086,7 +10082,7 @@ impl App {
     }
 
     pub fn get_filtered_profiles(&self) -> Vec<&AwsProfile> {
-        crate::aws::filter_profiles(&self.available_profiles, &self.profile_filter)
+        filter_profiles(&self.available_profiles, &self.profile_filter)
     }
 
     pub fn get_filtered_sessions(&self) -> Vec<&Session> {
@@ -10214,7 +10210,7 @@ mod iam_policy_view_tests {
         app.mode = Mode::Normal;
         app.view_mode = ViewMode::Detail;
         app.iam_state.current_role = Some("TestRole".to_string());
-        app.iam_state.policies.items = vec![crate::iam::Policy {
+        app.iam_state.policies.items = vec![IamPolicy {
             policy_name: "TestPolicy".to_string(),
             policy_type: "Inline".to_string(),
             attached_via: "Direct".to_string(),
@@ -10396,7 +10392,7 @@ mod iam_policy_view_tests {
         app.mode = Mode::Normal;
         app.view_mode = ViewMode::Detail;
         app.iam_state.current_role = Some("TestRole".to_string());
-        app.iam_state.policies.items = vec![crate::iam::Policy {
+        app.iam_state.policies.items = vec![IamPolicy {
             policy_name: "TestPolicy".to_string(),
             policy_type: "Inline".to_string(),
             attached_via: "Direct".to_string(),
@@ -10911,7 +10907,7 @@ mod region_latency_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.iam_state.roles.items = (0..10)
-            .map(|i| crate::iam::IamRole {
+            .map(|i| IamRole {
                 role_name: format!("role{}", i),
                 path: "/".to_string(),
                 trusted_entities: String::new(),
@@ -10943,7 +10939,7 @@ mod region_latency_tests {
         app.mode = Mode::Normal;
         app.iam_state.roles.page_size = PageSize::Ten;
         app.iam_state.roles.items = (0..100)
-            .map(|i| crate::iam::IamRole {
+            .map(|i| IamRole {
                 role_name: format!("role{}", i),
                 path: "/".to_string(),
                 trusted_entities: String::new(),
@@ -10968,7 +10964,7 @@ mod region_latency_tests {
         app.mode = Mode::Normal;
         app.iam_state.users.page_size = PageSize::Ten;
         app.iam_state.users.items = (0..100)
-            .map(|i| crate::iam::IamUser {
+            .map(|i| IamUser {
                 user_name: format!("user{}", i),
                 path: "/".to_string(),
                 groups: String::new(),
@@ -11303,7 +11299,7 @@ mod region_latency_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.cfn_state.table.items = (0..100)
-            .map(|i| crate::cfn::Stack {
+            .map(|i| CfnStack {
                 name: format!("stack-{}", i),
                 stack_id: format!(
                     "arn:aws:cloudformation:us-east-1:123456789012:stack/stack-{}/id",
@@ -11358,7 +11354,7 @@ mod region_latency_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.cfn_state.table.items = (0..200)
-            .map(|i| crate::cfn::Stack {
+            .map(|i| CfnStack {
                 name: format!("stack-{}", i),
                 stack_id: format!(
                     "arn:aws:cloudformation:us-east-1:123456789012:stack/stack-{}/id",
@@ -11468,7 +11464,7 @@ mod region_latency_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.alarms_state.table.items = (0..100)
-            .map(|i| crate::cw::alarms::Alarm {
+            .map(|i| Alarm {
                 name: format!("alarm-{}", i),
                 state: "OK".to_string(),
                 state_updated_timestamp: "2023-01-01T00:00:00Z".to_string(),
@@ -12012,8 +12008,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_navigation() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12022,21 +12016,21 @@ mod region_latency_tests {
 
         // Add test versions
         app.lambda_state.version_table.items = vec![
-            Version {
+            LambdaVersion {
                 version: "3".to_string(),
                 aliases: "prod".to_string(),
                 description: "".to_string(),
                 last_modified: "".to_string(),
                 architecture: "X86_64".to_string(),
             },
-            Version {
+            LambdaVersion {
                 version: "2".to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
                 last_modified: "".to_string(),
                 architecture: "X86_64".to_string(),
             },
-            Version {
+            LambdaVersion {
                 version: "1".to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
@@ -12057,9 +12051,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_with_aliases() {
-        use crate::lambda::Version;
-
-        let version = Version {
+        let version = LambdaVersion {
             version: "35".to_string(),
             aliases: "prod, staging".to_string(),
             description: "Production version".to_string(),
@@ -12073,8 +12065,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_expansion() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12083,14 +12073,14 @@ mod region_latency_tests {
 
         // Add test versions
         app.lambda_state.version_table.items = vec![
-            Version {
+            LambdaVersion {
                 version: "2".to_string(),
                 aliases: "prod".to_string(),
                 description: "Production".to_string(),
                 last_modified: "2024-01-01".to_string(),
                 architecture: "X86_64".to_string(),
             },
-            Version {
+            LambdaVersion {
                 version: "1".to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
@@ -12113,8 +12103,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_page_navigation() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12123,7 +12111,7 @@ mod region_latency_tests {
 
         // Add 30 test versions
         app.lambda_state.version_table.items = (1..=30)
-            .map(|i| Version {
+            .map(|i| LambdaVersion {
                 version: i.to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
@@ -12145,8 +12133,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_pagination_arrow_keys() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12157,7 +12143,7 @@ mod region_latency_tests {
 
         // Add 30 test versions
         app.lambda_state.version_table.items = (1..=30)
-            .map(|i| Version {
+            .map(|i| LambdaVersion {
                 version: i.to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
@@ -12180,8 +12166,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_page_input_in_filter_mode() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12192,7 +12176,7 @@ mod region_latency_tests {
 
         // Add 30 test versions
         app.lambda_state.version_table.items = (1..=30)
-            .map(|i| Version {
+            .map(|i| LambdaVersion {
                 version: i.to_string(),
                 aliases: "".to_string(),
                 description: "".to_string(),
@@ -12217,8 +12201,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_filter_input() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12229,14 +12211,14 @@ mod region_latency_tests {
 
         // Add test versions
         app.lambda_state.version_table.items = vec![
-            Version {
+            LambdaVersion {
                 version: "1".to_string(),
                 aliases: "prod".to_string(),
                 description: "Production".to_string(),
                 last_modified: "".to_string(),
                 architecture: "X86_64".to_string(),
             },
-            Version {
+            LambdaVersion {
                 version: "2".to_string(),
                 aliases: "staging".to_string(),
                 description: "Staging".to_string(),
@@ -12301,8 +12283,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_lambda_versions_arrow_key_expansion() {
-        use crate::lambda::Version;
-
         let mut app = test_app();
         app.current_service = Service::LambdaFunctions;
         app.service_selected = true;
@@ -12310,7 +12290,7 @@ mod region_latency_tests {
         app.lambda_state.detail_tab = LambdaDetailTab::Versions;
         app.mode = Mode::Normal;
 
-        app.lambda_state.version_table.items = vec![Version {
+        app.lambda_state.version_table.items = vec![LambdaVersion {
             version: "1".to_string(),
             aliases: "prod".to_string(),
             description: "Production".to_string(),
@@ -12356,7 +12336,7 @@ mod region_latency_tests {
             layers: vec![],
         }];
 
-        app.lambda_state.version_table.items = vec![crate::lambda::Version {
+        app.lambda_state.version_table.items = vec![LambdaVersion {
             version: "1".to_string(),
             aliases: "prod".to_string(),
             description: "Production".to_string(),
@@ -12785,8 +12765,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_active() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::Active;
+        let filter = CfnStatusFilter::Active;
         assert!(filter.matches("CREATE_IN_PROGRESS"));
         assert!(filter.matches("UPDATE_IN_PROGRESS"));
         assert!(!filter.matches("CREATE_COMPLETE"));
@@ -12796,8 +12775,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_complete() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::Complete;
+        let filter = CfnStatusFilter::Complete;
         assert!(filter.matches("CREATE_COMPLETE"));
         assert!(filter.matches("UPDATE_COMPLETE"));
         assert!(!filter.matches("DELETE_COMPLETE"));
@@ -12806,8 +12784,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_failed() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::Failed;
+        let filter = CfnStatusFilter::Failed;
         assert!(filter.matches("CREATE_FAILED"));
         assert!(filter.matches("UPDATE_FAILED"));
         assert!(!filter.matches("CREATE_COMPLETE"));
@@ -12815,8 +12792,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_deleted() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::Deleted;
+        let filter = CfnStatusFilter::Deleted;
         assert!(filter.matches("DELETE_COMPLETE"));
         assert!(filter.matches("DELETE_IN_PROGRESS"));
         assert!(!filter.matches("CREATE_COMPLETE"));
@@ -12824,8 +12800,7 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_in_progress() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::InProgress;
+        let filter = CfnStatusFilter::InProgress;
         assert!(filter.matches("CREATE_IN_PROGRESS"));
         assert!(filter.matches("UPDATE_IN_PROGRESS"));
         assert!(filter.matches("DELETE_IN_PROGRESS"));
@@ -12834,19 +12809,18 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_cycle() {
-        use crate::ui::cfn::StatusFilter;
-        let filter = StatusFilter::All;
-        assert_eq!(filter.next(), StatusFilter::Active);
-        assert_eq!(filter.next().next(), StatusFilter::Complete);
-        assert_eq!(filter.next().next().next(), StatusFilter::Failed);
-        assert_eq!(filter.next().next().next().next(), StatusFilter::Deleted);
+        let filter = CfnStatusFilter::All;
+        assert_eq!(filter.next(), CfnStatusFilter::Active);
+        assert_eq!(filter.next().next(), CfnStatusFilter::Complete);
+        assert_eq!(filter.next().next().next(), CfnStatusFilter::Failed);
+        assert_eq!(filter.next().next().next().next(), CfnStatusFilter::Deleted);
         assert_eq!(
             filter.next().next().next().next().next(),
-            StatusFilter::InProgress
+            CfnStatusFilter::InProgress
         );
         assert_eq!(
             filter.next().next().next().next().next().next(),
-            StatusFilter::All
+            CfnStatusFilter::All
         );
     }
 
@@ -12872,9 +12846,8 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_filter_by_name() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
-        app.cfn_state.status_filter = StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "my-stack".to_string(),
@@ -12930,9 +12903,8 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_filter_by_description() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
-        app.cfn_state.status_filter = StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         app.cfn_state.table.items = vec![CfnStack {
             name: "stack1".to_string(),
             stack_id: "id1".to_string(),
@@ -12963,7 +12935,6 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_status_filter_applied() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
         app.cfn_state.table.items = vec![
             CfnStack {
@@ -13012,12 +12983,12 @@ mod region_latency_tests {
             },
         ];
 
-        app.cfn_state.status_filter = StatusFilter::Complete;
+        app.cfn_state.status_filter = CfnStatusFilter::Complete;
         let filtered = app.filtered_cloudformation_stacks();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "complete-stack");
 
-        app.cfn_state.status_filter = StatusFilter::Failed;
+        app.cfn_state.status_filter = CfnStatusFilter::Failed;
         let filtered = app.filtered_cloudformation_stacks();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "failed-stack");
@@ -13031,9 +13002,8 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_default_status_filter() {
-        use crate::ui::cfn::StatusFilter;
         let app = test_app();
-        assert_eq!(app.cfn_state.status_filter, StatusFilter::All);
+        assert_eq!(app.cfn_state.status_filter, CfnStatusFilter::All);
     }
 
     #[test]
@@ -13044,11 +13014,10 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_pagination_hotkeys() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
 
         // Add 150 stacks
         for i in 0..150 {
@@ -13148,12 +13117,11 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_enter_drills_into_stack_view() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
         app.tabs = vec![Tab {
             service: Service::CloudFormationStacks,
             title: "CloudFormation > Stacks".to_string(),
@@ -13194,12 +13162,11 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_arrow_keys_expand_collapse() {
-        use crate::ui::cfn::StatusFilter;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
 
         app.cfn_state.table.items.push(CfnStack {
             name: "test-stack".to_string(),
@@ -13241,12 +13208,12 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_tab_cycling() {
-        use crate::ui::cfn::{DetailTab, StatusFilter};
+        use crate::ui::cfn::DetailTab;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
         app.cfn_state.current_stack = Some("test-stack".to_string());
 
         assert_eq!(app.cfn_state.detail_tab, DetailTab::StackInfo);
@@ -13254,11 +13221,11 @@ mod region_latency_tests {
 
     #[test]
     fn test_cloudformation_console_url() {
-        use crate::ui::cfn::{DetailTab, StatusFilter};
+        use crate::ui::cfn::DetailTab;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
 
         app.cfn_state.table.items.push(CfnStack {
             name: "test-stack".to_string(),
@@ -13307,7 +13274,7 @@ mod region_latency_tests {
         app.mode = Mode::Normal;
 
         app.iam_state.roles.items = vec![
-            crate::iam::IamRole {
+            IamRole {
                 role_name: "role1".to_string(),
                 path: "/".to_string(),
                 trusted_entities: "AWS Service: ec2".to_string(),
@@ -13317,7 +13284,7 @@ mod region_latency_tests {
                 description: "Test role 1".to_string(),
                 max_session_duration: Some(3600),
             },
-            crate::iam::IamRole {
+            IamRole {
                 role_name: "role2".to_string(),
                 path: "/".to_string(),
                 trusted_entities: "AWS Service: lambda".to_string(),
@@ -13410,10 +13377,10 @@ mod region_latency_tests {
         let mut app = test_app();
         app.current_service = Service::IamRoles;
         app.service_selected = true;
-        app.iam_state.roles.page_size = crate::common::PageSize::Ten;
+        app.iam_state.roles.page_size = PageSize::Ten;
 
         app.iam_state.roles.items = (0..25)
-            .map(|i| crate::iam::IamRole {
+            .map(|i| IamRole {
                 role_name: format!("role{}", i),
                 path: "/".to_string(),
                 trusted_entities: "AWS Service: ec2".to_string(),
@@ -13444,7 +13411,7 @@ mod region_latency_tests {
         app.current_service = Service::IamRoles;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.iam_state.roles.items = vec![crate::iam::IamRole {
+        app.iam_state.roles.items = vec![IamRole {
             role_name: "TestRole".to_string(),
             path: "/".to_string(),
             trusted_entities: String::new(),
@@ -13457,11 +13424,11 @@ mod region_latency_tests {
 
         // Manually populate tags to test table rendering
         app.iam_state.tags.items = vec![
-            crate::iam::RoleTag {
+            IamRoleTag {
                 key: "Environment".to_string(),
                 value: "Production".to_string(),
             },
-            crate::iam::RoleTag {
+            IamRoleTag {
                 key: "Team".to_string(),
                 value: "Platform".to_string(),
             },
@@ -13482,11 +13449,11 @@ mod region_latency_tests {
         app.iam_state.current_role = Some("TestRole".to_string());
         app.iam_state.role_tab = RoleTab::Tags;
         app.iam_state.tags.items = vec![
-            crate::iam::RoleTag {
+            IamRoleTag {
                 key: "Tag1".to_string(),
                 value: "Value1".to_string(),
             },
-            crate::iam::RoleTag {
+            IamRoleTag {
                 key: "Tag2".to_string(),
                 value: "Value2".to_string(),
             },
@@ -13508,12 +13475,12 @@ mod region_latency_tests {
         app.iam_state.current_role = Some("TestRole".to_string());
         app.iam_state.role_tab = RoleTab::LastAccessed;
         app.iam_state.last_accessed_services.items = vec![
-            crate::iam::LastAccessedService {
+            LastAccessedService {
                 service: "S3".to_string(),
                 policies_granting: "Policy1".to_string(),
                 last_accessed: "2025-01-01".to_string(),
             },
-            crate::iam::LastAccessedService {
+            LastAccessedService {
                 service: "EC2".to_string(),
                 policies_granting: "Policy2".to_string(),
                 last_accessed: "2025-01-02".to_string(),
@@ -13575,7 +13542,7 @@ mod region_latency_tests {
         app.current_service = Service::CloudWatchLogGroups;
         app.mode = Mode::FilterInput;
         app.view_mode = ViewMode::Detail;
-        app.log_groups_state.detail_tab = crate::ui::cw::logs::DetailTab::LogStreams;
+        app.log_groups_state.detail_tab = CwLogsDetailTab::LogStreams;
         app.log_groups_state.input_focus = InputFocus::Filter;
 
         app.handle_action(Action::PrevFilterFocus);
@@ -13639,18 +13606,18 @@ mod region_latency_tests {
 
     #[test]
     fn test_cfn_filter_status_arrow_keys() {
-        use crate::ui::cfn::{StatusFilter, STATUS_FILTER};
+        use crate::ui::cfn::STATUS_FILTER;
         let mut app = test_app();
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::FilterInput;
         app.cfn_state.input_focus = STATUS_FILTER;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
 
         app.handle_action(Action::NextItem);
-        assert_eq!(app.cfn_state.status_filter, StatusFilter::Active);
+        assert_eq!(app.cfn_state.status_filter, CfnStatusFilter::Active);
 
         app.handle_action(Action::PrevItem);
-        assert_eq!(app.cfn_state.status_filter, StatusFilter::All);
+        assert_eq!(app.cfn_state.status_filter, CfnStatusFilter::All);
     }
 
     #[test]
@@ -13677,11 +13644,11 @@ mod region_latency_tests {
         app.mode = Mode::FilterInput;
         app.cfn_state.input_focus = InputFocus::Pagination;
         app.cfn_state.table.scroll_offset = 0;
-        app.cfn_state.table.page_size = crate::common::PageSize::Ten;
+        app.cfn_state.table.page_size = PageSize::Ten;
 
         // Add some test stacks
         app.cfn_state.table.items = (0..30)
-            .map(|i| crate::cfn::Stack {
+            .map(|i| CfnStack {
                 name: format!("stack-{}", i),
                 stack_id: format!("id-{}", i),
                 status: "CREATE_COMPLETE".to_string(),
@@ -13728,7 +13695,7 @@ mod region_latency_tests {
 
         // Add 30 test stacks
         app.cfn_state.table.items = (0..30)
-            .map(|i| crate::cfn::Stack {
+            .map(|i| CfnStack {
                 name: format!("stack-{}", i),
                 stack_id: format!("id-{}", i),
                 status: "CREATE_COMPLETE".to_string(),
@@ -13865,7 +13832,7 @@ mod region_latency_tests {
         app.current_service = Service::IamRoles;
         app.mode = Mode::Normal;
         app.iam_state.roles.items = (0..50)
-            .map(|i| crate::iam::IamRole {
+            .map(|i| IamRole {
                 role_name: format!("role-{}", i),
                 path: "/".to_string(),
                 trusted_entities: "AWS Service".to_string(),
@@ -14108,7 +14075,7 @@ mod region_latency_tests {
     #[test]
     fn test_s3_nested_prefix_expansion() {
         use crate::s3::Bucket;
-        use crate::s3::Object as S3Object;
+        use S3Object;
 
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
@@ -14169,7 +14136,7 @@ mod region_latency_tests {
     #[test]
     fn test_s3_nested_prefix_collapse() {
         use crate::s3::Bucket;
-        use crate::s3::Object as S3Object;
+        use S3Object;
 
         let mut app = test_app();
         app.current_service = Service::S3Buckets;
@@ -14291,7 +14258,7 @@ mod sqs_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.sqs_state.queues.items = (0..10)
-            .map(|i| crate::sqs::Queue {
+            .map(|i| SqsQueue {
                 name: format!("queue{}", i),
                 url: String::new(),
                 queue_type: "Standard".to_string(),
@@ -14335,7 +14302,7 @@ mod sqs_tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.sqs_state.queues.items = (0..100)
-            .map(|i| crate::sqs::Queue {
+            .map(|i| SqsQueue {
                 name: format!("queue{}", i),
                 url: String::new(),
                 queue_type: "Standard".to_string(),
@@ -14377,7 +14344,7 @@ mod sqs_tests {
         let mut app = test_app();
         app.current_service = Service::SqsQueues;
         app.service_selected = true;
-        app.sqs_state.queues.items = vec![crate::sqs::Queue {
+        app.sqs_state.queues.items = vec![SqsQueue {
             name: "my-queue".to_string(),
             url: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string(),
             queue_type: "Standard".to_string(),
@@ -14482,7 +14449,7 @@ mod sqs_tests {
         app.current_service = Service::SqsQueues;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.sqs_state.queues.items = vec![crate::sqs::Queue {
+        app.sqs_state.queues.items = vec![SqsQueue {
             name: "my-queue".to_string(),
             url: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string(),
             queue_type: "Standard".to_string(),
@@ -14534,7 +14501,7 @@ mod sqs_tests {
         app.sqs_state.current_queue =
             Some("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::LambdaTriggers;
-        app.sqs_state.triggers.items = vec![crate::sqs::LambdaTrigger {
+        app.sqs_state.triggers.items = vec![LambdaTrigger {
             uuid: "test-uuid".to_string(),
             arn: "arn:aws:lambda:us-east-1:123456789012:function:test".to_string(),
             status: "Enabled".to_string(),
@@ -14561,7 +14528,7 @@ mod sqs_tests {
         app.sqs_state.current_queue =
             Some("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::LambdaTriggers;
-        app.sqs_state.triggers.items = vec![crate::sqs::LambdaTrigger {
+        app.sqs_state.triggers.items = vec![LambdaTrigger {
             uuid: "test-uuid".to_string(),
             arn: "arn:aws:lambda:us-east-1:123456789012:function:test".to_string(),
             status: "Enabled".to_string(),
@@ -14593,19 +14560,19 @@ mod sqs_tests {
             Some("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::LambdaTriggers;
         app.sqs_state.triggers.items = vec![
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-3".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:test-3".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "2024-03-01T00:00:00Z".to_string(),
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-1".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:test-1".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "2024-01-01T00:00:00Z".to_string(),
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-2".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:test-2".to_string(),
                 status: "Enabled".to_string(),
@@ -14667,19 +14634,19 @@ mod sqs_tests {
             Some("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::LambdaTriggers;
         app.sqs_state.triggers.items = vec![
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-1".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:test-alpha".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "2024-01-01T00:00:00Z".to_string(),
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-2".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:test-beta".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "2024-02-01T00:00:00Z".to_string(),
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-3".to_string(),
                 arn: "arn:aws:lambda:us-east-1:123456789012:function:prod-gamma".to_string(),
                 status: "Enabled".to_string(),
@@ -14729,13 +14696,13 @@ mod sqs_tests {
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::LambdaTriggers;
         app.sqs_state.triggers.items = vec![
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "1".to_string(),
                 arn: "arn1".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "2024-01-01".to_string(),
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "2".to_string(),
                 arn: "arn2".to_string(),
                 status: "Enabled".to_string(),
@@ -14759,13 +14726,13 @@ mod sqs_tests {
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::EventBridgePipes;
         app.sqs_state.pipes.items = vec![
-            crate::sqs::EventBridgePipe {
+            EventBridgePipe {
                 name: "pipe1".to_string(),
                 status: "RUNNING".to_string(),
                 target: "target1".to_string(),
                 last_modified: "2024-01-01".to_string(),
             },
-            crate::sqs::EventBridgePipe {
+            EventBridgePipe {
                 name: "pipe2".to_string(),
                 status: "RUNNING".to_string(),
                 target: "target2".to_string(),
@@ -14789,11 +14756,11 @@ mod sqs_tests {
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::Tagging;
         app.sqs_state.tags.items = vec![
-            crate::sqs::QueueTag {
+            SqsQueueTag {
                 key: "Env".to_string(),
                 value: "prod".to_string(),
             },
-            crate::sqs::QueueTag {
+            SqsQueueTag {
                 key: "Team".to_string(),
                 value: "backend".to_string(),
             },
@@ -14813,7 +14780,7 @@ mod sqs_tests {
         app.mode = Mode::Normal;
         app.current_service = Service::SqsQueues;
         app.sqs_state.queues.items = vec![
-            crate::sqs::Queue {
+            SqsQueue {
                 name: "queue1".to_string(),
                 url: "url1".to_string(),
                 queue_type: "Standard".to_string(),
@@ -14841,7 +14808,7 @@ mod sqs_tests {
                 redrive_task_percent: "-".to_string(),
                 redrive_task_destination: "-".to_string(),
             },
-            crate::sqs::Queue {
+            SqsQueue {
                 name: "queue2".to_string(),
                 url: "url2".to_string(),
                 queue_type: "Standard".to_string(),
@@ -14887,11 +14854,11 @@ mod sqs_tests {
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::SnsSubscriptions;
         app.sqs_state.subscriptions.items = vec![
-            crate::sqs::SnsSubscription {
+            SnsSubscription {
                 subscription_arn: "arn:aws:sns:us-east-1:123:sub1".to_string(),
                 topic_arn: "arn:aws:sns:us-east-1:123:topic1".to_string(),
             },
-            crate::sqs::SnsSubscription {
+            SnsSubscription {
                 subscription_arn: "arn:aws:sns:us-east-1:123:sub2".to_string(),
                 topic_arn: "arn:aws:sns:us-east-1:123:topic2".to_string(),
             },
@@ -14912,7 +14879,7 @@ mod sqs_tests {
         app.current_service = Service::SqsQueues;
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::SnsSubscriptions;
-        app.sqs_state.input_focus = crate::common::InputFocus::Dropdown("SubscriptionRegion");
+        app.sqs_state.input_focus = InputFocus::Dropdown("SubscriptionRegion");
 
         assert_eq!(app.sqs_state.subscription_region_selected, 0);
         app.next_item();
@@ -14933,7 +14900,7 @@ mod sqs_tests {
         app.current_service = Service::SqsQueues;
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::SnsSubscriptions;
-        app.sqs_state.input_focus = crate::common::InputFocus::Dropdown("SubscriptionRegion");
+        app.sqs_state.input_focus = InputFocus::Dropdown("SubscriptionRegion");
         app.sqs_state.subscription_region_selected = 2; // us-west-1
 
         assert_eq!(app.sqs_state.subscription_region_filter, "");
@@ -14950,7 +14917,7 @@ mod sqs_tests {
         app.current_service = Service::SqsQueues;
         app.sqs_state.current_queue = Some("test-queue".to_string());
         app.sqs_state.detail_tab = SqsQueueDetailTab::SnsSubscriptions;
-        app.sqs_state.input_focus = crate::common::InputFocus::Dropdown("SubscriptionRegion");
+        app.sqs_state.input_focus = InputFocus::Dropdown("SubscriptionRegion");
         app.sqs_state.subscription_region_selected = 0;
         app.sqs_state.subscriptions.selected = 5;
 
@@ -15049,13 +15016,13 @@ mod sqs_tests {
 
     #[test]
     fn test_cfn_status_filter_change_resets_selection() {
-        use crate::ui::cfn::{StatusFilter, STATUS_FILTER};
+        use crate::ui::cfn::STATUS_FILTER;
         let mut app = test_app();
         app.service_selected = true;
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::FilterInput;
         app.cfn_state.input_focus = STATUS_FILTER;
-        app.cfn_state.status_filter = StatusFilter::All;
+        app.cfn_state.status_filter = CfnStatusFilter::All;
         app.cfn_state.table.items = vec![
             CfnStack {
                 name: "stack1".to_string(),
@@ -15106,7 +15073,7 @@ mod sqs_tests {
 
         app.handle_action(Action::NextItem);
 
-        assert_eq!(app.cfn_state.status_filter, StatusFilter::Active);
+        assert_eq!(app.cfn_state.status_filter, CfnStatusFilter::Active);
         assert_eq!(app.cfn_state.table.selected, 0);
     }
 
@@ -15155,7 +15122,7 @@ mod sqs_tests {
         app.service_selected = true;
         app.current_service = Service::CloudFormationStacks;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_scroll = 20;
 
         app.page_up();
@@ -15169,7 +15136,7 @@ mod sqs_tests {
         app.service_selected = true;
         app.current_service = Service::CloudFormationStacks;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_body = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15".to_string();
         app.cfn_state.template_scroll = 0;
 
@@ -15184,7 +15151,7 @@ mod sqs_tests {
         app.service_selected = true;
         app.current_service = Service::CloudFormationStacks;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_body = "line1\nline2\nline3".to_string();
         app.cfn_state.template_scroll = 0;
 
@@ -15201,7 +15168,7 @@ mod sqs_tests {
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::Normal;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_scroll = 5;
 
         app.prev_item();
@@ -15216,7 +15183,7 @@ mod sqs_tests {
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::Normal;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_body = "line1\nline2\nline3\nline4\nline5".to_string();
         app.cfn_state.template_scroll = 2;
 
@@ -15232,7 +15199,7 @@ mod sqs_tests {
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::Normal;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.cfn_state.template_body = "line1\nline2".to_string();
         app.cfn_state.template_scroll = 1;
 
@@ -15321,7 +15288,7 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.cfn_state.detail_tab = CfnDetailTab::Parameters;
         app.cfn_state.parameters.items = vec![rusticity_core::cfn::StackParameter {
             key: "Param1".to_string(),
             value: "Value1".to_string(),
@@ -15346,7 +15313,7 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.cfn_state.detail_tab = CfnDetailTab::Parameters;
         app.cfn_state.parameters.items = vec![
             rusticity_core::cfn::StackParameter {
                 key: "DatabaseName".to_string(),
@@ -15396,7 +15363,7 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Template;
+        app.cfn_state.detail_tab = CfnDetailTab::Template;
         app.mode = Mode::Normal;
 
         // Try to open preferences - should be ignored
@@ -15404,18 +15371,18 @@ mod lambda_version_tab_tests {
         assert_eq!(app.mode, Mode::Normal); // Should stay in Normal mode
 
         // GitSync tab should also not allow preferences
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::GitSync;
+        app.cfn_state.detail_tab = CfnDetailTab::GitSync;
         app.handle_action(Action::OpenColumnSelector);
         assert_eq!(app.mode, Mode::Normal); // Should stay in Normal mode
 
         // Parameters tab should allow preferences
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Parameters;
+        app.cfn_state.detail_tab = CfnDetailTab::Parameters;
         app.handle_action(Action::OpenColumnSelector);
         assert_eq!(app.mode, Mode::ColumnSelector); // Should open preferences
 
         // Outputs tab should allow preferences
         app.mode = Mode::Normal;
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.cfn_state.detail_tab = CfnDetailTab::Outputs;
         app.handle_action(Action::OpenColumnSelector);
         assert_eq!(app.mode, Mode::ColumnSelector); // Should open preferences
     }
@@ -15426,7 +15393,7 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.cfn_state.detail_tab = CfnDetailTab::Outputs;
         app.cfn_state.outputs.items = vec![rusticity_core::cfn::StackOutput {
             key: "Output1".to_string(),
             value: "Value1".to_string(),
@@ -15452,7 +15419,7 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.cfn_state.current_stack = Some("test-stack".to_string());
-        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Outputs;
+        app.cfn_state.detail_tab = CfnDetailTab::Outputs;
         app.cfn_state.outputs.items = vec![
             rusticity_core::cfn::StackOutput {
                 key: "ApiUrl".to_string(),

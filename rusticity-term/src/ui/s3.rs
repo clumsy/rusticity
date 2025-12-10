@@ -1,10 +1,14 @@
-use crate::app::App;
-use crate::common::CyclicEnum;
-use crate::common::{format_bytes, format_iso_timestamp, UTC_TIMESTAMP_WIDTH};
+use crate::app::{App, S3Bucket as AppS3Bucket, S3Object as AppS3Object};
+use crate::common::{
+    format_bytes, format_iso_timestamp, render_scrollbar, CyclicEnum, UTC_TIMESTAMP_WIDTH,
+};
 use crate::keymap::Mode;
 use crate::s3::{Bucket as S3Bucket, BucketColumn, Object as S3Object};
 use crate::table::TableState;
-use crate::ui::{active_border, filter_area, get_cursor, red_text, render_tabs};
+use crate::ui::table::{format_header_cell, CURSOR_COLLAPSED, CURSOR_EXPANDED};
+use crate::ui::{
+    active_border, filter_area, get_cursor, red_text, render_tabs, section_header, vertical,
+};
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 
@@ -178,9 +182,9 @@ impl ObjectTab {
 
 pub fn calculate_total_bucket_rows(app: &App) -> usize {
     fn count_nested(
-        obj: &crate::app::S3Object,
+        obj: &AppS3Object,
         expanded_prefixes: &std::collections::HashSet<String>,
-        prefix_preview: &std::collections::HashMap<String, Vec<crate::app::S3Object>>,
+        prefix_preview: &std::collections::HashMap<String, Vec<AppS3Object>>,
     ) -> usize {
         let mut count = 0;
         if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
@@ -217,9 +221,9 @@ pub fn calculate_total_bucket_rows(app: &App) -> usize {
 
 pub fn calculate_total_object_rows(app: &App) -> usize {
     fn count_nested(
-        obj: &crate::app::S3Object,
+        obj: &AppS3Object,
         expanded_prefixes: &std::collections::HashSet<String>,
-        prefix_preview: &std::collections::HashMap<String, Vec<crate::app::S3Object>>,
+        prefix_preview: &std::collections::HashMap<String, Vec<AppS3Object>>,
     ) -> usize {
         let mut count = 0;
         if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
@@ -260,7 +264,7 @@ pub fn render_buckets(frame: &mut Frame, app: &App, area: Rect) {
 fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
-    let chunks = crate::ui::vertical(
+    let chunks = vertical(
         [
             Constraint::Length(1), // Tabs
             Constraint::Length(3), // Filter (1 line + borders)
@@ -330,7 +334,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .filter_map(|col_id| {
             BucketColumn::from_id(col_id).map(|col| {
-                let name = crate::ui::table::format_header_cell(&col.name(), 0);
+                let name = format_header_cell(&col.name(), 0);
                 Cell::from(name).style(Style::default().add_modifier(Modifier::BOLD))
             })
         })
@@ -345,7 +349,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     let mut max_date_width = "⋮ Creation date".len();
 
     for (_idx, bucket) in &filtered_buckets {
-        let name_len = format!("{} 🪣 {}", crate::ui::table::CURSOR_COLLAPSED, bucket.name).len();
+        let name_len = format!("{} 🪣 {}", CURSOR_COLLAPSED, bucket.name).len();
         max_name_width = max_name_width.max(name_len);
         let region_display = if bucket.region.is_empty() {
             "-"
@@ -393,9 +397,9 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .flat_map(|(bucket_idx, (_orig_idx, bucket))| {
             let is_expanded = app.s3_state.expanded_prefixes.contains(&bucket.name);
             let expand_indicator = if is_expanded {
-                format!("{} ", crate::ui::table::CURSOR_EXPANDED)
+                format!("{} ", CURSOR_EXPANDED)
             } else {
-                format!("{} ", crate::ui::table::CURSOR_COLLAPSED)
+                format!("{} ", CURSOR_COLLAPSED)
             };
 
             // Format date as YYYY-MM-DD HH:MM:SS (UTC)
@@ -541,9 +545,9 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
                             let tree_char = if is_last_item { "╰─" } else { "├─" };
                             let expand_char = if obj.is_prefix {
                                 if obj_is_expanded {
-                                    crate::ui::table::CURSOR_EXPANDED
+                                    CURSOR_EXPANDED
                                 } else {
-                                    crate::ui::table::CURSOR_COLLAPSED
+                                    CURSOR_COLLAPSED
                                 }
                             } else {
                                 ""
@@ -658,7 +662,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
     let total_rows = app.s3_state.calculate_total_bucket_rows();
     let visible_rows = chunks[2].height.saturating_sub(3) as usize; // Subtract borders and header
     if total_rows > visible_rows {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             chunks[2].inner(Margin {
                 vertical: 1,
@@ -674,7 +678,7 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
     let show_filter = app.s3_state.object_tab == ObjectTab::Objects;
 
     let chunks = if show_filter {
-        crate::ui::vertical(
+        vertical(
             [
                 Constraint::Length(1), // Tabs
                 Constraint::Length(3), // Filter (1 line + borders)
@@ -683,7 +687,7 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
             area,
         )
     } else {
-        crate::ui::vertical(
+        vertical(
             [
                 Constraint::Length(1), // Tabs
                 Constraint::Min(0),    // Content (no filter)
@@ -789,7 +793,7 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            Cell::from(crate::ui::table::format_header_cell(name, i))
+            Cell::from(format_header_cell(name, i))
                 .style(Style::default().add_modifier(Modifier::BOLD))
         })
         .collect();
@@ -823,9 +827,9 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
             // Add expand indicator for prefixes
             let expand_indicator = if obj.is_prefix {
                 if app.s3_state.expanded_prefixes.contains(&obj.key) {
-                    format!("{} ", crate::ui::table::CURSOR_EXPANDED)
+                    format!("{} ", CURSOR_EXPANDED)
                 } else {
-                    format!("{} ", crate::ui::table::CURSOR_COLLAPSED)
+                    format!("{} ", CURSOR_COLLAPSED)
                 }
             } else {
                 String::new()
@@ -896,7 +900,7 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
                 if let Some(preview) = app.s3_state.prefix_preview.get(&obj.key) {
                     // Recursive function to render nested objects
                     fn render_nested_objects<'a>(
-                        objects: &'a [crate::s3::Object],
+                        objects: &'a [S3Object],
                         app: &'a App,
                         child_row_idx: &mut usize,
                         result: &mut Vec<Row<'a>>,
@@ -917,9 +921,9 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
                             let tree_char = if is_last_child { "╰─" } else { "├─" };
                             let child_expand = if preview_obj.is_prefix {
                                 if obj_is_expanded {
-                                    crate::ui::table::CURSOR_EXPANDED
+                                    CURSOR_EXPANDED
                                 } else {
-                                    crate::ui::table::CURSOR_COLLAPSED
+                                    CURSOR_COLLAPSED
                                 }
                             } else {
                                 ""
@@ -1042,7 +1046,7 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
     let total_rows = app.s3_state.calculate_total_object_rows();
     let visible_rows = area.height.saturating_sub(3) as usize;
     if total_rows > visible_rows {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             area.inner(Margin {
                 vertical: 1,
@@ -1073,7 +1077,7 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
 
     // Bucket overview
-    lines.push(crate::ui::section_header("Bucket overview", inner.width));
+    lines.push(section_header("Bucket overview", inner.width));
     if let Some(b) = bucket {
         let region = if b.region.is_empty() {
             "us-east-1"
@@ -1123,12 +1127,12 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Tags
-    lines.push(crate::ui::section_header("Tags (0)", inner.width));
+    lines.push(section_header("Tags (0)", inner.width));
     lines.push(Line::from("No tags associated with this resource."));
     lines.push(Line::from(""));
 
     // Default encryption
-    lines.push(crate::ui::section_header("Default encryption", inner.width));
+    lines.push(section_header("Default encryption", inner.width));
     lines.push(Line::from(vec![
         Span::styled(
             "Encryption type: ",
@@ -1146,23 +1150,17 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Server access logging
-    lines.push(crate::ui::section_header(
-        "Server access logging",
-        inner.width,
-    ));
+    lines.push(section_header("Server access logging", inner.width));
     lines.push(Line::from("Disabled"));
     lines.push(Line::from(""));
 
     // CloudTrail
-    lines.push(crate::ui::section_header(
-        "AWS CloudTrail data events",
-        inner.width,
-    ));
+    lines.push(section_header("AWS CloudTrail data events", inner.width));
     lines.push(Line::from("Configure in CloudTrail console"));
     lines.push(Line::from(""));
 
     // EventBridge
-    lines.push(crate::ui::section_header("Amazon EventBridge", inner.width));
+    lines.push(section_header("Amazon EventBridge", inner.width));
     lines.push(Line::from(vec![
         Span::styled(
             "Send notifications to Amazon EventBridge: ",
@@ -1173,28 +1171,22 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Transfer acceleration
-    lines.push(crate::ui::section_header(
-        "Transfer acceleration",
-        inner.width,
-    ));
+    lines.push(section_header("Transfer acceleration", inner.width));
     lines.push(Line::from("Disabled"));
     lines.push(Line::from(""));
 
     // Object Lock
-    lines.push(crate::ui::section_header("Object Lock", inner.width));
+    lines.push(section_header("Object Lock", inner.width));
     lines.push(Line::from("Disabled"));
     lines.push(Line::from(""));
 
     // Requester pays
-    lines.push(crate::ui::section_header("Requester pays", inner.width));
+    lines.push(section_header("Requester pays", inner.width));
     lines.push(Line::from("Disabled"));
     lines.push(Line::from(""));
 
     // Static website hosting
-    lines.push(crate::ui::section_header(
-        "Static website hosting",
-        inner.width,
-    ));
+    lines.push(section_header("Static website hosting", inner.width));
     lines.push(Line::from("Disabled"));
 
     let paragraph = Paragraph::new(lines)
@@ -1207,7 +1199,7 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     // Render scrollbar if needed
     let content_height = 40; // Approximate line count
     if content_height > area.height.saturating_sub(2) {
-        crate::common::render_scrollbar(
+        render_scrollbar(
             frame,
             area.inner(Margin {
                 vertical: 1,
@@ -1224,7 +1216,7 @@ pub async fn load_s3_buckets(app: &mut App) -> anyhow::Result<()> {
     let buckets = app.s3_client.list_buckets().await?;
     app.s3_state.buckets.items = buckets
         .into_iter()
-        .map(|(name, region, date)| crate::app::S3Bucket {
+        .map(|(name, region, date)| AppS3Bucket {
             name,
             region,
             creation_date: date,

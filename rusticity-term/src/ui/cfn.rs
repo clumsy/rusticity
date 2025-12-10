@@ -1,13 +1,16 @@
 use crate::app::App;
-use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
+use crate::cfn::{format_status, Column as CfnColumn, Stack as CfnStack};
 use crate::common::{
     render_dropdown, render_pagination_text, translate_column, ColumnId, CyclicEnum, InputFocus,
     SortDirection,
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::ui::table::Column;
-use crate::ui::{labeled_field, render_tabs, rounded_block};
+use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
+use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::{
+    block_height_for, labeled_field, render_json_highlighted, render_tabs, rounded_block,
+};
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::cfn::{StackOutput, StackParameter, StackResource};
 use std::collections::HashSet;
@@ -125,7 +128,7 @@ impl StatusFilter {
     }
 }
 
-impl crate::common::CyclicEnum for StatusFilter {
+impl CyclicEnum for StatusFilter {
     const ALL: &'static [Self] = &[
         Self::All,
         Self::Active,
@@ -272,8 +275,8 @@ pub fn resource_column_ids() -> Vec<ColumnId> {
     ResourceColumn::all().iter().map(|c| c.id()).collect()
 }
 
-pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&crate::cfn::Stack> {
-    let filtered: Vec<&crate::cfn::Stack> = if app.cfn_state.table.filter.is_empty() {
+pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
+    let filtered: Vec<&CfnStack> = if app.cfn_state.table.filter.is_empty() {
         app.cfn_state.table.items.iter().collect()
     } else {
         app.cfn_state
@@ -442,23 +445,23 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         };
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_filter_bar(
+    render_filter_bar(
         frame,
-        crate::ui::filter::FilterConfig {
+        FilterConfig {
             filter_text: &app.cfn_state.table.filter,
             placeholder,
             mode: app.mode,
             is_input_focused: app.cfn_state.input_focus == InputFocus::Filter,
             controls: vec![
-                crate::ui::filter::FilterControl {
+                FilterControl {
                     text: status_filter_text.to_string(),
                     is_focused: app.cfn_state.input_focus == STATUS_FILTER,
                 },
-                crate::ui::filter::FilterControl {
+                FilterControl {
                     text: view_nested_text.to_string(),
                     is_focused: app.cfn_state.input_focus == VIEW_NESTED,
                 },
-                crate::ui::filter::FilterControl {
+                FilterControl {
                     text: pagination.clone(),
                     is_focused: app.cfn_state.input_focus == InputFocus::Pagination,
                 },
@@ -482,7 +485,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         .filter_map(|col_id| CfnColumn::from_id(col_id))
         .collect();
 
-    let columns: Vec<Box<dyn crate::ui::table::Column<&CfnStack>>> =
+    let columns: Vec<Box<dyn Column<&CfnStack>>> =
         column_enums.iter().map(|col| col.to_column()).collect();
 
     let expanded_index = app.cfn_state.table.expanded_item.and_then(|idx| {
@@ -494,7 +497,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_stacks,
         selected_index: app.cfn_state.table.selected % app.cfn_state.table.page_size.value(),
         expanded_index,
@@ -503,13 +506,13 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         sort_direction: app.cfn_state.sort_direction,
         title: format!(" Stacks ({}) ", filtered_count),
         area: chunks[1],
-        get_expanded_content: Some(Box::new(|stack: &&crate::cfn::Stack| {
-            crate::ui::table::expanded_from_columns(&columns, stack)
+        get_expanded_content: Some(Box::new(|stack: &&CfnStack| {
+            expanded_from_columns(&columns, stack)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 
     // Render dropdown for StatusFilter when focused (after table so it appears on top)
     if app.mode == Mode::FilterInput && app.cfn_state.input_focus == STATUS_FILTER {
@@ -574,7 +577,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
             render_git_sync(frame, app, stack, chunks[2]);
         }
         DetailTab::Template => {
-            crate::ui::render_json_highlighted(
+            render_json_highlighted(
                 frame,
                 chunks[2],
                 &app.cfn_state.template_body,
@@ -601,8 +604,8 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
     }
 }
 
-pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &crate::cfn::Stack, area: Rect) {
-    let (formatted_status, _status_color) = crate::cfn::format_status(&stack.status);
+pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: Rect) {
+    let (formatted_status, _status_color) = format_status(&stack.status);
 
     // Overview section
     let fields = vec![
@@ -775,7 +778,7 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &crate::cfn::Stack
         .map(|(label, value)| labeled_field(label, *value))
         .collect();
     let overview = Paragraph::new(overview_lines)
-        .block(crate::ui::rounded_block().title(" Overview "))
+        .block(rounded_block().title(" Overview "))
         .wrap(Wrap { trim: true });
     frame.render_widget(overview, sections[0]);
 
@@ -788,7 +791,7 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &crate::cfn::Stack
     } else {
         stack.stack_policy.clone()
     };
-    crate::ui::render_json_highlighted(
+    render_json_highlighted(
         frame,
         sections[2],
         &policy_text,
@@ -829,9 +832,9 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
     let filtered: Vec<&(String, String)> = filtered_tags(app);
     let filtered_count = filtered.len();
 
-    crate::ui::filter::render_filter_bar(
+    render_filter_bar(
         frame,
-        crate::ui::filter::FilterConfig {
+        FilterConfig {
             filter_text: &app.cfn_state.tags.filter,
             placeholder: "Search tags",
             mode: app.mode,
@@ -858,7 +861,7 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_tags,
         selected_index: app.cfn_state.tags.selected % page_size,
         expanded_index,
@@ -868,15 +871,15 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Tags ({}) ", filtered_count),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|tag: &(String, String)| {
-            crate::ui::table::expanded_from_columns(&columns, tag)
+            expanded_from_columns(&columns, tag)
         })),
         is_active: true,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
-fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, area: Rect) {
+fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &CfnStack, area: Rect) {
     let fields = [
         ("Repository", "-"),
         ("Deployment file path", "-"),
@@ -888,7 +891,7 @@ fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &crate::cfn::Stack, ar
         ("Repository sync status message", "-"),
     ];
 
-    let git_sync_height = crate::ui::block_height_for(fields.len());
+    let git_sync_height = block_height_for(fields.len());
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -1196,14 +1199,14 @@ pub fn render_parameters(frame: &mut Frame, app: &App, area: Rect) {
     };
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_filter_bar(
+    render_filter_bar(
         frame,
-        crate::ui::filter::FilterConfig {
+        FilterConfig {
             filter_text: &app.cfn_state.parameters.filter,
             placeholder: "Search parameters",
             mode: app.mode,
             is_input_focused: app.cfn_state.parameters_input_focus == InputFocus::Filter,
-            controls: vec![crate::ui::filter::FilterControl {
+            controls: vec![FilterControl {
                 text: pagination,
                 is_focused: app.cfn_state.parameters_input_focus == InputFocus::Pagination,
             }],
@@ -1233,7 +1236,7 @@ pub fn render_parameters(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_params,
         selected_index: app.cfn_state.parameters.selected % page_size,
         expanded_index,
@@ -1243,12 +1246,12 @@ pub fn render_parameters(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Parameters ({}) ", filtered_count),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|param: &StackParameter| {
-            crate::ui::table::expanded_from_columns(&columns, param)
+            expanded_from_columns(&columns, param)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
@@ -1293,14 +1296,14 @@ pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
     };
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_filter_bar(
+    render_filter_bar(
         frame,
-        crate::ui::filter::FilterConfig {
+        FilterConfig {
             filter_text: &app.cfn_state.outputs.filter,
             placeholder: "Search outputs",
             mode: app.mode,
             is_input_focused: app.cfn_state.outputs_input_focus == InputFocus::Filter,
-            controls: vec![crate::ui::filter::FilterControl {
+            controls: vec![FilterControl {
                 text: pagination,
                 is_focused: app.cfn_state.outputs_input_focus == InputFocus::Pagination,
             }],
@@ -1329,7 +1332,7 @@ pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_outputs,
         selected_index: app.cfn_state.outputs.selected % page_size,
         expanded_index,
@@ -1339,12 +1342,12 @@ pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Outputs ({}) ", filtered_count),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|output: &StackOutput| {
-            crate::ui::table::expanded_from_columns(&columns, output)
+            expanded_from_columns(&columns, output)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
@@ -1366,14 +1369,14 @@ pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
     };
     let pagination = render_pagination_text(current_page, total_pages);
 
-    crate::ui::filter::render_filter_bar(
+    render_filter_bar(
         frame,
-        crate::ui::filter::FilterConfig {
+        FilterConfig {
             filter_text: &app.cfn_state.resources.filter,
             placeholder: "Search resources",
             mode: app.mode,
             is_input_focused: app.cfn_state.resources_input_focus == InputFocus::Filter,
-            controls: vec![crate::ui::filter::FilterControl {
+            controls: vec![FilterControl {
                 text: pagination,
                 is_focused: app.cfn_state.resources_input_focus == InputFocus::Pagination,
             }],
@@ -1403,7 +1406,7 @@ pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: page_resources,
         selected_index: app.cfn_state.resources.selected % page_size,
         expanded_index,
@@ -1413,12 +1416,12 @@ pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
         title: format!(" Resources ({}) ", filtered_count),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|resource: &StackResource| {
-            crate::ui::table::expanded_from_columns(&columns, resource)
+            expanded_from_columns(&columns, resource)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1702,8 +1705,9 @@ mod parameter_tests {
 
     #[test]
     fn test_parameters_expansion() {
+        use crate::app::Service;
         let mut app = test_app();
-        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.current_service = Service::CloudFormationStacks;
         app.cfn_state.current_stack = Some("test-stack".to_string());
         app.cfn_state.detail_tab = DetailTab::Parameters;
         app.cfn_state.parameters.items = vec![StackParameter {
@@ -2096,8 +2100,9 @@ mod resource_tests {
 
     #[test]
     fn test_resources_navigation() {
+        use crate::app::Service;
         let mut app = test_app();
-        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.current_service = Service::CloudFormationStacks;
         app.cfn_state.current_stack = Some("test-stack".to_string());
         app.cfn_state.detail_tab = DetailTab::Resources;
         app.cfn_state.resources.items = vec![

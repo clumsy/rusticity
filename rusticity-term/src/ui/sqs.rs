@@ -1,16 +1,27 @@
+use crate::app::App;
 use crate::aws::Region;
-use crate::common::{render_dropdown, InputFocus};
-use crate::keymap::Mode::FilterInput;
-use crate::sqs::pipe::{Column as PipeColumn, EventBridgePipe};
+#[cfg(test)]
+use crate::common::PageSize;
+use crate::common::{
+    format_bytes, format_duration_seconds, format_unix_timestamp, render_dropdown, CyclicEnum,
+    InputFocus, SortDirection,
+};
+use crate::keymap::Mode::{self, FilterInput};
+use crate::sqs::pipe::Column as PipeColumn;
 use crate::sqs::queue::{Column as SqsColumn, Queue};
 use crate::sqs::sub::{Column as SubscriptionColumn, SnsSubscription};
 use crate::sqs::tag::{Column as TagColumn, QueueTag};
-use crate::sqs::trigger::{Column as TriggerColumn, LambdaTrigger};
+use crate::sqs::trigger::Column as TriggerColumn;
+use crate::sqs::{EventBridgePipe, LambdaTrigger};
 use crate::table::TableState;
 use crate::ui::filter::{
     render_filter_bar, render_simple_filter, FilterConfig, FilterControl, SimpleFilterConfig,
 };
-use crate::ui::{labeled_field, render_tabs};
+use crate::ui::monitoring::{render_monitoring_tab, MetricChart, MonitoringState};
+use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::{
+    active_border, labeled_field, render_json_highlighted, render_pagination_text, render_tabs,
+};
 use ratatui::widgets::*;
 
 pub const FILTER_CONTROLS: &[InputFocus] = &[InputFocus::Filter, InputFocus::Pagination];
@@ -64,7 +75,7 @@ impl QueueDetailTab {
     }
 }
 
-impl crate::common::CyclicEnum for QueueDetailTab {
+impl CyclicEnum for QueueDetailTab {
     const ALL: &'static [Self] = &[
         QueueDetailTab::QueuePolicies,
         QueueDetailTab::Monitoring,
@@ -184,8 +195,6 @@ impl State {
     }
 }
 
-use crate::ui::monitoring::MonitoringState;
-
 impl MonitoringState for State {
     fn is_metrics_loading(&self) -> bool {
         self.metrics_loading
@@ -223,7 +232,7 @@ pub fn filtered_queues<'a>(queues: &'a [Queue], filter: &str) -> Vec<&'a Queue> 
         .collect()
 }
 
-pub fn filtered_lambda_triggers(app: &crate::App) -> Vec<&crate::sqs::LambdaTrigger> {
+pub fn filtered_lambda_triggers(app: &App) -> Vec<&LambdaTrigger> {
     let mut filtered: Vec<_> = app
         .sqs_state
         .triggers
@@ -245,7 +254,7 @@ pub fn filtered_lambda_triggers(app: &crate::App) -> Vec<&crate::sqs::LambdaTrig
     filtered
 }
 
-pub fn filtered_tags(app: &crate::App) -> Vec<&QueueTag> {
+pub fn filtered_tags(app: &App) -> Vec<&QueueTag> {
     let mut filtered: Vec<_> = app
         .sqs_state
         .tags
@@ -267,7 +276,7 @@ pub fn filtered_tags(app: &crate::App) -> Vec<&QueueTag> {
     filtered
 }
 
-pub fn filtered_subscriptions(app: &crate::App) -> Vec<&SnsSubscription> {
+pub fn filtered_subscriptions(app: &App) -> Vec<&SnsSubscription> {
     let region_filter = if app.sqs_state.subscription_region_filter.is_empty() {
         &app.region
     } else {
@@ -299,7 +308,7 @@ pub fn filtered_subscriptions(app: &crate::App) -> Vec<&SnsSubscription> {
     filtered
 }
 
-pub fn filtered_eventbridge_pipes(app: &crate::App) -> Vec<&crate::sqs::EventBridgePipe> {
+pub fn filtered_eventbridge_pipes(app: &App) -> Vec<&EventBridgePipe> {
     let mut filtered: Vec<_> = app
         .sqs_state
         .pipes
@@ -320,7 +329,7 @@ pub fn filtered_eventbridge_pipes(app: &crate::App) -> Vec<&crate::sqs::EventBri
     filtered
 }
 
-pub async fn load_sqs_queues(app: &mut crate::App) -> anyhow::Result<()> {
+pub async fn load_sqs_queues(app: &mut App) -> anyhow::Result<()> {
     let queues = app.sqs_client.list_queues("").await?;
     app.sqs_state.queues.items = queues
         .into_iter()
@@ -356,7 +365,7 @@ pub async fn load_sqs_queues(app: &mut crate::App) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn load_lambda_triggers(app: &mut crate::App, queue_url: &str) -> anyhow::Result<()> {
+pub async fn load_lambda_triggers(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
     let queue_arn = app.sqs_client.get_queue_arn(queue_url).await?;
     let triggers = app.sqs_client.list_lambda_triggers(&queue_arn).await?;
 
@@ -379,7 +388,7 @@ pub async fn load_lambda_triggers(app: &mut crate::App, queue_url: &str) -> anyh
     Ok(())
 }
 
-pub async fn load_metrics(app: &mut crate::App, queue_name: &str) -> anyhow::Result<()> {
+pub async fn load_metrics(app: &mut App, queue_name: &str) -> anyhow::Result<()> {
     let metrics = app.sqs_client.get_queue_metrics(queue_name).await?;
     app.sqs_state.metric_data = metrics;
 
@@ -428,7 +437,7 @@ pub async fn load_metrics(app: &mut crate::App, queue_name: &str) -> anyhow::Res
     Ok(())
 }
 
-pub async fn load_pipes(app: &mut crate::App, queue_url: &str) -> anyhow::Result<()> {
+pub async fn load_pipes(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
     let queue_arn = app.sqs_client.get_queue_arn(queue_url).await?;
     let pipes = app.sqs_client.list_pipes(&queue_arn).await?;
 
@@ -450,7 +459,7 @@ pub async fn load_pipes(app: &mut crate::App, queue_url: &str) -> anyhow::Result
     Ok(())
 }
 
-pub async fn load_tags(app: &mut crate::App, queue_url: &str) -> anyhow::Result<()> {
+pub async fn load_tags(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
     let tags = app.sqs_client.list_tags(queue_url).await?;
 
     app.sqs_state.tags.items = tags
@@ -469,7 +478,7 @@ pub async fn load_tags(app: &mut crate::App, queue_url: &str) -> anyhow::Result<
     Ok(())
 }
 
-pub fn render_queues(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
+pub fn render_queues(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::widgets::Clear;
 
     frame.render_widget(Clear, area);
@@ -481,7 +490,7 @@ pub fn render_queues(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
     }
 }
 
-fn render_queue_detail(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
+fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
     use ratatui::widgets::{Clear, Paragraph};
 
@@ -549,8 +558,6 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &crate::App, area: ratat
                     .alignment(ratatui::layout::Alignment::Center);
                 frame.render_widget(loading_text, chunks[3]);
             } else {
-                use crate::ui::monitoring::{render_monitoring_tab, MetricChart};
-
                 let age_max: f64 = app
                     .sqs_state
                     .metric_data
@@ -662,35 +669,35 @@ fn render_details_fields(queue: &Queue) -> Vec<ratatui::text::Line<'static>> {
         .split_whitespace()
         .next()
         .and_then(|s| s.parse::<i64>().ok())
-        .map(crate::common::format_bytes)
+        .map(format_bytes)
         .unwrap_or_else(|| queue.maximum_message_size.clone());
 
     let retention_period = queue
         .message_retention_period
         .parse::<i32>()
         .ok()
-        .map(crate::common::format_duration_seconds)
+        .map(format_duration_seconds)
         .unwrap_or_else(|| queue.message_retention_period.clone());
 
     let visibility_timeout = queue
         .visibility_timeout
         .parse::<i32>()
         .ok()
-        .map(crate::common::format_duration_seconds)
+        .map(format_duration_seconds)
         .unwrap_or_else(|| queue.visibility_timeout.clone());
 
     let delivery_delay = queue
         .delivery_delay
         .parse::<i32>()
         .ok()
-        .map(crate::common::format_duration_seconds)
+        .map(format_duration_seconds)
         .unwrap_or_else(|| queue.delivery_delay.clone());
 
     let receive_wait_time = queue
         .receive_message_wait_time
         .parse::<i32>()
         .ok()
-        .map(crate::common::format_duration_seconds)
+        .map(format_duration_seconds)
         .unwrap_or_else(|| queue.receive_message_wait_time.clone());
 
     vec![
@@ -708,14 +715,11 @@ fn render_details_fields(queue: &Queue) -> Vec<ratatui::text::Line<'static>> {
         labeled_field("Encryption", &queue.encryption),
         labeled_field("URL", &queue.url),
         labeled_field("Dead-letter queue", &queue.dead_letter_queue),
-        labeled_field(
-            "Created",
-            crate::common::format_unix_timestamp(&queue.created_timestamp),
-        ),
+        labeled_field("Created", format_unix_timestamp(&queue.created_timestamp)),
         labeled_field("Maximum message size", max_msg_size),
         labeled_field(
             "Last updated",
-            crate::common::format_unix_timestamp(&queue.last_modified_timestamp),
+            format_unix_timestamp(&queue.last_modified_timestamp),
         ),
         labeled_field("Message retention period", retention_period),
         labeled_field("Default visibility timeout", visibility_timeout),
@@ -745,7 +749,7 @@ fn render_details_pane(frame: &mut ratatui::Frame, queue: &Queue, area: ratatui:
         .title(" Details ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(crate::ui::active_border());
+        .border_style(active_border());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -755,11 +759,7 @@ fn render_details_pane(frame: &mut ratatui::Frame, queue: &Queue, area: ratatui:
     frame.render_widget(paragraph, inner);
 }
 
-fn render_queue_policies_tab(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
+fn render_queue_policies_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::{Constraint, Direction, Layout};
 
     let chunks = Layout::default()
@@ -768,7 +768,7 @@ fn render_queue_policies_tab(
         .split(area);
 
     // Access policy JSON using common JSON renderer
-    crate::ui::render_json_highlighted(
+    render_json_highlighted(
         frame,
         chunks[0],
         &app.sqs_state.policy_document,
@@ -778,12 +778,7 @@ fn render_queue_policies_tab(
     );
 }
 
-fn render_lambda_triggers_tab(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use crate::ui::table::{render_table, Column, TableConfig};
+fn render_lambda_triggers_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
 
     let chunks = Layout::default()
@@ -793,19 +788,19 @@ fn render_lambda_triggers_tab(
 
     let filtered = filtered_lambda_triggers(app);
 
-    let columns: Vec<Box<dyn Column<crate::sqs::LambdaTrigger>>> = app
+    let columns: Vec<Box<dyn Column<LambdaTrigger>>> = app
         .sqs_state
         .trigger_visible_column_ids
         .iter()
         .filter_map(|id| TriggerColumn::from_id(id))
-        .map(|col| Box::new(col) as Box<dyn Column<crate::sqs::LambdaTrigger>>)
+        .map(|col| Box::new(col) as Box<dyn Column<LambdaTrigger>>)
         .collect();
 
     // Pagination
     let page_size = app.sqs_state.triggers.page_size.value();
     let total_pages = filtered.len().div_ceil(page_size.max(1));
     let current_page = app.sqs_state.triggers.selected / page_size.max(1);
-    let pagination = crate::ui::render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(current_page, total_pages);
 
     // Filter at top
     render_simple_filter(
@@ -840,13 +835,13 @@ fn render_lambda_triggers_tab(
             columns: &columns,
             items: paginated,
             selected_index: app.sqs_state.triggers.selected % page_size.max(1),
-            is_active: app.mode != crate::keymap::Mode::FilterInput,
+            is_active: app.mode != Mode::FilterInput,
             title: format!(" Lambda triggers ({}) ", filtered.len()),
             sort_column: "last_modified",
-            sort_direction: crate::common::SortDirection::Asc,
+            sort_direction: SortDirection::Asc,
             expanded_index,
-            get_expanded_content: Some(Box::new(|trigger: &crate::sqs::LambdaTrigger| {
-                crate::ui::table::expanded_from_columns(&columns, trigger)
+            get_expanded_content: Some(Box::new(|trigger: &LambdaTrigger| {
+                expanded_from_columns(&columns, trigger)
             })),
         },
     );
@@ -865,10 +860,9 @@ pub fn extract_account_id(url: &str) -> &str {
 
 fn render_eventbridge_pipes_tab(
     frame: &mut ratatui::Frame,
-    app: &crate::App,
+    app: &App,
     area: ratatui::prelude::Rect,
 ) {
-    use crate::ui::table::{render_table, Column, TableConfig};
     use ratatui::prelude::*;
 
     let chunks = Layout::default()
@@ -878,18 +872,18 @@ fn render_eventbridge_pipes_tab(
 
     let filtered = filtered_eventbridge_pipes(app);
 
-    let columns: Vec<Box<dyn Column<crate::sqs::EventBridgePipe>>> = app
+    let columns: Vec<Box<dyn Column<EventBridgePipe>>> = app
         .sqs_state
         .pipe_visible_column_ids
         .iter()
         .filter_map(|id| PipeColumn::from_id(id))
-        .map(|col| Box::new(col) as Box<dyn Column<crate::sqs::EventBridgePipe>>)
+        .map(|col| Box::new(col) as Box<dyn Column<EventBridgePipe>>)
         .collect();
 
     let page_size = app.sqs_state.pipes.page_size.value();
     let total_pages = filtered.len().div_ceil(page_size.max(1));
     let current_page = app.sqs_state.pipes.selected / page_size.max(1);
-    let pagination = crate::ui::render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(current_page, total_pages);
 
     render_simple_filter(
         frame,
@@ -923,20 +917,19 @@ fn render_eventbridge_pipes_tab(
             columns: &columns,
             items: paginated,
             selected_index: app.sqs_state.pipes.selected % page_size.max(1),
-            is_active: app.mode != crate::keymap::Mode::FilterInput,
+            is_active: app.mode != Mode::FilterInput,
             title: format!(" EventBridge Pipes ({}) ", filtered.len()),
             sort_column: "last_modified",
-            sort_direction: crate::common::SortDirection::Asc,
+            sort_direction: SortDirection::Asc,
             expanded_index,
-            get_expanded_content: Some(Box::new(|pipe: &crate::sqs::EventBridgePipe| {
-                crate::ui::table::expanded_from_columns(&columns, pipe)
+            get_expanded_content: Some(Box::new(|pipe: &EventBridgePipe| {
+                expanded_from_columns(&columns, pipe)
             })),
         },
     );
 }
 
-fn render_tags_tab(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
-    use crate::ui::table::{render_table, Column, TableConfig};
+fn render_tags_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
 
     let chunks = Layout::default()
@@ -957,7 +950,7 @@ fn render_tags_tab(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::
     let page_size = app.sqs_state.tags.page_size.value();
     let total_pages = filtered.len().div_ceil(page_size.max(1));
     let current_page = app.sqs_state.tags.selected / page_size.max(1);
-    let pagination = crate::ui::render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(current_page, total_pages);
 
     render_simple_filter(
         frame,
@@ -991,24 +984,19 @@ fn render_tags_tab(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::
             columns: &columns,
             items: paginated,
             selected_index: app.sqs_state.tags.selected % page_size.max(1),
-            is_active: app.mode != crate::keymap::Mode::FilterInput,
+            is_active: app.mode != Mode::FilterInput,
             title: format!(" Tagging ({}) ", filtered.len()),
             sort_column: "value",
-            sort_direction: crate::common::SortDirection::Asc,
+            sort_direction: SortDirection::Asc,
             expanded_index,
             get_expanded_content: Some(Box::new(|tag: &QueueTag| {
-                crate::ui::table::expanded_from_columns(&columns, tag)
+                expanded_from_columns(&columns, tag)
             })),
         },
     );
 }
 
-fn render_subscriptions_tab(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
-    use crate::ui::table::{render_table, Column, TableConfig};
+fn render_subscriptions_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
 
     let chunks = Layout::default()
@@ -1029,7 +1017,7 @@ fn render_subscriptions_tab(
     let page_size = app.sqs_state.subscriptions.page_size.value();
     let total_pages = filtered.len().div_ceil(page_size.max(1));
     let current_page = app.sqs_state.subscriptions.selected / page_size.max(1);
-    let pagination = crate::ui::render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(current_page, total_pages);
 
     // Render filter with region dropdown
     render_subscription_filter(frame, app, chunks[0], &pagination);
@@ -1053,13 +1041,13 @@ fn render_subscriptions_tab(
             columns: &columns,
             items: paginated,
             selected_index: app.sqs_state.subscriptions.selected % page_size.max(1),
-            is_active: app.mode != crate::keymap::Mode::FilterInput,
+            is_active: app.mode != Mode::FilterInput,
             title: format!(" SNS subscriptions ({}) ", filtered.len()),
             sort_column: "subscription_arn",
-            sort_direction: crate::common::SortDirection::Asc,
+            sort_direction: SortDirection::Asc,
             expanded_index,
             get_expanded_content: Some(Box::new(|sub: &SnsSubscription| {
-                crate::ui::table::expanded_from_columns(&columns, sub)
+                expanded_from_columns(&columns, sub)
             })),
         },
     );
@@ -1080,7 +1068,7 @@ fn render_subscriptions_tab(
 
 fn render_subscription_filter(
     frame: &mut ratatui::Frame,
-    app: &crate::App,
+    app: &App,
     area: ratatui::prelude::Rect,
     pagination: &str,
 ) {
@@ -1117,7 +1105,7 @@ fn render_subscription_filter(
 
 fn render_dead_letter_queue_tab(
     frame: &mut ratatui::Frame,
-    app: &crate::App,
+    app: &App,
     area: ratatui::prelude::Rect,
 ) {
     use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -1133,7 +1121,7 @@ fn render_dead_letter_queue_tab(
         .title(" Dead-letter queue ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(crate::ui::active_border());
+        .border_style(active_border());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1170,11 +1158,7 @@ fn render_dead_letter_queue_tab(
     }
 }
 
-fn render_encryption_tab(
-    frame: &mut ratatui::Frame,
-    app: &crate::App,
-    area: ratatui::prelude::Rect,
-) {
+fn render_encryption_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
     let queue = app
@@ -1188,7 +1172,7 @@ fn render_encryption_tab(
         .title(" Encryption ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(crate::ui::active_border());
+        .border_style(active_border());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1207,7 +1191,7 @@ fn render_encryption_tab(
 
 fn render_dlq_redrive_tasks_tab(
     frame: &mut ratatui::Frame,
-    app: &crate::App,
+    app: &App,
     area: ratatui::prelude::Rect,
 ) {
     use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -1223,7 +1207,7 @@ fn render_dlq_redrive_tasks_tab(
         .title(" Dead-letter queue redrive status ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(crate::ui::active_border());
+        .border_style(active_border());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1242,11 +1226,10 @@ fn render_dlq_redrive_tasks_tab(
     }
 }
 
-fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui::prelude::Rect) {
-    use crate::common::SortDirection;
-    use crate::keymap::Mode;
+fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
     use ratatui::widgets::Clear;
+    use SortDirection;
 
     frame.render_widget(Clear, area);
 
@@ -1263,7 +1246,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
     let page_size = app.sqs_state.queues.page_size.value();
     let total_pages = filtered_count.div_ceil(page_size);
     let current_page = app.sqs_state.queues.selected / page_size;
-    let pagination = crate::ui::render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(current_page, total_pages);
 
     render_simple_filter(
         frame,
@@ -1287,12 +1270,11 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
 
     let title = format!(" Queues ({}) ", filtered.len());
 
-    let columns: Vec<Box<dyn crate::ui::table::Column<Queue>>> = app
+    let columns: Vec<Box<dyn Column<Queue>>> = app
         .sqs_visible_column_ids
         .iter()
         .filter_map(|col_id| {
-            SqsColumn::from_id(col_id)
-                .map(|col| Box::new(col) as Box<dyn crate::ui::table::Column<Queue>>)
+            SqsColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<Queue>>)
         })
         .collect();
 
@@ -1304,7 +1286,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
         }
     });
 
-    let config = crate::ui::table::TableConfig {
+    let config = TableConfig {
         items: paginated,
         selected_index: app.sqs_state.queues.selected % page_size,
         expanded_index,
@@ -1314,18 +1296,17 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &crate::App, area: ratatui
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|queue: &Queue| {
-            crate::ui::table::expanded_from_columns(&columns, queue)
+            expanded_from_columns(&columns, queue)
         })),
         is_active: app.mode != Mode::FilterInput,
     };
 
-    crate::ui::table::render_table(frame, config);
+    render_table(frame, config);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::CyclicEnum;
 
     #[test]
     fn test_sqs_state_initialization() {
@@ -1541,8 +1522,7 @@ mod tests {
 
     #[test]
     fn test_timestamp_column_width() {
-        use crate::sqs::queue::Column;
-        use crate::ui::table::Column as TableColumn;
+        use SqsColumn as Column;
         // Timestamps are 27 characters: "YYYY-MM-DD HH:MM:SS (UTC)"
         assert!(Column::Created.width() >= 27);
         assert!(Column::LastUpdated.width() >= 27);
@@ -1552,7 +1532,7 @@ mod tests {
     fn test_message_retention_period_formatting() {
         // Test that 345600 seconds formats to days
         let seconds = 345600;
-        let formatted = crate::common::format_duration_seconds(seconds);
+        let formatted = format_duration_seconds(seconds);
         // 345600 seconds = 4 days
         assert_eq!(formatted, "4d");
     }
@@ -1626,13 +1606,11 @@ mod tests {
 
     #[test]
     fn test_trigger_column_all() {
-        use crate::sqs::trigger::Column as TriggerColumn;
         assert_eq!(TriggerColumn::all().len(), 4);
     }
 
     #[test]
     fn test_trigger_column_ids() {
-        use crate::sqs::trigger::Column as TriggerColumn;
         let ids = TriggerColumn::ids();
         assert_eq!(ids.len(), 4);
         assert!(ids.contains(&"column.sqs.trigger.uuid"));
@@ -1643,7 +1621,6 @@ mod tests {
 
     #[test]
     fn test_trigger_column_from_id() {
-        use crate::sqs::trigger::Column as TriggerColumn;
         assert_eq!(
             TriggerColumn::from_id("column.sqs.trigger.uuid"),
             Some(TriggerColumn::Uuid)
@@ -1665,8 +1642,7 @@ mod tests {
 
     #[test]
     fn test_trigger_status_rendering() {
-        use crate::sqs::trigger::{Column as TriggerColumn, LambdaTrigger};
-        use crate::ui::table::Column;
+        use Column;
 
         let trigger = LambdaTrigger {
             uuid: "test-uuid".to_string(),
@@ -1682,8 +1658,7 @@ mod tests {
 
     #[test]
     fn test_trigger_timestamp_rendering() {
-        use crate::sqs::trigger::{Column as TriggerColumn, LambdaTrigger};
-        use crate::ui::table::Column;
+        use Column;
 
         let trigger = LambdaTrigger {
             uuid: "test-uuid".to_string(),
@@ -1718,8 +1693,6 @@ mod tests {
 
     #[test]
     fn test_trigger_filtering() {
-        use crate::sqs::trigger::LambdaTrigger;
-
         let triggers = [
             LambdaTrigger {
                 uuid: "uuid-123".to_string(),
@@ -1756,7 +1729,7 @@ mod tests {
     fn test_trigger_pagination() {
         let mut state = State::new();
         state.triggers.items = (0..10)
-            .map(|i| crate::sqs::LambdaTrigger {
+            .map(|i| LambdaTrigger {
                 uuid: format!("uuid-{}", i),
                 arn: format!("arn:aws:lambda:us-east-1:123:function:test{}", i),
                 status: "Enabled".to_string(),
@@ -1788,7 +1761,6 @@ mod tests {
 
     #[test]
     fn test_trigger_page_size_options() {
-        use crate::common::PageSize;
         let mut state = State::new();
 
         // Default is 50
@@ -1824,13 +1796,13 @@ mod tests {
     #[test]
     fn test_trigger_sort_by_last_modified() {
         let mut triggers = [
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-2".to_string(),
                 arn: "arn2".to_string(),
                 status: "Enabled".to_string(),
                 last_modified: "1609459300".to_string(), // Later
             },
-            crate::sqs::LambdaTrigger {
+            LambdaTrigger {
                 uuid: "uuid-1".to_string(),
                 arn: "arn1".to_string(),
                 status: "Enabled".to_string(),
@@ -1847,12 +1819,11 @@ mod tests {
 
     #[test]
     fn test_trigger_pagination_calculation() {
-        use crate::common::PageSize;
         let mut state = State::new();
 
         // Add 25 triggers
         state.triggers.items = (0..25)
-            .map(|i| crate::sqs::LambdaTrigger {
+            .map(|i| LambdaTrigger {
                 uuid: format!("uuid-{}", i),
                 arn: format!("arn{}", i),
                 status: "Enabled".to_string(),
@@ -2130,7 +2101,6 @@ mod tests {
 
     #[test]
     fn test_tags_column_ids() {
-        use crate::sqs::tag::Column as TagColumn;
         let ids = TagColumn::ids();
         assert_eq!(ids.len(), 2);
         assert_eq!(ids[0], "column.sqs.tag.key");
@@ -2139,7 +2109,6 @@ mod tests {
 
     #[test]
     fn test_tags_column_from_id() {
-        use crate::sqs::tag::Column as TagColumn;
         assert!(TagColumn::from_id("column.sqs.tag.key").is_some());
         assert!(TagColumn::from_id("column.sqs.tag.value").is_some());
         assert!(TagColumn::from_id("invalid").is_none());
@@ -2156,7 +2125,6 @@ mod tests {
 
     #[test]
     fn test_subscription_column_ids() {
-        use crate::sqs::sub::Column as SubscriptionColumn;
         let ids = SubscriptionColumn::ids();
         assert_eq!(ids.len(), 2);
         assert_eq!(ids[0], "column.sqs.subscription.subscription_arn");
@@ -2165,7 +2133,6 @@ mod tests {
 
     #[test]
     fn test_subscription_column_from_id() {
-        use crate::sqs::sub::Column as SubscriptionColumn;
         assert!(SubscriptionColumn::from_id("column.sqs.subscription.subscription_arn").is_some());
         assert!(SubscriptionColumn::from_id("column.sqs.subscription.topic_arn").is_some());
         assert!(SubscriptionColumn::from_id("invalid").is_none());

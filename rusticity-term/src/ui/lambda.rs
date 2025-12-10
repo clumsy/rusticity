@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::common::{
-    format_bytes, format_duration_seconds, format_memory_mb, render_pagination_text, ColumnId,
-    CyclicEnum, InputFocus, SortDirection,
+    filter_by_fields, format_bytes, format_duration_seconds, format_memory_mb,
+    render_pagination_text, ColumnId, CyclicEnum, InputFocus, SortDirection,
 };
 use crate::keymap::Mode;
 use crate::lambda::{
@@ -1448,49 +1448,19 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
 
 // Lambda-specific helper functions
 pub fn filtered_lambda_functions(app: &App) -> Vec<&LambdaFunction> {
-    if app.lambda_state.table.filter.is_empty() {
-        app.lambda_state.table.items.iter().collect()
-    } else {
-        app.lambda_state
-            .table
-            .items
-            .iter()
-            .filter(|f| {
-                f.name
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-                    || f.description
-                        .to_lowercase()
-                        .contains(&app.lambda_state.table.filter.to_lowercase())
-                    || f.runtime
-                        .to_lowercase()
-                        .contains(&app.lambda_state.table.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.lambda_state.table.items,
+        &app.lambda_state.table.filter,
+        |f| vec![&f.name, &f.description, &f.runtime],
+    )
 }
 
 pub fn filtered_lambda_applications(app: &App) -> Vec<&LambdaApplication> {
-    if app.lambda_application_state.table.filter.is_empty() {
-        app.lambda_application_state.table.items.iter().collect()
-    } else {
-        app.lambda_application_state
-            .table
-            .items
-            .iter()
-            .filter(|a| {
-                a.name
-                    .to_lowercase()
-                    .contains(&app.lambda_application_state.table.filter.to_lowercase())
-                    || a.description
-                        .to_lowercase()
-                        .contains(&app.lambda_application_state.table.filter.to_lowercase())
-                    || a.status
-                        .to_lowercase()
-                        .contains(&app.lambda_application_state.table.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.lambda_application_state.table.items,
+        &app.lambda_application_state.table.filter,
+        |a| vec![&a.name, &a.description, &a.status],
+    )
 }
 
 pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {

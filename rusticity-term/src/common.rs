@@ -679,3 +679,39 @@ pub enum PageSize {
     Fifty,
     OneHundred,
 }
+
+/// Generic helper to filter items by a field that matches a filter string (case-insensitive contains)
+pub fn filter_by_field<'a, T, F>(items: &'a [T], filter: &str, get_field: F) -> Vec<&'a T>
+where
+    F: Fn(&T) -> &str,
+{
+    if filter.is_empty() {
+        items.iter().collect()
+    } else {
+        let filter_lower = filter.to_lowercase();
+        items
+            .iter()
+            .filter(|item| get_field(item).to_lowercase().contains(&filter_lower))
+            .collect()
+    }
+}
+
+/// Generic helper to filter items by multiple fields (case-insensitive contains on any field)
+pub fn filter_by_fields<'a, T, F>(items: &'a [T], filter: &str, get_fields: F) -> Vec<&'a T>
+where
+    F: Fn(&T) -> Vec<&str>,
+{
+    if filter.is_empty() {
+        items.iter().collect()
+    } else {
+        let filter_lower = filter.to_lowercase();
+        items
+            .iter()
+            .filter(|item| {
+                get_fields(item)
+                    .iter()
+                    .any(|field| field.to_lowercase().contains(&filter_lower))
+            })
+            .collect()
+    }
+}

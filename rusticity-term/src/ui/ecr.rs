@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_field, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+};
 use crate::ecr::image::{self, Image as EcrImage};
 use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
@@ -59,20 +61,11 @@ impl Tab {
 }
 
 pub fn filtered_ecr_repositories(app: &App) -> Vec<&EcrRepository> {
-    if app.ecr_state.repositories.filter.is_empty() {
-        app.ecr_state.repositories.items.iter().collect()
-    } else {
-        app.ecr_state
-            .repositories
-            .items
-            .iter()
-            .filter(|r| {
-                r.name
-                    .to_lowercase()
-                    .contains(&app.ecr_state.repositories.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_field(
+        &app.ecr_state.repositories.items,
+        &app.ecr_state.repositories.filter,
+        |r| &r.name,
+    )
 }
 
 pub fn filtered_ecr_images(app: &App) -> Vec<&EcrImage> {

@@ -1,8 +1,8 @@
 use crate::app::App;
 use crate::cfn::{format_status, Column as CfnColumn, Stack as CfnStack};
 use crate::common::{
-    render_dropdown, render_pagination_text, translate_column, ColumnId, CyclicEnum, InputFocus,
-    SortDirection,
+    filter_by_fields, render_dropdown, render_pagination_text, translate_column, ColumnId,
+    CyclicEnum, InputFocus, SortDirection,
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
@@ -276,28 +276,14 @@ pub fn resource_column_ids() -> Vec<ColumnId> {
 }
 
 pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
-    let filtered: Vec<&CfnStack> = if app.cfn_state.table.filter.is_empty() {
-        app.cfn_state.table.items.iter().collect()
-    } else {
-        app.cfn_state
-            .table
-            .items
-            .iter()
-            .filter(|s| {
-                s.name
-                    .to_lowercase()
-                    .contains(&app.cfn_state.table.filter.to_lowercase())
-                    || s.description
-                        .to_lowercase()
-                        .contains(&app.cfn_state.table.filter.to_lowercase())
-            })
-            .collect()
-    };
-
-    filtered
-        .into_iter()
-        .filter(|s| app.cfn_state.status_filter.matches(&s.status))
-        .collect()
+    filter_by_fields(
+        &app.cfn_state.table.items,
+        &app.cfn_state.table.filter,
+        |s| vec![&s.name, &s.description],
+    )
+    .into_iter()
+    .filter(|s| app.cfn_state.status_filter.matches(&s.status))
+    .collect()
 }
 
 pub fn parameter_column_ids() -> Vec<ColumnId> {
@@ -309,99 +295,43 @@ pub fn output_column_ids() -> Vec<ColumnId> {
 }
 
 pub fn filtered_parameters(app: &App) -> Vec<&StackParameter> {
-    if app.cfn_state.parameters.filter.is_empty() {
-        app.cfn_state.parameters.items.iter().collect()
-    } else {
-        app.cfn_state
-            .parameters
-            .items
-            .iter()
-            .filter(|p| {
-                p.key
-                    .to_lowercase()
-                    .contains(&app.cfn_state.parameters.filter.to_lowercase())
-                    || p.value
-                        .to_lowercase()
-                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
-                    || p.resolved_value
-                        .to_lowercase()
-                        .contains(&app.cfn_state.parameters.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.cfn_state.parameters.items,
+        &app.cfn_state.parameters.filter,
+        |p| vec![&p.key, &p.value, &p.resolved_value],
+    )
 }
 
 pub fn filtered_outputs(app: &App) -> Vec<&StackOutput> {
-    if app.cfn_state.outputs.filter.is_empty() {
-        app.cfn_state.outputs.items.iter().collect()
-    } else {
-        app.cfn_state
-            .outputs
-            .items
-            .iter()
-            .filter(|o| {
-                o.key
-                    .to_lowercase()
-                    .contains(&app.cfn_state.outputs.filter.to_lowercase())
-                    || o.value
-                        .to_lowercase()
-                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
-                    || o.description
-                        .to_lowercase()
-                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
-                    || o.export_name
-                        .to_lowercase()
-                        .contains(&app.cfn_state.outputs.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.cfn_state.outputs.items,
+        &app.cfn_state.outputs.filter,
+        |o| vec![&o.key, &o.value, &o.description, &o.export_name],
+    )
 }
 
 pub fn filtered_resources(app: &App) -> Vec<&StackResource> {
-    if app.cfn_state.resources.filter.is_empty() {
-        app.cfn_state.resources.items.iter().collect()
-    } else {
-        app.cfn_state
-            .resources
-            .items
-            .iter()
-            .filter(|r| {
-                r.logical_id
-                    .to_lowercase()
-                    .contains(&app.cfn_state.resources.filter.to_lowercase())
-                    || r.physical_id
-                        .to_lowercase()
-                        .contains(&app.cfn_state.resources.filter.to_lowercase())
-                    || r.resource_type
-                        .to_lowercase()
-                        .contains(&app.cfn_state.resources.filter.to_lowercase())
-                    || r.status
-                        .to_lowercase()
-                        .contains(&app.cfn_state.resources.filter.to_lowercase())
-                    || r.module_info
-                        .to_lowercase()
-                        .contains(&app.cfn_state.resources.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.cfn_state.resources.items,
+        &app.cfn_state.resources.filter,
+        |r| {
+            vec![
+                &r.logical_id,
+                &r.physical_id,
+                &r.resource_type,
+                &r.status,
+                &r.module_info,
+            ]
+        },
+    )
 }
 
 pub fn filtered_tags(app: &App) -> Vec<&(String, String)> {
-    if app.cfn_state.tags.filter.is_empty() {
-        app.cfn_state.tags.items.iter().collect()
-    } else {
-        app.cfn_state
-            .tags
-            .items
-            .iter()
-            .filter(|(k, v)| {
-                k.to_lowercase()
-                    .contains(&app.cfn_state.tags.filter.to_lowercase())
-                    || v.to_lowercase()
-                        .contains(&app.cfn_state.tags.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.cfn_state.tags.items,
+        &app.cfn_state.tags.filter,
+        |(k, v)| vec![k.as_str(), v.as_str()],
+    )
 }
 
 pub fn render_stacks(frame: &mut Frame, app: &App, area: Rect) {

@@ -76,9 +76,11 @@ pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
     StreamColumn, StreamSort, TimeUnit,
 };
+#[cfg(test)]
+use rusticity_core::LogStream;
 use rusticity_core::{
     AlarmsClient, AwsConfig, CloudFormationClient, CloudWatchClient, Ec2Client, EcrClient,
-    IamClient, LambdaClient, LogEvent, LogGroup, LogStream, S3Client, SqsClient,
+    IamClient, LambdaClient, S3Client, SqsClient,
 };
 
 #[derive(Clone)]
@@ -3072,23 +3074,23 @@ impl App {
                     self.insights_state.insights.results_selected =
                         (self.insights_state.insights.results_selected + 1).min(max);
                 } else if self.view_mode == ViewMode::Detail {
-                    let filtered_streams = self.filtered_log_streams();
+                    let filtered_streams = filtered_log_streams(self);
                     let max = filtered_streams.len().saturating_sub(1);
                     self.log_groups_state.selected_stream =
                         (self.log_groups_state.selected_stream + 1).min(max);
                 } else if self.view_mode == ViewMode::List
                     && self.current_service == Service::CloudWatchLogGroups
                 {
-                    let filtered_groups = self.filtered_log_groups();
+                    let filtered_groups = filtered_log_groups(self);
                     self.log_groups_state
                         .log_groups
                         .next_item(filtered_groups.len());
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = self.filtered_ecr_images();
+                        let filtered_images = filtered_ecr_images(self);
                         self.ecr_state.images.page_down(filtered_images.len());
                     } else {
-                        let filtered_repos = self.filtered_ecr_repositories();
+                        let filtered_repos = filtered_ecr_repositories(self);
                         self.ecr_state.repositories.page_down(filtered_repos.len());
                     }
                 }
@@ -3134,12 +3136,12 @@ impl App {
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = self.filtered_ecr_images();
+                        let filtered_images = filtered_ecr_images(self);
                         if let Some(image) = self.ecr_state.images.get_selected(&filtered_images) {
                             copy_to_clipboard(&image.uri);
                         }
                     } else {
-                        let filtered_repos = self.filtered_ecr_repositories();
+                        let filtered_repos = filtered_ecr_repositories(self);
                         if let Some(repo) =
                             self.ecr_state.repositories.get_selected(&filtered_repos)
                         {
@@ -3165,7 +3167,7 @@ impl App {
                         }
                     } else {
                         // In list view - copy selected stack ARN
-                        let filtered_stacks = self.filtered_cloudformation_stacks();
+                        let filtered_stacks = filtered_cloudformation_stacks(self);
                         if let Some(stack) = self.cfn_state.table.get_selected(&filtered_stacks) {
                             copy_to_clipboard(&stack.stack_id);
                         }
@@ -3581,34 +3583,6 @@ impl App {
         services
     }
 
-    pub fn selected_log_group(&self) -> Option<&LogGroup> {
-        selected_log_group(self)
-    }
-
-    pub fn filtered_log_streams(&self) -> Vec<&LogStream> {
-        filtered_log_streams(self)
-    }
-
-    pub fn filtered_log_events(&self) -> Vec<&LogEvent> {
-        filtered_log_events(self)
-    }
-
-    pub fn filtered_log_groups(&self) -> Vec<&LogGroup> {
-        filtered_log_groups(self)
-    }
-
-    pub fn filtered_ecr_repositories(&self) -> Vec<&EcrRepository> {
-        filtered_ecr_repositories(self)
-    }
-
-    pub fn filtered_ecr_images(&self) -> Vec<&EcrImage> {
-        filtered_ecr_images(self)
-    }
-
-    pub fn filtered_cloudformation_stacks(&self) -> Vec<&CfnStack> {
-        filtered_cloudformation_stacks(self)
-    }
-
     pub fn breadcrumbs(&self) -> String {
         if !self.service_selected {
             return String::new();
@@ -3622,7 +3596,7 @@ impl App {
                 parts.push("Log groups".to_string());
 
                 if self.view_mode != ViewMode::List {
-                    if let Some(group) = self.selected_log_group() {
+                    if let Some(group) = selected_log_group(self) {
                         parts.push(group.name.clone());
                     }
                 }
@@ -3730,7 +3704,7 @@ impl App {
         match self.current_service {
             Service::CloudWatchLogGroups => {
                 if self.view_mode == ViewMode::Events {
-                    if let Some(group) = self.selected_log_group() {
+                    if let Some(group) = selected_log_group(self) {
                         if let Some(stream) = self
                             .log_groups_state
                             .log_streams
@@ -3744,7 +3718,7 @@ impl App {
                         }
                     }
                 } else if self.view_mode == ViewMode::Detail {
-                    if let Some(group) = self.selected_log_group() {
+                    if let Some(group) = selected_log_group(self) {
                         return cw::logs::console_url_detail(&self.config.region, &group.name);
                     }
                 }
@@ -4113,12 +4087,12 @@ impl App {
                     }
                 } else if self.current_service == Service::CloudWatchLogGroups {
                     if self.view_mode == ViewMode::List {
-                        let filtered_groups = self.filtered_log_groups();
+                        let filtered_groups = filtered_log_groups(self);
                         self.log_groups_state
                             .log_groups
                             .next_item(filtered_groups.len());
                     } else if self.view_mode == ViewMode::Detail {
-                        let filtered_streams = self.filtered_log_streams();
+                        let filtered_streams = filtered_log_streams(self);
                         if !filtered_streams.is_empty() {
                             let max = filtered_streams.len() - 1;
                             if self.log_groups_state.selected_stream >= max {
@@ -4168,12 +4142,12 @@ impl App {
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = self.filtered_ecr_images();
+                        let filtered_images = filtered_ecr_images(self);
                         if !filtered_images.is_empty() {
                             self.ecr_state.images.next_item(filtered_images.len());
                         }
                     } else {
-                        let filtered_repos = self.filtered_ecr_repositories();
+                        let filtered_repos = filtered_ecr_repositories(self);
                         if !filtered_repos.is_empty() {
                             self.ecr_state.repositories.selected =
                                 (self.ecr_state.repositories.selected + 1)
@@ -4348,7 +4322,7 @@ impl App {
                         let filtered = filtered_resources(self);
                         self.cfn_state.resources.next_item(filtered.len());
                     } else {
-                        let filtered = self.filtered_cloudformation_stacks();
+                        let filtered = filtered_cloudformation_stacks(self);
                         self.cfn_state.table.next_item(filtered.len());
                     }
                 } else if self.current_service == Service::IamUsers {
@@ -4797,7 +4771,7 @@ impl App {
         {
             if self.view_mode == ViewMode::List {
                 // Log groups list pagination
-                let filtered = self.filtered_log_groups();
+                let filtered = filtered_log_groups(self);
                 let page_size = self.log_groups_state.log_groups.page_size.value();
                 let filtered_count = filtered.len();
                 self.log_groups_state.input_focus.handle_page_down(
@@ -4808,7 +4782,7 @@ impl App {
                 );
             } else {
                 // Log streams pagination
-                let filtered = self.filtered_log_streams();
+                let filtered = filtered_log_streams(self);
                 let page_size = 20;
                 let filtered_count = filtered.len();
                 self.log_groups_state.input_focus.handle_page_down(
@@ -4894,14 +4868,14 @@ impl App {
             && self.ecr_state.input_focus == InputFocus::Filter
         {
             // When input is focused, allow table scrolling
-            let filtered = self.filtered_ecr_repositories();
+            let filtered = filtered_ecr_repositories(self);
             self.ecr_state.repositories.page_down(filtered.len());
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
         {
             let page_size = self.ecr_state.repositories.page_size.value();
-            let filtered_count = self.filtered_ecr_repositories().len();
+            let filtered_count = filtered_ecr_repositories(self).len();
             self.ecr_state.input_focus.handle_page_down(
                 &mut self.ecr_state.repositories.selected,
                 &mut self.ecr_state.repositories.scroll_offset,
@@ -4997,12 +4971,12 @@ impl App {
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::List
             {
-                let filtered = self.filtered_log_groups();
+                let filtered = filtered_log_groups(self);
                 self.log_groups_state.log_groups.page_down(filtered.len());
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::Detail
             {
-                let len = self.filtered_log_streams().len();
+                let len = filtered_log_streams(self).len();
                 nav_page_down(&mut self.log_groups_state.selected_stream, len, 10);
             } else if self.view_mode == ViewMode::Events {
                 let max = self.log_groups_state.log_events.len();
@@ -5049,10 +5023,10 @@ impl App {
                 }
             } else if self.current_service == Service::EcrRepositories {
                 if self.ecr_state.current_repository.is_some() {
-                    let filtered = self.filtered_ecr_images();
+                    let filtered = filtered_ecr_images(self);
                     self.ecr_state.images.page_down(filtered.len());
                 } else {
-                    let filtered = self.filtered_ecr_repositories();
+                    let filtered = filtered_ecr_repositories(self);
                     self.ecr_state.repositories.page_down(filtered.len());
                 }
             } else if self.current_service == Service::SqsQueues {
@@ -5077,7 +5051,7 @@ impl App {
                     let filtered = filtered_outputs(self);
                     self.cfn_state.outputs.page_down(filtered.len());
                 } else {
-                    let filtered = self.filtered_cloudformation_stacks();
+                    let filtered = filtered_cloudformation_stacks(self);
                     self.cfn_state.table.page_down(filtered.len());
                 }
             } else if self.current_service == Service::IamUsers {
@@ -5923,7 +5897,7 @@ impl App {
                     .goto_page(page, filtered_count);
             }
             Service::CloudFormationStacks => {
-                let filtered_count = self.filtered_cloudformation_stacks().len();
+                let filtered_count = filtered_cloudformation_stacks(self).len();
                 self.cfn_state.table.goto_page(page, filtered_count);
             }
             Service::IamUsers => {
@@ -6659,7 +6633,7 @@ impl App {
             } else if self.current_service == Service::CloudFormationStacks {
                 if self.cfn_state.current_stack.is_none() {
                     // Drill into stack detail view
-                    let filtered_stacks = self.filtered_cloudformation_stacks();
+                    let filtered_stacks = filtered_cloudformation_stacks(self);
                     if let Some(stack) = self.cfn_state.table.get_selected(&filtered_stacks) {
                         let stack_name = stack.name.clone();
                         let mut tags = stack.tags.clone();
@@ -6675,7 +6649,7 @@ impl App {
             } else if self.current_service == Service::EcrRepositories {
                 if self.ecr_state.current_repository.is_none() {
                     // In repositories view - drill into selected repository
-                    let filtered_repos = self.filtered_ecr_repositories();
+                    let filtered_repos = filtered_ecr_repositories(self);
                     if let Some(repo) = self.ecr_state.repositories.get_selected(&filtered_repos) {
                         let repo_name = repo.name.clone();
                         let repo_uri = repo.uri.clone();
@@ -6898,7 +6872,7 @@ impl App {
             } else if self.current_service == Service::CloudWatchLogGroups {
                 if self.view_mode == ViewMode::List {
                     // Map filtered selection to actual group index
-                    let filtered_groups = self.filtered_log_groups();
+                    let filtered_groups = filtered_log_groups(self);
                     if let Some(selected_group) =
                         filtered_groups.get(self.log_groups_state.log_groups.selected)
                     {
@@ -6919,7 +6893,7 @@ impl App {
                     self.update_current_tab_breadcrumb();
                 } else if self.view_mode == ViewMode::Detail {
                     // Map filtered stream selection to actual stream index
-                    let filtered_streams = self.filtered_log_streams();
+                    let filtered_streams = filtered_log_streams(self);
                     if let Some(selected_stream) =
                         filtered_streams.get(self.log_groups_state.selected_stream)
                     {
@@ -9749,7 +9723,7 @@ mod tests {
         ];
         app.cfn_state.table.filter = "prod".to_string();
 
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "prod-stack");
     }
@@ -9866,7 +9840,7 @@ mod tests {
         app.cfn_state.table.reset();
 
         // Verify filtering works
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "test-stack");
 
@@ -9992,7 +9966,7 @@ mod tests {
         app.current_service = Service::CloudFormationStacks;
         app.cfn_state.table.items = vec![];
 
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 0);
 
         // Pagination should still show [1] even with 0 items
@@ -10802,7 +10776,7 @@ mod region_latency_tests {
         ];
 
         app.ecr_state.repositories.filter = "app".to_string();
-        let filtered = app.filtered_ecr_repositories();
+        let filtered = filtered_ecr_repositories(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "my-app");
     }
@@ -12896,7 +12870,7 @@ mod region_latency_tests {
         ];
 
         app.cfn_state.table.filter = "my".to_string();
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "my-stack");
     }
@@ -12929,7 +12903,7 @@ mod region_latency_tests {
         }];
 
         app.cfn_state.table.filter = "production".to_string();
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
     }
 
@@ -12984,12 +12958,12 @@ mod region_latency_tests {
         ];
 
         app.cfn_state.status_filter = CfnStatusFilter::Complete;
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "complete-stack");
 
         app.cfn_state.status_filter = CfnStatusFilter::Failed;
-        let filtered = app.filtered_cloudformation_stacks();
+        let filtered = filtered_cloudformation_stacks(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "failed-stack");
     }

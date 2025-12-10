@@ -3,8 +3,8 @@ use crate::aws::Region;
 #[cfg(test)]
 use crate::common::PageSize;
 use crate::common::{
-    format_bytes, format_duration_seconds, format_unix_timestamp, render_dropdown, CyclicEnum,
-    InputFocus, SortDirection,
+    filter_by_fields, format_bytes, format_duration_seconds, format_unix_timestamp,
+    render_dropdown, CyclicEnum, InputFocus, SortDirection,
 };
 use crate::keymap::Mode::{self, FilterInput};
 use crate::sqs::pipe::Column as PipeColumn;
@@ -233,45 +233,22 @@ pub fn filtered_queues<'a>(queues: &'a [Queue], filter: &str) -> Vec<&'a Queue> 
 }
 
 pub fn filtered_lambda_triggers(app: &App) -> Vec<&LambdaTrigger> {
-    let mut filtered: Vec<_> = app
-        .sqs_state
-        .triggers
-        .items
-        .iter()
-        .filter(|t| {
-            app.sqs_state.triggers.filter.is_empty()
-                || t.uuid
-                    .to_lowercase()
-                    .contains(&app.sqs_state.triggers.filter.to_lowercase())
-                || t.arn
-                    .to_lowercase()
-                    .contains(&app.sqs_state.triggers.filter.to_lowercase())
-        })
-        .collect();
+    let mut filtered = filter_by_fields(
+        &app.sqs_state.triggers.items,
+        &app.sqs_state.triggers.filter,
+        |t| vec![&t.uuid, &t.arn],
+    );
 
-    // Sort by last_modified ASC
     filtered.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
     filtered
 }
 
 pub fn filtered_tags(app: &App) -> Vec<&QueueTag> {
-    let mut filtered: Vec<_> = app
-        .sqs_state
-        .tags
-        .items
-        .iter()
-        .filter(|t| {
-            app.sqs_state.tags.filter.is_empty()
-                || t.key
-                    .to_lowercase()
-                    .contains(&app.sqs_state.tags.filter.to_lowercase())
-                || t.value
-                    .to_lowercase()
-                    .contains(&app.sqs_state.tags.filter.to_lowercase())
-        })
-        .collect();
+    let mut filtered =
+        filter_by_fields(&app.sqs_state.tags.items, &app.sqs_state.tags.filter, |t| {
+            vec![&t.key, &t.value]
+        });
 
-    // Sort by value ASC
     filtered.sort_by(|a, b| a.value.cmp(&b.value));
     filtered
 }
@@ -283,47 +260,25 @@ pub fn filtered_subscriptions(app: &App) -> Vec<&SnsSubscription> {
         &app.sqs_state.subscription_region_filter
     };
 
-    let mut filtered: Vec<_> = app
-        .sqs_state
-        .subscriptions
-        .items
-        .iter()
-        .filter(|s| {
-            let text_match = app.sqs_state.subscriptions.filter.is_empty()
-                || s.subscription_arn
-                    .to_lowercase()
-                    .contains(&app.sqs_state.subscriptions.filter.to_lowercase())
-                || s.topic_arn
-                    .to_lowercase()
-                    .contains(&app.sqs_state.subscriptions.filter.to_lowercase());
+    let mut filtered: Vec<_> = filter_by_fields(
+        &app.sqs_state.subscriptions.items,
+        &app.sqs_state.subscriptions.filter,
+        |s| vec![&s.subscription_arn, &s.topic_arn],
+    )
+    .into_iter()
+    .filter(|s| s.subscription_arn.contains(region_filter))
+    .collect();
 
-            let region_match = s.subscription_arn.contains(region_filter);
-
-            text_match && region_match
-        })
-        .collect();
-
-    // Sort by subscription_arn ASC
     filtered.sort_by(|a, b| a.subscription_arn.cmp(&b.subscription_arn));
     filtered
 }
 
 pub fn filtered_eventbridge_pipes(app: &App) -> Vec<&EventBridgePipe> {
-    let mut filtered: Vec<_> = app
-        .sqs_state
-        .pipes
-        .items
-        .iter()
-        .filter(|p| {
-            app.sqs_state.pipes.filter.is_empty()
-                || p.name
-                    .to_lowercase()
-                    .contains(&app.sqs_state.pipes.filter.to_lowercase())
-                || p.target
-                    .to_lowercase()
-                    .contains(&app.sqs_state.pipes.filter.to_lowercase())
-        })
-        .collect();
+    let mut filtered = filter_by_fields(
+        &app.sqs_state.pipes.items,
+        &app.sqs_state.pipes.filter,
+        |p| vec![&p.name, &p.target],
+    );
 
     filtered.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
     filtered

@@ -1,5 +1,8 @@
 use crate::app::{App, ViewMode};
-use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_field, filter_by_fields, render_pagination_text, CyclicEnum, InputFocus,
+    SortDirection,
+};
 use crate::iam::{
     GroupColumn, GroupUser, GroupUserColumn, IamGroup, IamRole, IamUser, LastAccessedService,
     Policy, PolicyColumn, RoleColumn, RoleTag, UserColumn, UserGroup, UserTag,
@@ -1667,37 +1670,19 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
 
 // IAM-specific helper functions
 pub fn filtered_iam_users(app: &App) -> Vec<&IamUser> {
-    if app.iam_state.users.filter.is_empty() {
-        app.iam_state.users.items.iter().collect()
-    } else {
-        app.iam_state
-            .users
-            .items
-            .iter()
-            .filter(|u| {
-                u.user_name
-                    .to_lowercase()
-                    .contains(&app.iam_state.users.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_field(
+        &app.iam_state.users.items,
+        &app.iam_state.users.filter,
+        |u| &u.user_name,
+    )
 }
 
 pub fn filtered_iam_roles(app: &App) -> Vec<&IamRole> {
-    if app.iam_state.roles.filter.is_empty() {
-        app.iam_state.roles.items.iter().collect()
-    } else {
-        app.iam_state
-            .roles
-            .items
-            .iter()
-            .filter(|r| {
-                r.role_name
-                    .to_lowercase()
-                    .contains(&app.iam_state.roles.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_field(
+        &app.iam_state.roles.items,
+        &app.iam_state.roles.filter,
+        |r| &r.role_name,
+    )
 }
 
 pub fn filtered_iam_policies(app: &App) -> Vec<&Policy> {
@@ -1724,43 +1709,17 @@ pub fn filtered_iam_policies(app: &App) -> Vec<&Policy> {
 }
 
 pub fn filtered_tags(app: &App) -> Vec<&RoleTag> {
-    if app.iam_state.tags.filter.is_empty() {
-        app.iam_state.tags.items.iter().collect()
-    } else {
-        app.iam_state
-            .tags
-            .items
-            .iter()
-            .filter(|t| {
-                t.key
-                    .to_lowercase()
-                    .contains(&app.iam_state.tags.filter.to_lowercase())
-                    || t.value
-                        .to_lowercase()
-                        .contains(&app.iam_state.tags.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(&app.iam_state.tags.items, &app.iam_state.tags.filter, |t| {
+        vec![&t.key, &t.value]
+    })
 }
 
 pub fn filtered_user_tags(app: &App) -> Vec<&UserTag> {
-    if app.iam_state.user_tags.filter.is_empty() {
-        app.iam_state.user_tags.items.iter().collect()
-    } else {
-        app.iam_state
-            .user_tags
-            .items
-            .iter()
-            .filter(|t| {
-                t.key
-                    .to_lowercase()
-                    .contains(&app.iam_state.user_tags.filter.to_lowercase())
-                    || t.value
-                        .to_lowercase()
-                        .contains(&app.iam_state.user_tags.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.iam_state.user_tags.items,
+        &app.iam_state.user_tags.filter,
+        |t| vec![&t.key, &t.value],
+    )
 }
 
 pub fn filtered_last_accessed(app: &App) -> Vec<&LastAccessedService> {

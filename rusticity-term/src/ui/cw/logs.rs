@@ -339,7 +339,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    if let Some(group) = app.selected_log_group() {
+    if let Some(group) = selected_log_group(app) {
         let detail_block = Block::default()
             .title(" Log group details ")
             .borders(Borders::ALL)

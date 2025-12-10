@@ -2130,6 +2130,7 @@ mod tests {
     use crate::ecr::repo::Repository as EcrRepository;
     use crate::keymap::Action;
     use crate::lambda;
+    use crate::ui::cw::logs::filtered_log_groups;
     use crate::ui::table::Column;
 
     fn test_app() -> App {
@@ -4856,7 +4857,7 @@ mod tests {
 
         // Test filtering
         app.log_groups_state.log_groups.filter = "lambda".to_string();
-        let filtered = app.filtered_log_groups();
+        let filtered = filtered_log_groups(&app);
         assert_eq!(filtered.len(), 2);
 
         // Test pagination

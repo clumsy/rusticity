@@ -7,7 +7,8 @@ use crate::s3::{Bucket as S3Bucket, BucketColumn, Object as S3Object};
 use crate::table::TableState;
 use crate::ui::table::{format_header_cell, CURSOR_COLLAPSED, CURSOR_EXPANDED};
 use crate::ui::{
-    active_border, filter_area, get_cursor, red_text, render_tabs, section_header, vertical,
+    active_border, filter_area, get_cursor, red_text, render_tabs, rounded_block, section_header,
+    vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -649,10 +650,8 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .header(header)
         .column_spacing(1)
         .block(
-            Block::default()
+            rounded_block()
                 .title(title)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)),
         );
 
@@ -749,12 +748,7 @@ fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
             // Placeholder for other tabs
             let placeholder =
                 Paragraph::new(format!("{} - Coming soon", app.s3_state.object_tab.name()))
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_type(BorderType::Rounded)
-                            .border_style(active_border()),
-                    )
+                    .block(rounded_block().border_style(active_border()))
                     .style(Style::default().fg(Color::Gray));
             frame.render_widget(placeholder, chunks[content_idx]);
         }
@@ -1032,13 +1026,7 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
     )
     .header(header)
     .column_spacing(1)
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(active_border()),
-    );
+    .block(rounded_block().title(title).border_style(active_border()));
 
     frame.render_widget(table, area);
 
@@ -1069,10 +1057,8 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![];
 
-    let block = Block::default()
+    let block = rounded_block()
         .title(" Properties ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
         .border_style(active_border());
     let inner = block.inner(area);
 
@@ -1865,5 +1851,17 @@ mod tests {
 
         // Selection should be clamped to 19 (last row)
         assert_eq!(state.selected_row, 19);
+    }
+
+    #[test]
+    fn test_rounded_block_with_custom_border_style() {
+        use ratatui::prelude::Rect;
+        let block = rounded_block()
+            .title(" Properties ")
+            .border_style(active_border());
+        let area = Rect::new(0, 0, 70, 12);
+        let inner = block.inner(area);
+        assert_eq!(inner.width, 68);
+        assert_eq!(inner.height, 10);
     }
 }

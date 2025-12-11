@@ -45,7 +45,8 @@ fn common_detail_hotkeys() -> Vec<Span<'static>> {
     spans.extend(hint("^d", "page down"));
     spans.extend(hint("y", "yank"));
     spans.extend(hint("^o", "console"));
-    spans.extend(hint("^p", "preferences"));
+    spans.extend(hint("p", "preferences"));
+    spans.extend(hint("^p", "print"));
     spans.extend(hint("^r", "refresh"));
     spans.extend(hint("^w", "close"));
     spans.extend(last_hint("q", "quit"));
@@ -62,7 +63,8 @@ fn common_list_hotkeys() -> Vec<Span<'static>> {
     spans.extend(hint("^d", "page down"));
     spans.extend(hint("y", "yank"));
     spans.extend(hint("^o", "console"));
-    spans.extend(hint("^p", "preferences"));
+    spans.extend(hint("p", "preferences"));
+    spans.extend(hint("^p", "print"));
     spans.extend(hint("^r", "refresh"));
     spans.extend(hint("^w", "close"));
     spans.extend(last_hint("q", "quit"));
@@ -274,7 +276,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("←→", "toggle"));
         hints.extend(hint("⏎", "open"));
         hints.extend(hint("^o", "console"));
-        hints.extend(hint("^p", "preferences"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("^w", "close"));
         hints.extend(last_hint("q", "quit"));
@@ -410,7 +413,7 @@ mod tests {
     #[test]
     fn test_version_padding_calculation() {
         // Simulate help text width
-        let help_text = " ↑↓ scroll ⋮ ←→ toggle ⋮ ⏎ open ⋮ ^o console ⋮ ^p preferences ⋮ ^r refresh ⋮ ^w close ⋮ q quit ";
+        let help_text = " ↑↓ scroll ⋮ ←→ toggle ⋮ ⏎ open ⋮ ^o console ⋮ p preferences ⋮ ^p print ⋮ ^r refresh ⋮ ^w close ⋮ q quit ";
         let help_width: usize = help_text.len();
 
         let version_text = "RUSTICITY v0.1.3 (#1234567)";
@@ -424,5 +427,65 @@ mod tests {
 
         // Total should equal status_width
         assert_eq!(help_width + padding + version_width, status_width);
+    }
+
+    #[test]
+    fn test_preferences_hint_uses_p_not_ctrl_p() {
+        use super::common_list_hotkeys;
+        let spans = common_list_hotkeys();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+
+        // Should have "p preferences" not "^p preferences"
+        assert!(
+            text.contains("p preferences"),
+            "Should show 'p preferences'"
+        );
+        assert!(
+            !text.contains("^p preferences"),
+            "Should not show '^p preferences'"
+        );
+    }
+
+    #[test]
+    fn test_print_hint_uses_ctrl_p() {
+        use super::common_list_hotkeys;
+        let spans = common_list_hotkeys();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+
+        // Should have "^p print" for copy to clipboard
+        assert!(
+            text.contains("^p print"),
+            "Should show '^p print' for copy to clipboard"
+        );
+    }
+
+    #[test]
+    fn test_yank_hint_uses_y() {
+        use super::common_list_hotkeys;
+        let spans = common_list_hotkeys();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+
+        // Should have "y yank" for copying selected item
+        assert!(
+            text.contains("y yank"),
+            "Should show 'y yank' for copying selected item"
+        );
+    }
+
+    #[test]
+    fn test_common_detail_hotkeys_has_correct_hints() {
+        use super::common_detail_hotkeys;
+        let spans = common_detail_hotkeys();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+
+        // Detail views should have p for preferences and ^p for print
+        assert!(
+            text.contains("p preferences"),
+            "Detail view should show 'p preferences'"
+        );
+        assert!(
+            text.contains("^p print"),
+            "Detail view should show '^p print'"
+        );
     }
 }

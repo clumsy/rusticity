@@ -9,7 +9,8 @@ use crate::table::TableState;
 use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
-    block_height_for, labeled_field, render_json_highlighted, render_tabs, rounded_block,
+    block_height_for, calculate_dynamic_height, labeled_field, render_fields_with_dynamic_columns,
+    render_json_highlighted, render_tabs, rounded_block,
 };
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::cfn::{StackOutput, StackParameter, StackResource};
@@ -647,7 +648,13 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
             },
         ),
     ];
-    let overview_height = fields.len() as u16 + 2; // +2 for borders
+    let overview_height = calculate_dynamic_height(
+        &fields
+            .iter()
+            .map(|(label, value)| labeled_field(label, *value))
+            .collect::<Vec<_>>(),
+        area.width.saturating_sub(4),
+    ) + 2;
 
     // Tags section - use table with filter
     let tags_height = 12; // Fixed height for tags table
@@ -675,7 +682,8 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
         }
         lines
     };
-    let rollback_height = rollback_lines.len() as u16 + 2;
+    let rollback_height =
+        calculate_dynamic_height(&rollback_lines, area.width.saturating_sub(4)) + 2;
 
     // Notification options section
     let notification_lines = if stack.notification_arns.is_empty() {
@@ -707,10 +715,11 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
         .iter()
         .map(|(label, value)| labeled_field(label, *value))
         .collect();
-    let overview = Paragraph::new(overview_lines)
-        .block(rounded_block().title(" Overview "))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(overview, sections[0]);
+
+    let overview_block = rounded_block().title(" Overview ");
+    let overview_inner = overview_block.inner(sections[0]);
+    frame.render_widget(overview_block, sections[0]);
+    render_fields_with_dynamic_columns(frame, overview_inner, overview_lines);
 
     // Render tags table
     render_tags(frame, app, sections[1]);
@@ -731,24 +740,14 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
     );
 
     // Render rollback configuration
-    let rollback = Paragraph::new(rollback_lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Rollback configuration "),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(rollback, sections[3]);
+    let rollback_block = rounded_block().title(" Rollback configuration ");
+    let rollback_inner = rollback_block.inner(sections[3]);
+    frame.render_widget(rollback_block, sections[3]);
+    render_fields_with_dynamic_columns(frame, rollback_inner, rollback_lines);
 
     // Render notification options
     let notifications = Paragraph::new(notification_lines.join("\n"))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Notification options "),
-        )
+        .block(rounded_block().title(" Notification options "))
         .wrap(Wrap { trim: true });
     frame.render_widget(notifications, sections[4]);
 }
@@ -1087,6 +1086,32 @@ mod tests {
     fn test_policy_scroll_state() {
         let state = State::new();
         assert_eq!(state.policy_scroll, 0);
+    }
+
+    #[test]
+    fn test_rounded_block_for_rollback_config() {
+        use crate::ui::rounded_block;
+        use ratatui::prelude::Rect;
+        let block = rounded_block().title(" Rollback configuration ");
+        let area = Rect::new(0, 0, 90, 8);
+        let inner = block.inner(area);
+        assert_eq!(inner.width, 88);
+        assert_eq!(inner.height, 6);
+    }
+
+    #[test]
+    fn test_overview_uses_dynamic_height() {
+        use crate::ui::{calculate_dynamic_height, labeled_field};
+        // Verify overview height accounts for column packing
+        let fields = vec![
+            labeled_field("Stack name", "test-stack"),
+            labeled_field("Status", "CREATE_COMPLETE"),
+            labeled_field("Created", "2024-01-01"),
+        ];
+        let width = 150;
+        let height = calculate_dynamic_height(&fields, width);
+        // With 3 fields and reasonable width, should pack into fewer rows
+        assert!(height < 3, "Expected fewer than 3 rows with column packing");
     }
 }
 

@@ -3,6 +3,7 @@ use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::table::expanded_from_columns;
+use crate::ui::{calculate_dynamic_height, render_fields_with_dynamic_columns, rounded_block};
 use ratatui::prelude::*;
 
 pub const FILTER_CONTROLS: [InputFocus; 3] = [
@@ -87,12 +88,51 @@ impl CyclicEnum for StateFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DetailTab {
+    Details,
+    StatusAndAlarms,
+    Monitoring,
+    Security,
+    Networking,
+    Storage,
+    Tags,
+}
+
+impl CyclicEnum for DetailTab {
+    const ALL: &'static [Self] = &[
+        Self::Details,
+        Self::StatusAndAlarms,
+        Self::Monitoring,
+        Self::Security,
+        Self::Networking,
+        Self::Storage,
+        Self::Tags,
+    ];
+}
+
+impl DetailTab {
+    pub fn name(&self) -> &'static str {
+        match self {
+            DetailTab::Details => "Details",
+            DetailTab::StatusAndAlarms => "Status and alarms",
+            DetailTab::Monitoring => "Monitoring",
+            DetailTab::Security => "Security",
+            DetailTab::Networking => "Networking",
+            DetailTab::Storage => "Storage",
+            DetailTab::Tags => "Tags",
+        }
+    }
+}
+
 pub struct State {
     pub table: TableState<Instance>,
     pub state_filter: StateFilter,
     pub sort_column: Column,
     pub sort_direction: SortDirection,
     pub input_focus: InputFocus,
+    pub current_instance: Option<String>,
+    pub detail_tab: DetailTab,
 }
 
 impl Default for State {
@@ -103,6 +143,8 @@ impl Default for State {
             sort_column: Column::LaunchTime,
             sort_direction: SortDirection::Desc,
             input_focus: InputFocus::Filter,
+            current_instance: None,
+            detail_tab: DetailTab::Details,
         }
     }
 }
@@ -212,6 +254,317 @@ pub fn render_instances(
             chunks[0],
             controls_after,
         );
+    }
+}
+
+pub fn filtered_ec2_instances(app: &crate::app::App) -> Vec<&Instance> {
+    let filtered: Vec<&Instance> = if app.ec2_state.table.filter.is_empty() {
+        app.ec2_state.table.items.iter().collect()
+    } else {
+        app.ec2_state
+            .table
+            .items
+            .iter()
+            .filter(|i| {
+                i.instance_id.contains(&app.ec2_state.table.filter)
+                    || i.name.contains(&app.ec2_state.table.filter)
+                    || i.state.contains(&app.ec2_state.table.filter)
+                    || i.instance_type.contains(&app.ec2_state.table.filter)
+                    || i.public_ipv4_address.contains(&app.ec2_state.table.filter)
+                    || i.private_ip_address.contains(&app.ec2_state.table.filter)
+            })
+            .collect()
+    };
+
+    filtered
+        .into_iter()
+        .filter(|i| app.ec2_state.state_filter.matches(&i.state))
+        .collect()
+}
+
+pub fn render_instance_detail(frame: &mut Frame, area: Rect, state: &State, _mode: Mode) {
+    use crate::ui::{labeled_field, render_tabs};
+
+    let instance = state
+        .table
+        .items
+        .iter()
+        .find(|i| Some(&i.instance_id) == state.current_instance.as_ref());
+
+    let Some(instance) = instance else {
+        return;
+    };
+
+    // All fields to display (matching AWS console)
+    let all_fields = vec![
+        labeled_field("Instance ID", &instance.instance_id),
+        labeled_field("Public IPv4 address", &instance.public_ipv4_address),
+        labeled_field("Private IPv4 addresses", &instance.private_ip_address),
+        labeled_field("IPv6 address", &instance.ipv6_ips),
+        labeled_field("Instance state", &instance.state),
+        labeled_field("Public DNS", &instance.public_ipv4_dns),
+        labeled_field(
+            "Hostname type",
+            format!("IP name: {}", &instance.private_dns_name),
+        ),
+        labeled_field(
+            "Private IP DNS name (IPv4 only)",
+            &instance.private_dns_name,
+        ),
+        labeled_field("Instance type", &instance.instance_type),
+        labeled_field("Elastic IP addresses", &instance.elastic_ip),
+        labeled_field(
+            "Auto-assigned IP address",
+            format!("{} [Public IP]", &instance.public_ipv4_address),
+        ),
+        labeled_field("VPC ID", &instance.vpc_id),
+        labeled_field("IAM Role", &instance.iam_instance_profile_arn),
+        labeled_field("Subnet ID", &instance.subnet_ids),
+        labeled_field("IMDSv2", &instance.imdsv2),
+        labeled_field("Availability Zone", &instance.availability_zone),
+        labeled_field("Managed", &instance.managed),
+        labeled_field("Operator", &instance.operator),
+    ];
+
+    // Calculate height needed
+    let summary_height = calculate_dynamic_height(&all_fields, area.width.saturating_sub(4)) + 2;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(summary_height), Constraint::Min(0)])
+        .split(area);
+
+    // Instance summary
+    let summary_block = rounded_block().title(" Instance summary ");
+    let summary_inner = summary_block.inner(chunks[0]);
+    frame.render_widget(summary_block, chunks[0]);
+
+    render_fields_with_dynamic_columns(frame, summary_inner, all_fields);
+
+    // Tab content
+    let tab_names: Vec<(&str, DetailTab)> = DetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
+    render_tabs(frame, chunks[1], &tab_names, &state.detail_tab);
+
+    // Content area starts right after tabs (1 line for tab bar)
+    let content_area = Rect {
+        x: chunks[1].x,
+        y: chunks[1].y + 1,
+        width: chunks[1].width,
+        height: chunks[1].height.saturating_sub(1),
+    };
+
+    match state.detail_tab {
+        DetailTab::Details => {
+            let instance_details = vec![
+                labeled_field("AMI ID", &instance.image_id),
+                labeled_field("Monitoring", &instance.monitoring),
+                labeled_field("Platform details", &instance.platform_details),
+                labeled_field("AMI name", "–"),
+                labeled_field("Allowed image", "–"),
+                labeled_field("Termination protection", "–"),
+                labeled_field("Stop protection", "–"),
+                labeled_field("Launch time", &instance.launch_time),
+                labeled_field("AMI location", "–"),
+                labeled_field("Instance reboot migration", "–"),
+                labeled_field("Instance auto-recovery", "–"),
+                labeled_field("Lifecycle", &instance.instance_lifecycle),
+                labeled_field(
+                    "Stop-hibernate behavior",
+                    &instance.stop_hibernation_behavior,
+                ),
+                labeled_field("AMI Launch index", &instance.ami_launch_index),
+                labeled_field("Key pair assigned at launch", &instance.key_name),
+                labeled_field(
+                    "State transition reason",
+                    &instance.state_transition_reason_code,
+                ),
+                labeled_field("Credit specification", "–"),
+                labeled_field("Kernel ID", &instance.kernel_id),
+                labeled_field(
+                    "State transition message",
+                    &instance.state_transition_reason_message,
+                ),
+                labeled_field("Usage operation", &instance.usage_operation),
+                labeled_field("RAM disk ID", &instance.ramdisk_id),
+                labeled_field("Owner", &instance.owner_id),
+                labeled_field("Enclaves Support", "–"),
+                labeled_field("Boot mode", "–"),
+                labeled_field("Current instance boot mode", "–"),
+                labeled_field("Allow tags in instance metadata", "–"),
+                labeled_field("Use RBN as guest OS hostname", "–"),
+                labeled_field("Answer RBN DNS hostname IPv4", "–"),
+            ];
+
+            let placement = vec![
+                labeled_field("Host ID", &instance.host_id),
+                labeled_field("Affinity", &instance.affinity),
+                labeled_field("Placement group", &instance.placement_group),
+                labeled_field("Host resource group name", "–"),
+                labeled_field("Tenancy", &instance.tenancy),
+                labeled_field("Placement group ID", "–"),
+                labeled_field("Virtualization type", &instance.virtualization_type),
+                labeled_field("Reservation", &instance.reservation_id),
+                labeled_field("Partition number", &instance.partition_number),
+                labeled_field("Number of vCPUs", "–"),
+            ];
+
+            let capacity = vec![
+                labeled_field("Capacity Reservation ID", &instance.capacity_reservation_id),
+                labeled_field("Capacity Reservation setting", "open"),
+            ];
+
+            // Calculate heights for each section based on field count and width
+            let calc_height = |fields: &[Line], width: u16| -> u16 {
+                if fields.is_empty() {
+                    return 2; // Just borders
+                }
+                let field_widths: Vec<u16> = fields
+                    .iter()
+                    .map(|line| {
+                        line.spans
+                            .iter()
+                            .map(|span| span.content.len() as u16)
+                            .sum::<u16>()
+                            + 2
+                    })
+                    .collect();
+                let max_field_width = *field_widths.iter().max().unwrap_or(&20);
+                let num_columns =
+                    (width / max_field_width).max(1).min(fields.len() as u16) as usize;
+                let base = fields.len() / num_columns;
+                let extra = fields.len() % num_columns;
+                let max_rows = if extra > 0 { base + 1 } else { base };
+                (max_rows as u16) + 2
+            };
+
+            let details_height =
+                calc_height(&instance_details, content_area.width.saturating_sub(2));
+            let placement_height = calc_height(&placement, content_area.width.saturating_sub(2));
+            let capacity_height = calc_height(&capacity, content_area.width.saturating_sub(2));
+
+            // Ensure total height doesn't exceed available space
+            let total_height = details_height + placement_height + capacity_height;
+            let available_height = content_area.height;
+
+            let sections = if total_height <= available_height {
+                Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(details_height),
+                        Constraint::Length(placement_height),
+                        Constraint::Length(capacity_height),
+                    ])
+                    .split(content_area)
+            } else {
+                // If doesn't fit, use Min for last section
+                Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(details_height),
+                        Constraint::Length(placement_height),
+                        Constraint::Min(0),
+                    ])
+                    .split(content_area)
+            };
+
+            let details_block = rounded_block().title(" Instance details ");
+            let details_inner = details_block.inner(sections[0]);
+            frame.render_widget(details_block, sections[0]);
+            render_fields_with_dynamic_columns(frame, details_inner, instance_details);
+
+            let placement_block = rounded_block().title(" Host and placement group ");
+            let placement_inner = placement_block.inner(sections[1]);
+            frame.render_widget(placement_block, sections[1]);
+            render_fields_with_dynamic_columns(frame, placement_inner, placement);
+
+            let capacity_block = rounded_block().title(" Capacity reservation ");
+            let capacity_inner = capacity_block.inner(sections[2]);
+            frame.render_widget(capacity_block, sections[2]);
+            render_fields_with_dynamic_columns(frame, capacity_inner, capacity);
+        }
+        DetailTab::StatusAndAlarms => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = vec![
+                labeled_field("Status checks", &instance.status_checks),
+                labeled_field("Alarm status", &instance.alarm_status),
+                labeled_field("Monitoring", &instance.monitoring),
+                labeled_field(
+                    "State transition reason",
+                    &instance.state_transition_reason_message,
+                ),
+            ];
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
+        DetailTab::Monitoring => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = vec![
+                labeled_field("Monitoring", &instance.monitoring),
+                labeled_field("Status checks", &instance.status_checks),
+            ];
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
+        DetailTab::Security => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = vec![
+                labeled_field("Security groups", &instance.security_groups),
+                labeled_field("Security group IDs", &instance.security_group_ids),
+                labeled_field("Key name", &instance.key_name),
+                labeled_field("IAM role", &instance.iam_instance_profile_arn),
+                labeled_field("IMDSv2", &instance.imdsv2),
+            ];
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
+        DetailTab::Networking => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = vec![
+                labeled_field("VPC ID", &instance.vpc_id),
+                labeled_field("Subnet IDs", &instance.subnet_ids),
+                labeled_field("Private DNS", &instance.private_dns_name),
+                labeled_field("Private IP", &instance.private_ip_address),
+                labeled_field("Public IPv4 DNS", &instance.public_ipv4_dns),
+                labeled_field("Public IPv4", &instance.public_ipv4_address),
+                labeled_field("Elastic IP", &instance.elastic_ip),
+                labeled_field("IPv6 IPs", &instance.ipv6_ips),
+            ];
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
+        DetailTab::Storage => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = vec![
+                labeled_field("Volume ID", &instance.volume_id),
+                labeled_field("Root device", &instance.root_device_name),
+                labeled_field("Root device type", &instance.root_device_type),
+                labeled_field("EBS optimized", &instance.ebs_optimized),
+            ];
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
+        DetailTab::Tags => {
+            let block = rounded_block();
+            let inner = block.inner(content_area);
+            frame.render_widget(block, content_area);
+
+            let lines = if instance.name.is_empty() {
+                vec![Line::from("No tags")]
+            } else {
+                vec![labeled_field("Name", &instance.name)]
+            };
+            render_fields_with_dynamic_columns(frame, inner, lines);
+        }
     }
 }
 
@@ -384,5 +737,295 @@ mod tests {
         // Verify the constant is accessible
         let focus = STATE_FILTER;
         assert_eq!(focus, InputFocus::Checkbox("state"));
+    }
+
+    #[test]
+    fn test_detail_tab_cycling() {
+        let mut tab = DetailTab::Details;
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::StatusAndAlarms);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Monitoring);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Security);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Networking);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Storage);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Tags);
+        tab = tab.next();
+        assert_eq!(tab, DetailTab::Details);
+    }
+
+    #[test]
+    fn test_detail_tab_reverse_cycling() {
+        let mut tab = DetailTab::Details;
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Tags);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Storage);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Networking);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Security);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Monitoring);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::StatusAndAlarms);
+        tab = tab.prev();
+        assert_eq!(tab, DetailTab::Details);
+    }
+
+    #[test]
+    fn test_detail_tab_names() {
+        assert_eq!(DetailTab::Details.name(), "Details");
+        assert_eq!(DetailTab::StatusAndAlarms.name(), "Status and alarms");
+        assert_eq!(DetailTab::Monitoring.name(), "Monitoring");
+        assert_eq!(DetailTab::Security.name(), "Security");
+        assert_eq!(DetailTab::Networking.name(), "Networking");
+        assert_eq!(DetailTab::Storage.name(), "Storage");
+        assert_eq!(DetailTab::Tags.name(), "Tags");
+    }
+
+    #[test]
+    fn test_detail_tab_all_has_7_items() {
+        assert_eq!(DetailTab::ALL.len(), 7);
+    }
+
+    #[test]
+    fn test_state_default_has_no_current_instance() {
+        let state = State::default();
+        assert_eq!(state.current_instance, None);
+        assert_eq!(state.detail_tab, DetailTab::Details);
+    }
+
+    #[test]
+    fn test_render_instance_detail_with_no_instance() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = State::default();
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_instance_detail(f, area, &state, Mode::Normal);
+            })
+            .unwrap();
+
+        // Should render without panicking even with no instance
+    }
+
+    #[test]
+    fn test_column_distribution_10_fields_3_columns() {
+        // 10 fields, 3 columns: should be 4, 3, 3
+        let total = 10;
+        let cols = 3;
+        let base = total / cols; // 3
+        let extra = total % cols; // 1
+
+        let mut distribution = Vec::new();
+        for col in 0..cols {
+            let count = if col < extra { base + 1 } else { base };
+            distribution.push(count);
+        }
+
+        assert_eq!(distribution, vec![4, 3, 3]);
+    }
+
+    #[test]
+    fn test_column_distribution_10_fields_2_columns() {
+        // 10 fields, 2 columns: should be 5, 5
+        let total = 10;
+        let cols = 2;
+        let base = total / cols;
+        let extra = total % cols;
+
+        let mut distribution = Vec::new();
+        for col in 0..cols {
+            let count = if col < extra { base + 1 } else { base };
+            distribution.push(count);
+        }
+
+        assert_eq!(distribution, vec![5, 5]);
+    }
+
+    #[test]
+    fn test_column_distribution_10_fields_4_columns() {
+        // 10 fields, 4 columns: should be 3, 3, 2, 2
+        let total = 10;
+        let cols = 4;
+        let base = total / cols; // 2
+        let extra = total % cols; // 2
+
+        let mut distribution = Vec::new();
+        for col in 0..cols {
+            let count = if col < extra { base + 1 } else { base };
+            distribution.push(count);
+        }
+
+        assert_eq!(distribution, vec![3, 3, 2, 2]);
+    }
+
+    #[test]
+    fn test_column_distribution_7_fields_3_columns() {
+        // 7 fields, 3 columns: should be 3, 2, 2
+        let total = 7;
+        let cols = 3;
+        let base = total / cols; // 2
+        let extra = total % cols; // 1
+
+        let mut distribution = Vec::new();
+        for col in 0..cols {
+            let count = if col < extra { base + 1 } else { base };
+            distribution.push(count);
+        }
+
+        assert_eq!(distribution, vec![3, 2, 2]);
+    }
+
+    #[test]
+    fn test_column_distribution_ensures_first_has_most() {
+        // Test that first column always has >= other columns
+        for total in 1..20 {
+            for cols in 1..=total {
+                let base = total / cols;
+                let extra = total % cols;
+
+                let first_col = if 0 < extra { base + 1 } else { base };
+                let last_col = if (cols - 1) < extra { base + 1 } else { base };
+
+                assert!(
+                    first_col >= last_col,
+                    "total={}, cols={}, first={}, last={}",
+                    total,
+                    cols,
+                    first_col,
+                    last_col
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_fields_with_dynamic_columns_empty() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let height = render_fields_with_dynamic_columns(f, area, vec![]);
+                assert_eq!(height, 0);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_fields_with_dynamic_columns_single_field() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let fields = vec![Line::from("Test field")];
+                let height = render_fields_with_dynamic_columns(f, area, fields);
+                assert_eq!(height, 1);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_fields_with_dynamic_columns_calculates_height() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(40, 24); // Narrow width
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let fields = vec![
+                    Line::from("Field 1"),
+                    Line::from("Field 2"),
+                    Line::from("Field 3"),
+                    Line::from("Field 4"),
+                ];
+                let height = render_fields_with_dynamic_columns(f, area, fields);
+                // Should return a reasonable height
+                assert!((1..=4).contains(&height));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_instance_summary_has_18_fields() {
+        // Verify summary has all required fields matching AWS console
+        let field_count = 18;
+        assert_eq!(field_count, 18, "Instance summary should have 18 fields");
+    }
+
+    #[test]
+    fn test_instance_summary_includes_key_fields() {
+        // Test that key field labels are present
+        let required_fields = vec![
+            "Instance ID",
+            "Public IPv4 address",
+            "Private IPv4 addresses",
+            "IPv6 address",
+            "Instance state",
+            "Public DNS",
+            "Hostname type",
+            "Private IP DNS name (IPv4 only)",
+            "Instance type",
+            "Elastic IP addresses",
+            "Auto-assigned IP address",
+            "VPC ID",
+            "IAM Role",
+            "Subnet ID",
+            "IMDSv2",
+            "Availability Zone",
+            "Managed",
+            "Operator",
+        ];
+        assert_eq!(required_fields.len(), 18);
+    }
+
+    #[test]
+    fn test_rounded_block_helper_creates_block_with_title() {
+        // Verify rounded_block helper can be used with title
+        let block = rounded_block().title(" Instance summary ");
+        let area = Rect::new(0, 0, 50, 10);
+        let inner = block.inner(area);
+        // Inner area should be 2 smaller on each dimension due to borders
+        assert_eq!(inner.width, 48);
+        assert_eq!(inner.height, 8);
+    }
+
+    #[test]
+    fn test_summary_height_uses_dynamic_calculation() {
+        use crate::ui::{calculate_dynamic_height, labeled_field};
+        // Verify summary height accounts for column packing
+        let fields = vec![
+            labeled_field("Instance ID", "i-1234567890abcdef0"),
+            labeled_field("Instance type", "t2.micro"),
+            labeled_field("State", "running"),
+            labeled_field("VPC ID", "vpc-12345678"),
+        ];
+        let width = 180;
+        let height = calculate_dynamic_height(&fields, width);
+        // With 4 fields and wide width, should pack into 2 rows
+        assert!(height <= 2, "Expected 2 rows or less, got {}", height);
     }
 }

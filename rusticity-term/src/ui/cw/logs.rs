@@ -8,7 +8,10 @@ use crate::cw::insights::{DateRangeType, TimeUnit};
 use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
-use crate::ui::{filter_area, get_cursor, labeled_field, render_tabs};
+use crate::ui::{
+    calculate_dynamic_height, filter_area, get_cursor, labeled_field,
+    render_fields_with_dynamic_columns, render_tabs,
+};
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::{LogEvent, LogGroup, LogStream};
 
@@ -330,10 +333,55 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         Style::default()
     };
 
+    let detail_height = if let Some(group) = selected_log_group(app) {
+        let arn = format!(
+            "arn:aws:logs:{}:{}:log-group:{}:*",
+            app.config.region, app.config.account_id, group.name
+        );
+        let creation_time = group
+            .creation_time
+            .map(|t| format_timestamp(&t))
+            .unwrap_or_else(|| "-".to_string());
+        let stored_bytes = format_bytes(group.stored_bytes.unwrap_or(0));
+
+        let lines = vec![
+            labeled_field("Log class", "Standard"),
+            labeled_field("Retention", "Never expire"),
+            labeled_field("Stored bytes", stored_bytes),
+            labeled_field("Creation time", creation_time),
+            labeled_field("ARN", arn),
+            Line::from(vec![
+                Span::styled(
+                    "Metric filters: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("0"),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Subscription filters: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("0"),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "KMS key ID: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("-"),
+            ]),
+        ];
+
+        calculate_dynamic_height(&lines, area.width.saturating_sub(2)) + 2
+    } else {
+        3
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10),
+            Constraint::Length(detail_height),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
@@ -388,7 +436,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
             ]),
         ];
 
-        frame.render_widget(Paragraph::new(lines), inner);
+        render_fields_with_dynamic_columns(frame, inner, lines);
     }
 
     render_tab_menu(frame, app, chunks[1]);
@@ -419,7 +467,7 @@ fn render_tab_placeholder(frame: &mut Frame, app: &App, area: Rect, border_style
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(paragraph, area);
 }
-fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, _border_style: Style) {
+fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, border_style: Style) {
     frame.render_widget(Clear, area);
 
     let chunks = Layout::default()
@@ -513,7 +561,8 @@ fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, _border_st
         get_expanded_content: Some(Box::new(|stream: &LogStream| {
             expanded_from_columns(&columns, stream)
         })),
-        is_active: app.log_groups_state.input_focus != InputFocus::Filter,
+        is_active: border_style.fg == Some(Color::Green)
+            && app.log_groups_state.input_focus != InputFocus::Filter,
     };
 
     render_table(frame, config);

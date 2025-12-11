@@ -452,4 +452,37 @@ mod tests {
         let action = handle_key(key, Mode::SessionPicker);
         assert_eq!(action, Some(Action::Refresh));
     }
+
+    #[test]
+    fn test_p_opens_column_selector() {
+        let key = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::Normal);
+        assert_eq!(
+            action,
+            Some(Action::OpenColumnSelector),
+            "p should open column selector (preferences)"
+        );
+    }
+
+    #[test]
+    fn test_ctrl_p_copies_to_clipboard() {
+        let key = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        let action = handle_key(key, Mode::Normal);
+        assert_eq!(
+            action,
+            Some(Action::CopyToClipboard),
+            "Ctrl+P should copy screen to clipboard (print)"
+        );
+    }
+
+    #[test]
+    fn test_y_yanks_selected_item() {
+        let key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::Normal);
+        assert_eq!(
+            action,
+            Some(Action::Yank),
+            "y should yank (copy) selected item"
+        );
+    }
 }

@@ -17,8 +17,8 @@ use crate::ui::table::{
     expanded_from_columns, plain_expanded_content, render_table, Column as TableColumn, TableConfig,
 };
 use crate::ui::{
-    block_height, format_expansion_text, labeled_field, render_tabs, rounded_block, section_header,
-    vertical,
+    calculate_dynamic_height, format_expansion_text, labeled_field,
+    render_fields_with_dynamic_columns, render_tabs, rounded_block, section_header, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -457,7 +457,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     let overview_height = if overview_lines.is_empty() {
         0
     } else {
-        overview_lines.len() as u16 + 2
+        calculate_dynamic_height(&overview_lines, area.width.saturating_sub(4)) + 2
     };
 
     let chunks = vertical(
@@ -479,7 +479,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let overview_inner = overview_block.inner(chunks[0]);
         frame.render_widget(overview_block, chunks[0]);
-        frame.render_widget(Paragraph::new(overview_lines), overview_inner);
+        render_fields_with_dynamic_columns(frame, overview_inner, overview_lines);
     }
 
     // Tabs
@@ -534,8 +534,18 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let chunks_content = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(block_height(&code_lines)),
-                        Constraint::Length(block_height(&runtime_lines)),
+                        Constraint::Length(
+                            calculate_dynamic_height(
+                                &code_lines,
+                                chunks[2].width.saturating_sub(4),
+                            ) + 2,
+                        ),
+                        Constraint::Length(
+                            calculate_dynamic_height(
+                                &runtime_lines,
+                                chunks[2].width.saturating_sub(4),
+                            ) + 2,
+                        ),
                         Constraint::Min(0), // Layers
                     ])
                     .split(chunks[2]);
@@ -549,7 +559,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
 
-                frame.render_widget(Paragraph::new(code_lines), code_inner);
+                render_fields_with_dynamic_columns(frame, code_inner, code_lines);
 
                 // Runtime settings section
                 let runtime_block = Block::default()
@@ -560,7 +570,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
 
-                frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
+                render_fields_with_dynamic_columns(frame, runtime_inner, runtime_lines);
 
                 // Layers section
                 let layer_refs: Vec<&Layer> = func.layers.iter().collect();
@@ -638,7 +648,12 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 let config_chunks = vertical(
                     [
-                        Constraint::Length(block_height(&config_lines)),
+                        Constraint::Length(
+                            calculate_dynamic_height(
+                                &config_lines,
+                                chunks[2].width.saturating_sub(4),
+                            ) + 2,
+                        ),
                         Constraint::Min(0),
                     ],
                     chunks[2],
@@ -653,7 +668,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let config_inner = config_block.inner(config_chunks[0]);
                 frame.render_widget(config_block, config_chunks[0]);
 
-                frame.render_widget(Paragraph::new(config_lines), config_inner);
+                render_fields_with_dynamic_columns(frame, config_inner, config_lines);
             }
         }
     } else if app.lambda_state.detail_tab == DetailTab::Versions {
@@ -976,10 +991,11 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
     let config_height = if config_lines.is_empty() {
         0
     } else {
-        config_lines.len() as u16 + 2
+        calculate_dynamic_height(&config_lines, area.width.saturating_sub(4)) + 2
     };
 
-    let overview_height = overview_lines.len() as u16 + 2; // +2 for borders
+    let overview_height =
+        calculate_dynamic_height(&overview_lines, area.width.saturating_sub(4)) + 2;
 
     let chunks = vertical(
         [
@@ -1016,7 +1032,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let overview_inner = overview_block.inner(chunks[0]);
                     frame.render_widget(overview_block, chunks[0]);
 
-                    frame.render_widget(Paragraph::new(overview_lines), overview_inner);
+                    render_fields_with_dynamic_columns(frame, overview_inner, overview_lines);
                 }
             }
         }
@@ -1031,7 +1047,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let config_inner = config_block.inner(chunks[1]);
         frame.render_widget(config_block, chunks[1]);
-        frame.render_widget(Paragraph::new(config_lines), config_inner);
+        render_fields_with_dynamic_columns(frame, config_inner, config_lines);
     }
 }
 
@@ -1068,7 +1084,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
     let overview_height = if overview_lines.is_empty() {
         0
     } else {
-        overview_lines.len() as u16 + 2
+        calculate_dynamic_height(&overview_lines, area.width.saturating_sub(4)) + 2
     };
 
     let chunks = vertical(
@@ -1090,7 +1106,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let overview_inner = overview_block.inner(chunks[0]);
         frame.render_widget(overview_block, chunks[0]);
-        frame.render_widget(Paragraph::new(overview_lines), overview_inner);
+        render_fields_with_dynamic_columns(frame, overview_inner, overview_lines);
     }
 
     // Tabs - only Code, Monitor, and Configuration
@@ -1132,8 +1148,18 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let chunks_content = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(block_height(&code_lines)),
-                        Constraint::Length(block_height(&runtime_lines)),
+                        Constraint::Length(
+                            calculate_dynamic_height(
+                                &code_lines,
+                                chunks[2].width.saturating_sub(4),
+                            ) + 2,
+                        ),
+                        Constraint::Length(
+                            calculate_dynamic_height(
+                                &runtime_lines,
+                                chunks[2].width.saturating_sub(4),
+                            ) + 2,
+                        ),
                         Constraint::Min(0),
                     ])
                     .split(chunks[2]);
@@ -1147,7 +1173,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let code_inner = code_block.inner(chunks_content[0]);
                 frame.render_widget(code_block, chunks_content[0]);
 
-                frame.render_widget(Paragraph::new(code_lines), code_inner);
+                render_fields_with_dynamic_columns(frame, code_inner, code_lines);
 
                 // Runtime settings section
                 let runtime_block = Block::default()
@@ -1158,7 +1184,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 let runtime_inner = runtime_block.inner(chunks_content[1]);
                 frame.render_widget(runtime_block, chunks_content[1]);
 
-                frame.render_widget(Paragraph::new(runtime_lines), runtime_inner);
+                render_fields_with_dynamic_columns(frame, runtime_inner, runtime_lines);
 
                 // Layers section (empty table)
                 let layers: Vec<Layer> = vec![];
@@ -1238,7 +1264,12 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let chunks_content = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
-                            Constraint::Length(block_height(&config_lines)),
+                            Constraint::Length(
+                                calculate_dynamic_height(
+                                    &config_lines,
+                                    chunks[2].width.saturating_sub(4),
+                                ) + 2,
+                            ),
                             Constraint::Length(3), // Filter
                             Constraint::Min(0),    // Aliases table
                         ])
@@ -1253,7 +1284,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let config_inner = config_block.inner(chunks_content[0]);
                     frame.render_widget(config_block, chunks_content[0]);
 
-                    frame.render_widget(Paragraph::new(config_lines), config_inner);
+                    render_fields_with_dynamic_columns(frame, config_inner, config_lines);
 
                     // Filter for aliases
                     let page_size = app.lambda_state.alias_table.page_size.value();
@@ -2396,5 +2427,50 @@ mod tests {
             VersionDetailTab::Monitor
         );
         assert_eq!(VersionDetailTab::Monitor.prev(), VersionDetailTab::Code);
+    }
+
+    #[test]
+    fn test_rounded_block_helper_usage() {
+        // Verify rounded_block helper creates proper block structure
+        let block = rounded_block().title(" Function overview ");
+        let area = Rect::new(0, 0, 100, 20);
+        let inner = block.inner(area);
+        assert_eq!(inner.width, 98); // 2 less for borders
+        assert_eq!(inner.height, 18); // 2 less for borders
+    }
+
+    #[test]
+    fn test_overview_height_uses_dynamic_calculation() {
+        use crate::ui::labeled_field;
+        // Verify height is calculated based on column layout, not just field count
+        let fields = vec![
+            labeled_field("Name", "test-function"),
+            labeled_field("Runtime", "python3.11"),
+            labeled_field("Handler", "lambda_function.lambda_handler"),
+            labeled_field("Memory", "128 MB"),
+        ];
+        let width = 200; // Wide enough for 2 columns
+        let height = calculate_dynamic_height(&fields, width);
+        // With 4 fields and wide width, should fit in 2 rows (2 columns)
+        assert!(height <= 2, "Expected 2 rows or less, got {}", height);
+    }
+
+    #[test]
+    fn test_code_properties_uses_dynamic_height() {
+        use crate::ui::labeled_field;
+        // Verify Code properties and Runtime settings use dynamic height
+        let code_lines = vec![
+            labeled_field("Package size", "17.86 MB"),
+            labeled_field("SHA256 hash", "abc123"),
+            labeled_field("Last modified", "2025-12-11"),
+        ];
+        let width = 200;
+        let height = calculate_dynamic_height(&code_lines, width);
+        // With 3 fields and wide width, should pack into 2 rows or less
+        assert!(
+            height <= 2,
+            "Expected 2 rows or less for code properties, got {}",
+            height
+        );
     }
 }

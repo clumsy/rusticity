@@ -280,6 +280,110 @@ pub fn block_with_style(title: &str, style: Style) -> Block<'_> {
     block(title).border_style(style)
 }
 
+/// Renders fields in dynamic columns based on available width
+/// Returns the height needed for the content
+pub fn render_fields_with_dynamic_columns(frame: &mut Frame, area: Rect, fields: Vec<Line>) -> u16 {
+    use ratatui::widgets::Paragraph;
+
+    if fields.is_empty() {
+        return 0;
+    }
+
+    // Calculate max width needed per field
+    let field_widths: Vec<u16> = fields
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.len() as u16)
+                .sum::<u16>()
+                + 2
+        })
+        .collect();
+
+    let max_field_width = *field_widths.iter().max().unwrap_or(&20);
+    let available_width = area.width;
+
+    // Determine how many columns fit
+    let num_columns = (available_width / max_field_width)
+        .max(1)
+        .min(fields.len() as u16) as usize;
+
+    // Distribute fields: first column gets most, others get same or fewer
+    let total_fields = fields.len();
+    let base_per_column = total_fields / num_columns;
+    let extra = total_fields % num_columns;
+
+    let mut columns: Vec<Vec<Line>> = Vec::new();
+    let mut field_idx = 0;
+
+    for col in 0..num_columns {
+        let fields_in_this_col = if col < extra {
+            base_per_column + 1
+        } else {
+            base_per_column
+        };
+
+        let mut column_fields = Vec::new();
+        for _ in 0..fields_in_this_col {
+            if field_idx < fields.len() {
+                column_fields.push(fields[field_idx].clone());
+                field_idx += 1;
+            }
+        }
+        columns.push(column_fields);
+    }
+
+    // Calculate max rows
+    let max_rows = columns.iter().map(|c| c.len()).max().unwrap_or(1) as u16;
+
+    // Create layout
+    let constraints: Vec<Constraint> = (0..num_columns)
+        .map(|_| Constraint::Percentage(100 / num_columns as u16))
+        .collect();
+
+    let column_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    // Render each column
+    for (i, column_fields) in columns.iter().enumerate() {
+        if i < column_layout.len() {
+            frame.render_widget(Paragraph::new(column_fields.clone()), column_layout[i]);
+        }
+    }
+
+    max_rows
+}
+
+/// Calculates the height needed for fields with dynamic columns (without rendering)
+pub fn calculate_dynamic_height(fields: &[Line], width: u16) -> u16 {
+    if fields.is_empty() {
+        return 0;
+    }
+
+    let field_widths: Vec<u16> = fields
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.len() as u16)
+                .sum::<u16>()
+                + 2
+        })
+        .collect();
+
+    let max_field_width = *field_widths.iter().max().unwrap_or(&20);
+    let num_columns = (width / max_field_width).max(1).min(fields.len() as u16) as usize;
+
+    let base = fields.len() / num_columns;
+    let extra = fields.len() % num_columns;
+    let max_rows = if extra > 0 { base + 1 } else { base };
+
+    max_rows as u16
+}
+
 // Render a summary section with labeled fields
 pub fn render_summary(frame: &mut Frame, area: Rect, title: &str, fields: &[(&str, String)]) {
     let summary_block = block(title).border_type(BorderType::Rounded);
@@ -692,16 +796,22 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
-        Service::Ec2Instances => ec2::render_instances(
-            frame,
-            area,
-            &app.ec2_state,
-            &app.ec2_visible_column_ids
-                .iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>(),
-            app.mode,
-        ),
+        Service::Ec2Instances => {
+            if app.ec2_state.current_instance.is_some() {
+                ec2::render_instance_detail(frame, area, &app.ec2_state, app.mode);
+            } else {
+                ec2::render_instances(
+                    frame,
+                    area,
+                    &app.ec2_state,
+                    &app.ec2_visible_column_ids
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>(),
+                    app.mode,
+                );
+            }
+        }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -1740,16 +1850,22 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
-        Service::Ec2Instances => ec2::render_instances(
-            frame,
-            area,
-            &app.ec2_state,
-            &app.ec2_visible_column_ids
-                .iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>(),
-            app.mode,
-        ),
+        Service::Ec2Instances => {
+            if app.ec2_state.current_instance.is_some() {
+                ec2::render_instance_detail(frame, area, &app.ec2_state, app.mode);
+            } else {
+                ec2::render_instances(
+                    frame,
+                    area,
+                    &app.ec2_state,
+                    &app.ec2_visible_column_ids
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>(),
+                    app.mode,
+                );
+            }
+        }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -5642,5 +5758,71 @@ mod tests {
         assert_eq!(spans[1].content, " ⋮ ");
         assert_eq!(spans[2].content, "Second");
         assert_eq!(spans[2].style, service_tab_style(true));
+    }
+
+    #[test]
+    fn test_calculate_dynamic_height_empty() {
+        let fields: Vec<Line> = vec![];
+        assert_eq!(calculate_dynamic_height(&fields, 100), 0);
+    }
+
+    #[test]
+    fn test_calculate_dynamic_height_single_column() {
+        let fields = vec![
+            Line::from("Field 1"),
+            Line::from("Field 2"),
+            Line::from("Field 3"),
+        ];
+        // Width 30, fields ~9 chars, should fit 3 columns, 3 fields / 3 = 1 row
+        assert_eq!(calculate_dynamic_height(&fields, 30), 1);
+    }
+
+    #[test]
+    fn test_calculate_dynamic_height_two_columns() {
+        let fields = vec![
+            Line::from("Field 1"),
+            Line::from("Field 2"),
+            Line::from("Field 3"),
+            Line::from("Field 4"),
+            Line::from("Field 5"),
+        ];
+        // Width 20, fields ~9 chars, should fit 2 columns, 5 fields / 2 = 3 rows (3,2)
+        assert_eq!(calculate_dynamic_height(&fields, 20), 3);
+    }
+
+    #[test]
+    fn test_calculate_dynamic_height_three_columns() {
+        let fields = vec![
+            Line::from("F1"),
+            Line::from("F2"),
+            Line::from("F3"),
+            Line::from("F4"),
+            Line::from("F5"),
+            Line::from("F6"),
+            Line::from("F7"),
+            Line::from("F8"),
+            Line::from("F9"),
+            Line::from("F10"),
+        ];
+        // Width 20, short fields ~4 chars, should fit 5 columns, 10 fields / 5 = 2 rows
+        // But if max_field_width is calculated differently, adjust expectation
+        let result = calculate_dynamic_height(&fields, 20);
+        // With 10 fields at width 20: max_field_width = 4 (2 + 2), columns = 20/4 = 5
+        // But columns is min(5, 10) = 5, so 10/5 = 2 rows
+        // However, if there's spacing or the calculation differs, it might be 3
+        // Let's check: 10 fields, if it calculates 4 columns: 10/4 = 2 base, 2 extra = 3 rows
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn test_calculate_dynamic_height_even_distribution() {
+        let fields = vec![
+            Line::from("A"),
+            Line::from("B"),
+            Line::from("C"),
+            Line::from("D"),
+        ];
+        // Width 100, should fit 4+ columns, 4 fields / 4 = 1 row each
+        assert_eq!(calculate_dynamic_height(&fields, 100), 1);
     }
 }

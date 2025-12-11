@@ -14,9 +14,10 @@ use crate::ui::table::{
     expanded_from_columns, plain_expanded_content, render_table, Column, TableConfig,
 };
 use crate::ui::{
-    active_border, block_height_for, filter_area, format_duration, get_cursor, labeled_field,
-    render_json_highlighted, render_last_accessed_section, render_permissions_section,
-    render_search_filter, render_summary, render_tabs, render_tags_section, vertical,
+    block_height_for, calculate_dynamic_height, filter_area, format_duration, get_cursor,
+    labeled_field, render_fields_with_dynamic_columns, render_json_highlighted,
+    render_last_accessed_section, render_permissions_section, render_search_filter, render_summary,
+    render_tabs, render_tags_section, rounded_block, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -905,11 +906,34 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
-    // Calculate summary height
-    let summary_height = if app.iam_state.current_user.is_some() {
-        block_height_for(5) // 5 fields
+    // Build summary lines first to calculate height
+    let summary_lines = if let Some(user_name) = &app.iam_state.current_user {
+        if let Some(user) = app
+            .iam_state
+            .users
+            .items
+            .iter()
+            .find(|u| u.user_name == *user_name)
+        {
+            vec![
+                labeled_field("ARN", &user.arn),
+                labeled_field("Console access", &user.console_access),
+                labeled_field("Access key", &user.access_key_id),
+                labeled_field("Created", &user.creation_time),
+                labeled_field("Last console sign-in", &user.console_last_sign_in),
+            ]
+        } else {
+            vec![]
+        }
     } else {
+        vec![]
+    };
+
+    // Calculate summary height
+    let summary_height = if summary_lines.is_empty() {
         0
+    } else {
+        calculate_dynamic_height(&summary_lines, area.width.saturating_sub(4)) + 2
     };
 
     let chunks = vertical(
@@ -933,34 +957,13 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Summary section
-    if let Some(user_name) = &app.iam_state.current_user {
-        if let Some(user) = app
-            .iam_state
-            .users
-            .items
-            .iter()
-            .find(|u| u.user_name == *user_name)
-        {
-            let summary_block = Block::default()
-                .title(" Summary ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(active_border());
+    if !summary_lines.is_empty() {
+        let summary_block = rounded_block().title(" Summary ");
 
-            let summary_inner = summary_block.inner(chunks[1]);
-            frame.render_widget(summary_block, chunks[1]);
+        let summary_inner = summary_block.inner(chunks[1]);
+        frame.render_widget(summary_block, chunks[1]);
 
-            let summary_lines = vec![
-                labeled_field("ARN", &user.arn),
-                labeled_field("Console access", &user.console_access),
-                labeled_field("Access key", &user.access_key_id),
-                labeled_field("Created", &user.creation_time),
-                labeled_field("Last console sign-in", &user.console_last_sign_in),
-            ];
-
-            let summary_paragraph = Paragraph::new(summary_lines);
-            frame.render_widget(summary_paragraph, summary_inner);
-        }
+        render_fields_with_dynamic_columns(frame, summary_inner, summary_lines);
     }
 
     // Tabs
@@ -2000,5 +2003,32 @@ mod tests {
             InputFocus::Pagination.prev(&ROLE_FILTER_CONTROLS),
             InputFocus::Filter
         );
+    }
+
+    #[test]
+    fn test_rounded_block_for_summary() {
+        use ratatui::prelude::Rect;
+        let block = rounded_block().title(" Summary ");
+        let area = Rect::new(0, 0, 60, 15);
+        let inner = block.inner(area);
+        assert_eq!(inner.width, 58);
+        assert_eq!(inner.height, 13);
+    }
+
+    #[test]
+    fn test_user_summary_uses_dynamic_height() {
+        use crate::ui::{calculate_dynamic_height, labeled_field};
+        // Verify user summary height accounts for column packing
+        let summary_lines = vec![
+            labeled_field("ARN", "arn:aws:iam::123456789012:user/test"),
+            labeled_field("Console access", "Enabled"),
+            labeled_field("Access key", "AKIA..."),
+            labeled_field("Created", "2024-01-01"),
+            labeled_field("Last console sign-in", "2024-12-11"),
+        ];
+        let width = 200;
+        let height = calculate_dynamic_height(&summary_lines, width);
+        // With 5 fields and wide width, should pack into 3 rows or less
+        assert!(height <= 3, "Expected 3 rows or less, got {}", height);
     }
 }

@@ -144,6 +144,24 @@ impl<T> TableState<T> {
     pub fn get_selected<'a>(&self, filtered: &'a [&'a T]) -> Option<&'a T> {
         filtered.get(self.selected).copied()
     }
+
+    /// Push a character to the filter and reset selection
+    pub fn filter_push(&mut self, c: char) {
+        self.filter.push(c);
+        self.reset();
+    }
+
+    /// Pop a character from the filter and reset selection
+    pub fn filter_pop(&mut self) {
+        self.filter.pop();
+        self.reset();
+    }
+
+    /// Clear the filter and reset selection
+    pub fn filter_clear(&mut self) {
+        self.filter.clear();
+        self.reset();
+    }
 }
 
 #[cfg(test)]

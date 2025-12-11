@@ -44,6 +44,7 @@ pub use crate::ui::cw::logs::{
     DetailTab as CwLogsDetailTab, EventFilterFocus, FILTER_CONTROLS as LOG_FILTER_CONTROLS,
 };
 use crate::ui::ec2;
+use crate::ui::ec2::filtered_ec2_instances;
 pub use crate::ui::ec2::{
     State as Ec2State, StateFilter as Ec2StateFilter, STATE_FILTER as EC2_STATE_FILTER,
 };
@@ -417,6 +418,80 @@ impl App {
             Some(&mut self.log_groups_state.stream_filter)
         } else {
             None
+        }
+    }
+
+    fn apply_filter_operation<F>(&mut self, op: F)
+    where
+        F: FnOnce(&mut String),
+    {
+        if let Some(filter) = self.get_active_filter_mut() {
+            op(filter);
+            // Automatically reset selection for all services
+            if self.current_service == Service::CloudWatchAlarms {
+                self.alarms_state.table.reset();
+            } else if self.current_service == Service::Ec2Instances {
+                self.ec2_state.table.reset();
+            } else if self.current_service == Service::S3Buckets {
+                if self.s3_state.current_bucket.is_some() {
+                    self.s3_state.selected_object = 0;
+                } else {
+                    self.s3_state.buckets.reset();
+                }
+            } else if self.current_service == Service::EcrRepositories {
+                if self.ecr_state.current_repository.is_some() {
+                    self.ecr_state.images.reset();
+                } else {
+                    self.ecr_state.repositories.reset();
+                }
+            } else if self.current_service == Service::SqsQueues {
+                self.sqs_state.queues.reset();
+            } else if self.current_service == Service::LambdaFunctions {
+                if self.lambda_state.current_version.is_some()
+                    || self.lambda_state.current_function.is_some()
+                {
+                    self.lambda_state.version_table.reset();
+                    self.lambda_state.alias_table.reset();
+                } else {
+                    self.lambda_state.table.reset();
+                }
+            } else if self.current_service == Service::LambdaApplications {
+                if self.lambda_application_state.current_application.is_some() {
+                    self.lambda_application_state.deployments.reset();
+                    self.lambda_application_state.resources.reset();
+                } else {
+                    self.lambda_application_state.table.reset();
+                }
+            } else if self.current_service == Service::CloudFormationStacks {
+                self.cfn_state.table.reset();
+            } else if self.current_service == Service::IamUsers {
+                if self.iam_state.current_user.is_some() {
+                    self.iam_state.user_tags.reset();
+                    self.iam_state.policies.reset();
+                } else {
+                    self.iam_state.users.reset();
+                }
+            } else if self.current_service == Service::IamRoles {
+                if self.iam_state.current_role.is_some() {
+                    self.iam_state.tags.reset();
+                    self.iam_state.policies.reset();
+                } else {
+                    self.iam_state.roles.reset();
+                }
+            } else if self.current_service == Service::IamUserGroups {
+                if self.iam_state.current_group.is_some() {
+                    self.iam_state.policies.reset();
+                    self.iam_state.group_users.reset();
+                } else {
+                    self.iam_state.groups.reset();
+                }
+            } else if self.current_service == Service::CloudWatchLogGroups {
+                if self.view_mode == ViewMode::List {
+                    self.log_groups_state.log_groups.reset();
+                } else if self.log_groups_state.detail_tab == DetailTab::LogStreams {
+                    self.log_groups_state.selected_stream = 0;
+                }
+            }
         }
     }
 
@@ -1174,9 +1249,7 @@ impl App {
                                 self.lambda_application_state.input_focus == InputFocus::Filter
                             };
                         if is_input_focused {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::CloudFormationStacks {
                         if self.cfn_state.current_stack.is_some()
@@ -1201,58 +1274,44 @@ impl App {
                                 self.cfn_state.resources.selected = 0;
                             }
                         } else if self.cfn_state.input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::EcrRepositories
                         && self.ecr_state.current_repository.is_none()
                     {
                         if self.ecr_state.input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::IamRoles
                         && self.iam_state.current_role.is_none()
                     {
                         if self.iam_state.role_input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.view_mode == ViewMode::PolicyView {
                         if self.iam_state.policy_input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::LambdaFunctions
                         && self.lambda_state.current_version.is_some()
                         && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
                     {
                         if self.lambda_state.alias_input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::LambdaFunctions
                         && self.lambda_state.current_function.is_some()
                         && self.lambda_state.detail_tab == LambdaDetailTab::Versions
                     {
                         if self.lambda_state.version_input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::LambdaFunctions
                         && self.lambda_state.current_function.is_some()
                         && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
                     {
                         if self.lambda_state.alias_input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::SqsQueues
                         && self.sqs_state.current_queue.is_some()
@@ -1263,12 +1322,10 @@ impl App {
                             || self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions)
                     {
                         if self.sqs_state.input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.push(c);
-                            }
+                            self.apply_filter_operation(|f| f.push(c));
                         }
-                    } else if let Some(filter) = self.get_active_filter_mut() {
-                        filter.push(c);
+                    } else {
+                        self.apply_filter_operation(|f| f.push(c));
                     }
                 } else if self.mode == Mode::EventFilterInput {
                     if self.log_groups_state.event_input_focus == EventFilterFocus::Filter {
@@ -1355,12 +1412,14 @@ impl App {
                                 self.cfn_state.resources.selected = 0;
                             }
                         } else if self.cfn_state.input_focus == InputFocus::Filter {
-                            if let Some(filter) = self.get_active_filter_mut() {
-                                filter.pop();
-                            }
+                            self.apply_filter_operation(|f| {
+                                f.pop();
+                            });
                         }
-                    } else if let Some(filter) = self.get_active_filter_mut() {
-                        filter.pop();
+                    } else {
+                        self.apply_filter_operation(|f| {
+                            f.pop();
+                        });
                     }
                 } else if self.mode == Mode::EventFilterInput {
                     if self.log_groups_state.event_input_focus == EventFilterFocus::Filter {
@@ -2358,6 +2417,10 @@ impl App {
                     } else if self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions {
                         self.sqs_state.subscriptions.loading = true;
                     }
+                } else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                {
+                    self.ec2_state.detail_tab = self.ec2_state.detail_tab.next();
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -2443,6 +2506,10 @@ impl App {
                         self.sqs_state.set_monitoring_scroll(0);
                         self.sqs_state.clear_metrics();
                     }
+                } else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                {
+                    self.ec2_state.detail_tab = self.ec2_state.detail_tab.prev();
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -3364,6 +3431,14 @@ impl App {
                         self.ecr_state.images.reset();
                     }
                 }
+                // EC2: go back from instance detail to list
+                else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                {
+                    self.ec2_state.current_instance = None;
+                    self.view_mode = ViewMode::List;
+                    self.update_current_tab_breadcrumb();
+                }
                 // SQS: go back from queue detail to list
                 else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
@@ -3853,10 +3928,17 @@ impl App {
             }
             Service::IamUserGroups => iam::console_url_groups(&self.config.region),
             Service::Ec2Instances => {
-                format!(
-                    "https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:",
-                    self.config.region, self.config.region
-                )
+                if let Some(instance_id) = &self.ec2_state.current_instance {
+                    format!(
+                        "https://{}.console.aws.amazon.com/ec2/home?region={}#InstanceDetails:instanceId={}",
+                        self.config.region, self.config.region, instance_id
+                    )
+                } else {
+                    format!(
+                        "https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:",
+                        self.config.region, self.config.region
+                    )
+                }
             }
         }
     }
@@ -6657,6 +6739,15 @@ impl App {
                         self.ecr_state.current_repository_uri = Some(repo_uri);
                         self.ecr_state.images.reset();
                         self.ecr_state.repositories.loading = true;
+                    }
+                }
+            } else if self.current_service == Service::Ec2Instances {
+                if self.ec2_state.current_instance.is_none() {
+                    let filtered_instances = filtered_ec2_instances(self);
+                    if let Some(instance) = self.ec2_state.table.get_selected(&filtered_instances) {
+                        self.ec2_state.current_instance = Some(instance.instance_id.clone());
+                        self.view_mode = ViewMode::Detail;
+                        self.update_current_tab_breadcrumb();
                     }
                 }
             } else if self.current_service == Service::SqsQueues {
@@ -10796,6 +10887,92 @@ mod region_latency_tests {
 
         app.handle_action(Action::FilterBackspace);
         assert_eq!(app.ecr_state.repositories.filter, "tes");
+    }
+
+    #[test]
+    fn test_ecr_filter_resets_selection() {
+        let mut app = test_app();
+        app.current_service = Service::EcrRepositories;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ecr_state.repositories.items = vec![
+            EcrRepository {
+                name: "repo1".to_string(),
+                uri: "uri1".to_string(),
+                created_at: "2023-01-01".to_string(),
+                tag_immutability: "MUTABLE".to_string(),
+                encryption_type: "AES256".to_string(),
+            },
+            EcrRepository {
+                name: "repo2".to_string(),
+                uri: "uri2".to_string(),
+                created_at: "2023-01-02".to_string(),
+                tag_immutability: "IMMUTABLE".to_string(),
+                encryption_type: "KMS".to_string(),
+            },
+            EcrRepository {
+                name: "repo3".to_string(),
+                uri: "uri3".to_string(),
+                created_at: "2023-01-03".to_string(),
+                tag_immutability: "MUTABLE".to_string(),
+                encryption_type: "AES256".to_string(),
+            },
+        ];
+
+        // Move selection to second item
+        app.ecr_state.repositories.selected = 2;
+        assert_eq!(app.ecr_state.repositories.selected, 2);
+
+        // Apply filter - selection should reset to 0
+        app.handle_action(Action::FilterInput('t'));
+        assert_eq!(app.ecr_state.repositories.filter, "t");
+        assert_eq!(app.ecr_state.repositories.selected, 0);
+
+        // Move selection again
+        app.ecr_state.repositories.selected = 1;
+
+        // Backspace filter - selection should reset to 0
+        app.handle_action(Action::FilterBackspace);
+        assert_eq!(app.ecr_state.repositories.filter, "");
+        assert_eq!(app.ecr_state.repositories.selected, 0);
+    }
+
+    #[test]
+    fn test_ecr_images_filter_resets_selection() {
+        let mut app = test_app();
+        app.current_service = Service::EcrRepositories;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ecr_state.current_repository = Some("test-repo".to_string());
+        app.ecr_state.images.items = vec![
+            EcrImage {
+                tag: "v1.0.0".to_string(),
+                artifact_type: "container".to_string(),
+                digest: "sha256:abc123".to_string(),
+                pushed_at: "2023-01-01".to_string(),
+                size_bytes: 1000,
+                uri: "uri1".to_string(),
+                last_pull_time: "".to_string(),
+            },
+            EcrImage {
+                tag: "v2.0.0".to_string(),
+                artifact_type: "container".to_string(),
+                digest: "sha256:def456".to_string(),
+                pushed_at: "2023-01-02".to_string(),
+                size_bytes: 2000,
+                uri: "uri2".to_string(),
+                last_pull_time: "".to_string(),
+            },
+        ];
+
+        // Move selection to second item
+        app.ecr_state.images.selected = 1;
+        assert_eq!(app.ecr_state.images.selected, 1);
+
+        // Apply filter - selection should reset to 0
+        app.handle_action(Action::FilterInput('v'));
+        assert_eq!(app.ecr_state.images.filter, "v");
+        assert_eq!(app.ecr_state.images.selected, 0);
     }
 
     #[test]

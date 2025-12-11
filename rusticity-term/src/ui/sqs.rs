@@ -20,7 +20,8 @@ use crate::ui::filter::{
 use crate::ui::monitoring::{render_monitoring_tab, MetricChart, MonitoringState};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
-    active_border, labeled_field, render_json_highlighted, render_pagination_text, render_tabs,
+    calculate_dynamic_height, labeled_field, render_fields_with_dynamic_columns,
+    render_json_highlighted, render_pagination_text, render_tabs, rounded_block,
 };
 use ratatui::widgets::*;
 
@@ -461,8 +462,8 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
     let queue_name = queue.map(|q| q.name.as_str()).unwrap_or("Unknown");
 
     let details_height = queue.map_or(3, |q| {
-        let field_count = render_details_fields(q).len();
-        field_count as u16 + 2 // fields + 2 borders
+        let lines = render_details_fields(q);
+        calculate_dynamic_height(&lines, area.width.saturating_sub(4)) + 2
     });
 
     let chunks = Layout::default()
@@ -485,7 +486,11 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
 
     // Details pane
     if let Some(q) = queue {
-        render_details_pane(frame, q, chunks[1]);
+        let lines = render_details_fields(q);
+        let block = rounded_block().title(" Details ");
+        let inner = block.inner(chunks[1]);
+        frame.render_widget(block, chunks[1]);
+        render_fields_with_dynamic_columns(frame, inner, lines);
     }
 
     // Tabs
@@ -695,23 +700,6 @@ fn render_details_fields(queue: &Queue) -> Vec<ratatui::text::Line<'static>> {
         labeled_field("FIFO throughput limit", &queue.fifo_throughput_limit),
         labeled_field("Redrive allow policy", &queue.redrive_allow_policy),
     ]
-}
-
-fn render_details_pane(frame: &mut ratatui::Frame, queue: &Queue, area: ratatui::prelude::Rect) {
-    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-
-    let block = Block::default()
-        .title(" Details ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(active_border());
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines = render_details_fields(queue);
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, inner);
 }
 
 fn render_queue_policies_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
@@ -1063,7 +1051,7 @@ fn render_dead_letter_queue_tab(
     app: &App,
     area: ratatui::prelude::Rect,
 ) {
-    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+    use ratatui::prelude::*;
 
     let queue = app
         .sqs_state
@@ -1072,18 +1060,8 @@ fn render_dead_letter_queue_tab(
         .iter()
         .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
 
-    let block = Block::default()
-        .title(" Dead-letter queue ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(active_border());
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     if let Some(q) = queue {
         if !q.redrive_policy.is_empty() {
-            // Parse RedrivePolicy JSON
             if let Ok(policy) = serde_json::from_str::<serde_json::Value>(&q.redrive_policy) {
                 let dlq_arn = policy
                     .get("deadLetterTargetArn")
@@ -1100,21 +1078,36 @@ fn render_dead_letter_queue_tab(
                     labeled_field("Maximum receives", &max_receives),
                 ];
 
-                let paragraph = Paragraph::new(lines);
-                frame.render_widget(paragraph, inner);
-            } else {
-                let paragraph = Paragraph::new("No dead-letter queue configured");
-                frame.render_widget(paragraph, inner);
+                let height = calculate_dynamic_height(&lines, area.width.saturating_sub(4)) + 2;
+
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(height), Constraint::Min(0)])
+                    .split(area);
+
+                let block = rounded_block().title(" Dead-letter queue ");
+                let inner = block.inner(chunks[0]);
+                frame.render_widget(block, chunks[0]);
+                render_fields_with_dynamic_columns(frame, inner, lines);
+                return;
             }
-        } else {
-            let paragraph = Paragraph::new("No dead-letter queue configured");
-            frame.render_widget(paragraph, inner);
         }
     }
+
+    // Fallback for no DLQ configured
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let block = rounded_block().title(" Dead-letter queue ");
+    let inner = block.inner(chunks[0]);
+    frame.render_widget(block, chunks[0]);
+    frame.render_widget(Paragraph::new("No dead-letter queue configured"), inner);
 }
 
 fn render_encryption_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
-    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+    use ratatui::prelude::*;
 
     let queue = app
         .sqs_state
@@ -1123,14 +1116,14 @@ fn render_encryption_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::p
         .iter()
         .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
 
-    let block = Block::default()
-        .title(" Encryption ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(active_border());
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let block = rounded_block().title(" Encryption ");
+    let inner = block.inner(chunks[0]);
+    frame.render_widget(block, chunks[0]);
 
     if let Some(q) = queue {
         let encryption_text = if q.encryption.is_empty() || q.encryption == "-" {
@@ -1139,8 +1132,7 @@ fn render_encryption_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::p
             format!("Server-side encryption is managed by {}", q.encryption)
         };
 
-        let paragraph = Paragraph::new(encryption_text);
-        frame.render_widget(paragraph, inner);
+        frame.render_widget(Paragraph::new(encryption_text), inner);
     }
 }
 
@@ -1149,7 +1141,7 @@ fn render_dlq_redrive_tasks_tab(
     app: &App,
     area: ratatui::prelude::Rect,
 ) {
-    use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+    use ratatui::prelude::*;
 
     let queue = app
         .sqs_state
@@ -1157,15 +1149,6 @@ fn render_dlq_redrive_tasks_tab(
         .items
         .iter()
         .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
-
-    let block = Block::default()
-        .title(" Dead-letter queue redrive status ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(active_border());
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     if let Some(q) = queue {
         let lines = vec![
@@ -1176,8 +1159,17 @@ fn render_dlq_redrive_tasks_tab(
             labeled_field("Redrive destination", &q.redrive_task_destination),
         ];
 
-        let paragraph = Paragraph::new(lines);
-        frame.render_widget(paragraph, inner);
+        let height = calculate_dynamic_height(&lines, area.width.saturating_sub(4)) + 2;
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(height), Constraint::Min(0)])
+            .split(area);
+
+        let block = rounded_block().title(" Dead-letter queue redrive status ");
+        let inner = block.inner(chunks[0]);
+        frame.render_widget(block, chunks[0]);
+        render_fields_with_dynamic_columns(frame, inner, lines);
     }
 }
 
@@ -1262,6 +1254,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::prelude::Rect;
 
     #[test]
     fn test_sqs_state_initialization() {
@@ -2218,5 +2211,15 @@ mod tests {
             .position(|t| *t == QueueDetailTab::Monitoring)
             .unwrap();
         assert_eq!(monitoring_index, 1); // Should be second, after QueuePolicies
+    }
+
+    #[test]
+    fn test_rounded_block_used_for_details_pane() {
+        // Verify rounded_block helper creates proper bordered block
+        let block = rounded_block().title(" Details ");
+        let area = Rect::new(0, 0, 80, 10);
+        let inner = block.inner(area);
+        assert_eq!(inner.width, 78); // 2 less for borders
+        assert_eq!(inner.height, 8); // 2 less for borders
     }
 }

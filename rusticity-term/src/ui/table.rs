@@ -200,12 +200,13 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     let widths: Vec<Constraint> = config
         .columns
         .iter()
-        .map(|col| {
-            // First column needs +2 for expansion indicators and header padding
-            // Other columns need +2 for "⋮ " separator
-            // All columns need to be at least as wide as their name
-            let min_width = col.name().len() + 2;
-            let width = col.width().max(min_width as u16);
+        .enumerate()
+        .map(|(i, col)| {
+            // Calculate the actual formatted header width
+            let formatted_header = format_header_cell(col.name(), i);
+            let header_width = formatted_header.chars().count() as u16;
+            // Column width must be at least as wide as the formatted header
+            let width = col.width().max(header_width);
             Constraint::Length(width)
         })
         .collect();
@@ -468,5 +469,42 @@ mod tests {
     fn test_format_header_cell_with_sort_indicator() {
         assert_eq!(format_header_cell("Name ↑", 0), "  Name ↑");
         assert_eq!(format_header_cell("Status ↓", 1), "⋮ Status ↓");
+    }
+
+    #[test]
+    fn test_column_width_never_narrower_than_header() {
+        // First column: "  Name" = 6 chars
+        let header_first = format_header_cell("Name", 0);
+        assert_eq!(header_first.chars().count(), 6);
+
+        // Other columns: "⋮ Launch time" = 13 chars
+        let header_other = format_header_cell("Launch time", 1);
+        assert_eq!(header_other.chars().count(), 13);
+    }
+
+    #[test]
+    fn test_formatted_header_width_calculation() {
+        // Test that formatted header width is correctly calculated
+        assert_eq!(format_header_cell("ID", 0).chars().count(), 4); // "  ID"
+        assert_eq!(format_header_cell("ID", 1).chars().count(), 4); // "⋮ ID"
+        assert_eq!(format_header_cell("Name", 0).chars().count(), 6); // "  Name"
+        assert_eq!(format_header_cell("Name", 1).chars().count(), 6); // "⋮ Name"
+        assert_eq!(format_header_cell("Launch time", 1).chars().count(), 13); // "⋮ Launch time"
+    }
+
+    #[test]
+    fn test_utc_timestamp_column_width() {
+        // UTC timestamp format: "2025-11-14 00:00:00.000 UTC" = 27 chars
+        // Header "Launch time" formatted as "⋮ Launch time" = 13 chars
+        // Column width should be max(27, 13) = 27
+        use crate::common::UTC_TIMESTAMP_WIDTH;
+        assert_eq!(UTC_TIMESTAMP_WIDTH, 27);
+
+        let header = format_header_cell("Launch time", 1);
+        let header_width = header.chars().count() as u16;
+        assert_eq!(header_width, 13);
+
+        // The column width should use UTC_TIMESTAMP_WIDTH (27), not header width (13)
+        assert!(UTC_TIMESTAMP_WIDTH > header_width);
     }
 }

@@ -141,7 +141,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("y", "yank"));
         hints.extend(hint("^o", "console"));
         hints.extend(hint("^r", "refresh"));
-        hints.extend(hint("p", "columns"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
         hints.extend(hint("^w", "close"));
         hints.extend(last_hint("q", "quit"));
         hints
@@ -158,7 +159,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^o", "console"));
         hints.extend(hint("⇤⇥", "switch"));
         hints.extend(hint("^r", "refresh"));
-        hints.extend(hint("p", "columns"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
         hints.extend(hint("^w", "close"));
         hints.extend(last_hint("q", "quit"));
         hints
@@ -291,7 +293,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("<num>p", "page"));
         hints.extend(hint("^o", "console"));
         hints.extend(hint("^r", "refresh"));
-        hints.extend(hint("p", "columns"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
         hints.extend(hint("^w", "close"));
         hints.extend(last_hint("q", "quit"));
         hints
@@ -486,6 +489,69 @@ mod tests {
         assert!(
             text.contains("^p print"),
             "Detail view should show '^p print'"
+        );
+    }
+
+    #[test]
+    fn test_no_columns_hint_anywhere() {
+        let list_spans = super::common_list_hotkeys();
+        let list_text: String = list_spans.iter().map(|s| s.content.as_ref()).collect();
+
+        // Should never show "columns", always "preferences"
+        assert!(
+            !list_text.contains("p columns"),
+            "Should not show 'p columns', use 'p preferences' instead"
+        );
+
+        let detail_spans = super::common_detail_hotkeys();
+        let detail_text: String = detail_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            !detail_text.contains("p columns"),
+            "Should not show 'p columns', use 'p preferences' instead"
+        );
+    }
+
+    #[test]
+    fn test_all_views_have_print_hotkey() {
+        // Test list view
+        let list_spans = super::common_list_hotkeys();
+        let list_text: String = list_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            list_text.contains("^p print"),
+            "List view must have '^p print' hotkey"
+        );
+
+        // Test detail view
+        let detail_spans = super::common_detail_hotkeys();
+        let detail_text: String = detail_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            detail_text.contains("^p print"),
+            "Detail view must have '^p print' hotkey"
+        );
+    }
+
+    #[test]
+    fn test_preferences_always_uses_p_not_ctrl_p() {
+        let list_spans = super::common_list_hotkeys();
+        let list_text: String = list_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            list_text.contains("p preferences"),
+            "Should use 'p preferences'"
+        );
+        assert!(
+            !list_text.contains("^p preferences"),
+            "Should not use '^p preferences'"
+        );
+
+        let detail_spans = super::common_detail_hotkeys();
+        let detail_text: String = detail_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            detail_text.contains("p preferences"),
+            "Should use 'p preferences'"
+        );
+        assert!(
+            !detail_text.contains("^p preferences"),
+            "Should not use '^p preferences'"
         );
     }
 }

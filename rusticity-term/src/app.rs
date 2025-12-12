@@ -46,7 +46,8 @@ pub use crate::ui::cw::logs::{
 use crate::ui::ec2;
 use crate::ui::ec2::filtered_ec2_instances;
 pub use crate::ui::ec2::{
-    State as Ec2State, StateFilter as Ec2StateFilter, STATE_FILTER as EC2_STATE_FILTER,
+    DetailTab as Ec2DetailTab, State as Ec2State, StateFilter as Ec2StateFilter,
+    STATE_FILTER as EC2_STATE_FILTER,
 };
 pub use crate::ui::ecr::{
     filtered_ecr_images, filtered_ecr_repositories, State as EcrState, Tab as EcrTab,
@@ -307,7 +308,13 @@ impl App {
         if self.current_service == Service::CloudWatchAlarms {
             Some(&mut self.alarms_state.table.filter)
         } else if self.current_service == Service::Ec2Instances {
-            Some(&mut self.ec2_state.table.filter)
+            if self.ec2_state.current_instance.is_some()
+                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+            {
+                Some(&mut self.ec2_state.tags.filter)
+            } else {
+                Some(&mut self.ec2_state.table.filter)
+            }
         } else if self.current_service == Service::S3Buckets {
             if self.s3_state.current_bucket.is_some() {
                 Some(&mut self.s3_state.object_filter)
@@ -916,6 +923,7 @@ impl App {
             Action::PageDown => self.page_down(),
             Action::NextPane => self.next_pane(),
             Action::PrevPane => self.prev_pane(),
+            Action::CollapseRow => self.collapse_row(),
             Action::Select => self.select_item(),
             Action::OpenSpaceMenu => {
                 self.mode = Mode::SpaceMenu;
@@ -1324,6 +1332,14 @@ impl App {
                         if self.sqs_state.input_focus == InputFocus::Filter {
                             self.apply_filter_operation(|f| f.push(c));
                         }
+                    } else if self.current_service == Service::Ec2Instances
+                        && self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        if self.ec2_state.input_focus == InputFocus::Filter {
+                            self.ec2_state.tags.filter.push(c);
+                            self.ec2_state.tags.selected = 0;
+                        }
                     } else {
                         self.apply_filter_operation(|f| f.push(c));
                     }
@@ -1415,6 +1431,14 @@ impl App {
                             self.apply_filter_operation(|f| {
                                 f.pop();
                             });
+                        }
+                    } else if self.current_service == Service::Ec2Instances
+                        && self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        if self.ec2_state.input_focus == InputFocus::Filter {
+                            self.ec2_state.tags.filter.pop();
+                            self.ec2_state.tags.selected = 0;
                         }
                     } else {
                         self.apply_filter_operation(|f| {
@@ -1576,25 +1600,46 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    let idx = self.column_selector_index;
-                    if idx > 0 && idx <= self.ec2_column_ids.len() {
-                        if let Some(col) = self.ec2_column_ids.get(idx - 1) {
-                            if let Some(pos) =
-                                self.ec2_visible_column_ids.iter().position(|c| c == col)
+                    if self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        if let Some(col) = self
+                            .ec2_state
+                            .tag_column_ids
+                            .get(self.column_selector_index)
+                        {
+                            if let Some(pos) = self
+                                .ec2_state
+                                .tag_visible_column_ids
+                                .iter()
+                                .position(|c| c == col)
                             {
-                                self.ec2_visible_column_ids.remove(pos);
+                                self.ec2_state.tag_visible_column_ids.remove(pos);
                             } else {
-                                self.ec2_visible_column_ids.push(*col);
+                                self.ec2_state.tag_visible_column_ids.push(col.clone());
                             }
                         }
-                    } else if idx == self.ec2_column_ids.len() + 3 {
-                        self.ec2_state.table.page_size = PageSize::Ten;
-                    } else if idx == self.ec2_column_ids.len() + 4 {
-                        self.ec2_state.table.page_size = PageSize::TwentyFive;
-                    } else if idx == self.ec2_column_ids.len() + 5 {
-                        self.ec2_state.table.page_size = PageSize::Fifty;
-                    } else if idx == self.ec2_column_ids.len() + 6 {
-                        self.ec2_state.table.page_size = PageSize::OneHundred;
+                    } else {
+                        let idx = self.column_selector_index;
+                        if idx > 0 && idx <= self.ec2_column_ids.len() {
+                            if let Some(col) = self.ec2_column_ids.get(idx - 1) {
+                                if let Some(pos) =
+                                    self.ec2_visible_column_ids.iter().position(|c| c == col)
+                                {
+                                    self.ec2_visible_column_ids.remove(pos);
+                                } else {
+                                    self.ec2_visible_column_ids.push(*col);
+                                }
+                            }
+                        } else if idx == self.ec2_column_ids.len() + 3 {
+                            self.ec2_state.table.page_size = PageSize::Ten;
+                        } else if idx == self.ec2_column_ids.len() + 4 {
+                            self.ec2_state.table.page_size = PageSize::TwentyFive;
+                        } else if idx == self.ec2_column_ids.len() + 5 {
+                            self.ec2_state.table.page_size = PageSize::Fifty;
+                        } else if idx == self.ec2_column_ids.len() + 6 {
+                            self.ec2_state.table.page_size = PageSize::OneHundred;
+                        }
                     }
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some()
@@ -2421,6 +2466,9 @@ impl App {
                     && self.ec2_state.current_instance.is_some()
                 {
                     self.ec2_state.detail_tab = self.ec2_state.detail_tab.next();
+                    if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
+                        self.ec2_state.tags.loading = true;
+                    }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -2510,6 +2558,9 @@ impl App {
                     && self.ec2_state.current_instance.is_some()
                 {
                     self.ec2_state.detail_tab = self.ec2_state.detail_tab.prev();
+                    if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
+                        self.ec2_state.tags.loading = true;
+                    }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -3524,9 +3575,13 @@ impl App {
                         self.alarms_state.table.collapse();
                     }
                 }
-                // From EC2 instances view -> collapse if expanded
+                // From EC2 instances view -> always collapse
                 else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.table.has_expanded_item() {
+                    if self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        self.ec2_state.tags.collapse();
+                    } else {
                         self.ec2_state.table.collapse();
                     }
                 }
@@ -3961,7 +4016,13 @@ impl App {
         } else if self.current_service == Service::CloudWatchAlarms {
             29
         } else if self.current_service == Service::Ec2Instances {
-            self.ec2_column_ids.len() + 6
+            if self.ec2_state.current_instance.is_some()
+                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+            {
+                self.ec2_state.tag_column_ids.len() - 1
+            } else {
+                self.ec2_column_ids.len() + 6
+            }
         } else if self.current_service == Service::EcrRepositories {
             if self.ecr_state.current_repository.is_some() {
                 self.ecr_image_column_ids.len() + 6
@@ -4200,27 +4261,36 @@ impl App {
                         self.alarms_state.table.next_item(filtered_alarms);
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    let filtered: Vec<_> = self
-                        .ec2_state
-                        .table
-                        .items
-                        .iter()
-                        .filter(|i| self.ec2_state.state_filter.matches(&i.state))
-                        .filter(|i| {
-                            if self.ec2_state.table.filter.is_empty() {
-                                return true;
-                            }
-                            i.name.contains(&self.ec2_state.table.filter)
-                                || i.instance_id.contains(&self.ec2_state.table.filter)
-                                || i.state.contains(&self.ec2_state.table.filter)
-                                || i.instance_type.contains(&self.ec2_state.table.filter)
-                                || i.availability_zone.contains(&self.ec2_state.table.filter)
-                                || i.security_groups.contains(&self.ec2_state.table.filter)
-                                || i.key_name.contains(&self.ec2_state.table.filter)
-                        })
-                        .collect();
-                    if !filtered.is_empty() {
-                        self.ec2_state.table.next_item(filtered.len());
+                    if self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        let filtered = crate::ui::ec2::filtered_tags(self);
+                        if !filtered.is_empty() {
+                            self.ec2_state.tags.next_item(filtered.len());
+                        }
+                    } else {
+                        let filtered: Vec<_> = self
+                            .ec2_state
+                            .table
+                            .items
+                            .iter()
+                            .filter(|i| self.ec2_state.state_filter.matches(&i.state))
+                            .filter(|i| {
+                                if self.ec2_state.table.filter.is_empty() {
+                                    return true;
+                                }
+                                i.name.contains(&self.ec2_state.table.filter)
+                                    || i.instance_id.contains(&self.ec2_state.table.filter)
+                                    || i.state.contains(&self.ec2_state.table.filter)
+                                    || i.instance_type.contains(&self.ec2_state.table.filter)
+                                    || i.availability_zone.contains(&self.ec2_state.table.filter)
+                                    || i.security_groups.contains(&self.ec2_state.table.filter)
+                                    || i.key_name.contains(&self.ec2_state.table.filter)
+                            })
+                            .collect();
+                        if !filtered.is_empty() {
+                            self.ec2_state.table.next_item(filtered.len());
+                        }
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
@@ -4657,7 +4727,13 @@ impl App {
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.alarms_state.table.prev_item();
                 } else if self.current_service == Service::Ec2Instances {
-                    self.ec2_state.table.prev_item();
+                    if self.ec2_state.current_instance.is_some()
+                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                    {
+                        self.ec2_state.tags.prev_item();
+                    } else {
+                        self.ec2_state.table.prev_item();
+                    }
                 } else if self.current_service == Service::EcrRepositories {
                     if self.ecr_state.current_repository.is_some() {
                         self.ecr_state.images.prev_item();
@@ -5696,7 +5772,11 @@ impl App {
                 self.alarms_state.table.toggle_expand();
             }
         } else if self.current_service == Service::Ec2Instances {
-            if !self.ec2_state.table.is_expanded() {
+            if self.ec2_state.current_instance.is_some()
+                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+            {
+                self.ec2_state.tags.toggle_expand();
+            } else if !self.ec2_state.table.is_expanded() {
                 self.ec2_state.table.toggle_expand();
             }
         } else if self.current_service == Service::EcrRepositories {
@@ -6355,6 +6435,98 @@ impl App {
             } else if self.iam_state.groups.has_expanded_item() {
                 self.iam_state.groups.collapse();
             }
+        }
+    }
+
+    fn collapse_row(&mut self) {
+        match self.current_service {
+            Service::CloudWatchLogGroups => {
+                if self.view_mode == ViewMode::Events {
+                    if let Some(idx) = self.log_groups_state.expanded_event {
+                        self.log_groups_state.expanded_event = None;
+                        self.log_groups_state.selected_event = idx;
+                    }
+                } else if self.view_mode == ViewMode::Detail {
+                    if let Some(idx) = self.log_groups_state.expanded_stream {
+                        self.log_groups_state.expanded_stream = None;
+                        self.log_groups_state.selected_stream = idx;
+                    }
+                } else {
+                    self.log_groups_state.log_groups.collapse();
+                }
+            }
+            Service::CloudWatchAlarms => self.alarms_state.table.collapse(),
+            Service::Ec2Instances => {
+                if self.ec2_state.current_instance.is_some()
+                    && self.ec2_state.detail_tab == Ec2DetailTab::Tags
+                {
+                    self.ec2_state.tags.collapse();
+                } else {
+                    self.ec2_state.table.collapse();
+                }
+            }
+            Service::EcrRepositories => {
+                if self.ecr_state.current_repository.is_some() {
+                    self.ecr_state.images.collapse();
+                } else {
+                    self.ecr_state.repositories.collapse();
+                }
+            }
+            Service::LambdaFunctions => self.lambda_state.table.collapse(),
+            Service::SqsQueues => self.sqs_state.queues.collapse(),
+            Service::CloudFormationStacks => {
+                if self.cfn_state.current_stack.is_some() {
+                    match self.cfn_state.detail_tab {
+                        crate::ui::cfn::DetailTab::Resources => {
+                            self.cfn_state.resources.collapse();
+                        }
+                        crate::ui::cfn::DetailTab::Parameters => {
+                            self.cfn_state.parameters.collapse();
+                        }
+                        crate::ui::cfn::DetailTab::Outputs => {
+                            self.cfn_state.outputs.collapse();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    self.cfn_state.table.collapse();
+                }
+            }
+            Service::IamUsers => {
+                if self.iam_state.current_user.is_some() {
+                    match self.iam_state.user_tab {
+                        crate::ui::iam::UserTab::Permissions => {
+                            self.iam_state.policies.collapse();
+                        }
+                        crate::ui::iam::UserTab::Groups => {
+                            self.iam_state.user_group_memberships.collapse();
+                        }
+                        crate::ui::iam::UserTab::Tags => {
+                            self.iam_state.user_tags.collapse();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    self.iam_state.users.collapse();
+                }
+            }
+            Service::IamRoles => {
+                if self.iam_state.current_role.is_some() {
+                    match self.iam_state.role_tab {
+                        crate::ui::iam::RoleTab::Permissions => {
+                            self.iam_state.policies.collapse();
+                        }
+                        crate::ui::iam::RoleTab::Tags => {
+                            self.iam_state.tags.collapse();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    self.iam_state.roles.collapse();
+                }
+            }
+            Service::IamUserGroups => self.iam_state.groups.collapse(),
+            _ => {}
         }
     }
 
@@ -15907,5 +16079,99 @@ mod lambda_version_tab_tests {
         // Prev wraps to Stopping
         app.handle_action(Action::PrevItem);
         assert_eq!(app.ec2_state.state_filter, Ec2StateFilter::Stopping);
+    }
+
+    #[test]
+    fn test_collapse_row_ec2_instances() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.ec2_state.table.expanded_item = Some(0);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.ec2_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_ec2_tags() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.ec2_state.current_instance = Some("i-123".to_string());
+        app.ec2_state.detail_tab = Ec2DetailTab::Tags;
+        app.ec2_state.tags.expanded_item = Some(1);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.ec2_state.tags.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_cloudwatch_log_groups() {
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.log_groups_state.log_groups.expanded_item = Some(2);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.log_groups_state.log_groups.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_cloudwatch_alarms() {
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchAlarms;
+        app.alarms_state.table.expanded_item = Some(0);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.alarms_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_lambda_functions() {
+        let mut app = test_app();
+        app.current_service = Service::LambdaFunctions;
+        app.lambda_state.table.expanded_item = Some(1);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.lambda_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_cfn_stacks() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.table.expanded_item = Some(0);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.cfn_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_cfn_resources() {
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("test-stack".to_string());
+        app.cfn_state.detail_tab = crate::ui::cfn::DetailTab::Resources;
+        app.cfn_state.resources.expanded_item = Some(2);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.cfn_state.resources.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_iam_users() {
+        let mut app = test_app();
+        app.current_service = Service::IamUsers;
+        app.iam_state.users.expanded_item = Some(1);
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.iam_state.users.expanded_item, None);
+    }
+
+    #[test]
+    fn test_collapse_row_does_nothing_when_not_expanded() {
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.ec2_state.table.expanded_item = None;
+
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.ec2_state.table.expanded_item, None);
     }
 }

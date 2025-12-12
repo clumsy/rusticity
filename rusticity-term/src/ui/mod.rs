@@ -28,6 +28,21 @@ pub use query_editor::{render_query_editor, QueryEditorConfig};
 pub use status::{first_hint, hint, last_hint, SPINNER_FRAMES};
 pub use table::{format_expandable, CURSOR_COLLAPSED, CURSOR_EXPANDED};
 
+pub const PAGE_SIZE_OPTIONS: &[(PageSize, &str)] = &[
+    (PageSize::Ten, "10"),
+    (PageSize::TwentyFive, "25"),
+    (PageSize::Fifty, "50"),
+    (PageSize::OneHundred, "100"),
+];
+
+pub const PAGE_SIZE_OPTIONS_SMALL: &[(PageSize, &str)] = &[
+    (PageSize::Ten, "10"),
+    (PageSize::TwentyFive, "25"),
+    (PageSize::Fifty, "50"),
+];
+
+pub const MAX_DETAIL_COLUMNS: usize = 3;
+
 use self::styles::highlight;
 use crate::app::{AlarmViewMode, App, CalendarField, LambdaDetailTab, Service, ViewMode};
 use crate::cfn::Column as CfnColumn;
@@ -304,9 +319,10 @@ pub fn render_fields_with_dynamic_columns(frame: &mut Frame, area: Rect, fields:
     let max_field_width = *field_widths.iter().max().unwrap_or(&20);
     let available_width = area.width;
 
-    // Determine how many columns fit
+    // Determine how many columns fit (max 3)
     let num_columns = (available_width / max_field_width)
         .max(1)
+        .min(MAX_DETAIL_COLUMNS as u16)
         .min(fields.len() as u16) as usize;
 
     // Distribute fields: first column gets most, others get same or fewer
@@ -375,7 +391,10 @@ pub fn calculate_dynamic_height(fields: &[Line], width: u16) -> u16 {
         .collect();
 
     let max_field_width = *field_widths.iter().max().unwrap_or(&20);
-    let num_columns = (width / max_field_width).max(1).min(fields.len() as u16) as usize;
+    let num_columns = (width / max_field_width)
+        .max(1)
+        .min(MAX_DETAIL_COLUMNS as u16)
+        .min(fields.len() as u16) as usize;
 
     let base = fields.len() / num_columns;
     let extra = fields.len() % num_columns;
@@ -798,7 +817,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
         Service::Ec2Instances => {
             if app.ec2_state.current_instance.is_some() {
-                ec2::render_instance_detail(frame, area, &app.ec2_state, app.mode);
+                ec2::render_instance_detail(frame, area, app);
             } else {
                 ec2::render_instances(
                     frame,
@@ -884,15 +903,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
 
         // Page Size section
         all_items.push(ListItem::new(""));
-        let (page_items, page_len) = render_page_size_section(
-            app.alarms_state.table.page_size,
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-                (PageSize::OneHundred, "100"),
-            ],
-        );
+        let (page_items, page_len) =
+            render_page_size_section(app.alarms_state.table.page_size, PAGE_SIZE_OPTIONS);
         all_items.extend(page_items);
         max_len = max_len.max(page_len);
 
@@ -907,7 +919,9 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         max_len = max_len.max(len);
 
         (all_items, " Preferences ", max_len)
-    } else if app.view_mode == ViewMode::Events {
+    } else if app.view_mode == ViewMode::Events
+        && app.current_service == Service::CloudWatchLogGroups
+    {
         let mut max_len = 0;
         let items: Vec<ListItem> = app
             .cw_log_event_column_ids
@@ -922,7 +936,9 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             })
             .collect();
         (items, " Select visible columns (Space to toggle) ", max_len)
-    } else if app.view_mode == ViewMode::Detail {
+    } else if app.view_mode == ViewMode::Detail
+        && app.current_service == Service::CloudWatchLogGroups
+    {
         let mut max_len = 0;
         let items: Vec<ListItem> = app
             .cw_log_stream_column_ids
@@ -983,37 +999,51 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         };
         (items, " Preferences ", max_len)
     } else if app.current_service == Service::Ec2Instances {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
+        if app.ec2_state.current_instance.is_some()
+            && app.ec2_state.detail_tab == ec2::DetailTab::Tags
+        {
+            let mut max_len = 0;
+            let items: Vec<ListItem> = app
+                .ec2_state
+                .tag_column_ids
+                .iter()
+                .filter_map(|col_id| {
+                    use crate::ec2::tag::Column as TagColumn;
+                    TagColumn::from_id(col_id).map(|col| {
+                        let is_visible = app.ec2_state.tag_visible_column_ids.contains(col_id);
+                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                        max_len = max_len.max(len);
+                        item
+                    })
+                })
+                .collect();
+            (items, " Preferences ", max_len)
+        } else {
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
 
-        let (header, header_len) = render_section_header("Columns");
-        all_items.push(header);
-        max_len = max_len.max(header_len);
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
 
-        for col_id in &app.ec2_column_ids {
-            if let Some(col) = Ec2Column::from_id(col_id) {
-                let is_visible = app.ec2_visible_column_ids.contains(col_id);
-                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.ec2_column_ids {
+                if let Some(col) = Ec2Column::from_id(col_id) {
+                    let is_visible = app.ec2_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
+
+            all_items.push(ListItem::new(""));
+
+            let (page_items, page_len) =
+                render_page_size_section(app.ec2_state.table.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
         }
-
-        all_items.push(ListItem::new(""));
-
-        let (page_items, page_len) = render_page_size_section(
-            app.ec2_state.table.page_size,
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-                (PageSize::OneHundred, "100"),
-            ],
-        );
-        all_items.extend(page_items);
-        max_len = max_len.max(page_len);
-
-        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::SqsQueues {
         if app.sqs_state.current_queue.is_some()
             && app.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -1036,15 +1066,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.sqs_state.triggers.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.sqs_state.triggers.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
 
@@ -1121,12 +1144,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 app.lambda_state.table.page_size
             },
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-                (PageSize::OneHundred, "100"),
-            ],
+            PAGE_SIZE_OPTIONS,
         );
         all_items.extend(page_items);
         max_len = max_len.max(page_len);
@@ -1156,11 +1174,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 all_items.push(ListItem::new(""));
                 let (page_items, page_len) = render_page_size_section(
                     app.lambda_application_state.resources.page_size,
-                    &[
-                        (PageSize::Ten, "10"),
-                        (PageSize::TwentyFive, "25"),
-                        (PageSize::Fifty, "50"),
-                    ],
+                    PAGE_SIZE_OPTIONS_SMALL,
                 );
                 all_items.extend(page_items);
                 max_len = max_len.max(page_len);
@@ -1178,11 +1192,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 all_items.push(ListItem::new(""));
                 let (page_items, page_len) = render_page_size_section(
                     app.lambda_application_state.deployments.page_size,
-                    &[
-                        (PageSize::Ten, "10"),
-                        (PageSize::TwentyFive, "25"),
-                        (PageSize::Fifty, "50"),
-                    ],
+                    PAGE_SIZE_OPTIONS_SMALL,
                 );
                 all_items.extend(page_items);
                 max_len = max_len.max(page_len);
@@ -1201,11 +1211,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(ListItem::new(""));
             let (page_items, page_len) = render_page_size_section(
                 app.lambda_application_state.table.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                ],
+                PAGE_SIZE_OPTIONS_SMALL,
             );
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
@@ -1233,15 +1239,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.tags.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.tags.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
@@ -1262,15 +1261,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.parameters.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.parameters.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
@@ -1291,15 +1283,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.outputs.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.outputs.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_some()
@@ -1320,15 +1305,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.resources.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.resources.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_none() {
@@ -1347,15 +1325,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.cfn_state.table.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                    (PageSize::OneHundred, "100"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.table.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
@@ -1384,14 +1355,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.iam_state.policies.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.iam_state.policies.page_size, PAGE_SIZE_OPTIONS_SMALL);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         } else if app.iam_state.current_user.is_none() {
@@ -1407,14 +1372,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(
-                app.iam_state.users.page_size,
-                &[
-                    (PageSize::Ten, "10"),
-                    (PageSize::TwentyFive, "25"),
-                    (PageSize::Fifty, "50"),
-                ],
-            );
+            let (page_items, page_len) =
+                render_page_size_section(app.iam_state.users.page_size, PAGE_SIZE_OPTIONS_SMALL);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
@@ -1440,14 +1399,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         }
 
         all_items.push(ListItem::new(""));
-        let (page_items, page_len) = render_page_size_section(
-            app.iam_state.roles.page_size,
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-            ],
-        );
+        let (page_items, page_len) =
+            render_page_size_section(app.iam_state.roles.page_size, PAGE_SIZE_OPTIONS_SMALL);
         all_items.extend(page_items);
         max_len = max_len.max(page_len);
 
@@ -1472,14 +1425,8 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         }
 
         all_items.push(ListItem::new(""));
-        let (page_items, page_len) = render_page_size_section(
-            app.iam_state.groups.page_size,
-            &[
-                (PageSize::Ten, "10"),
-                (PageSize::TwentyFive, "25"),
-                (PageSize::Fifty, "50"),
-            ],
-        );
+        let (page_items, page_len) =
+            render_page_size_section(app.iam_state.groups.page_size, PAGE_SIZE_OPTIONS_SMALL);
         all_items.extend(page_items);
         max_len = max_len.max(page_len);
 
@@ -1852,7 +1799,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
         Service::Ec2Instances => {
             if app.ec2_state.current_instance.is_some() {
-                ec2::render_instance_detail(frame, area, &app.ec2_state, app.mode);
+                ec2::render_instance_detail(frame, area, app);
             } else {
                 ec2::render_instances(
                     frame,
@@ -5808,10 +5755,9 @@ mod tests {
         // But if max_field_width is calculated differently, adjust expectation
         let result = calculate_dynamic_height(&fields, 20);
         // With 10 fields at width 20: max_field_width = 4 (2 + 2), columns = 20/4 = 5
-        // But columns is min(5, 10) = 5, so 10/5 = 2 rows
-        // However, if there's spacing or the calculation differs, it might be 3
-        // Let's check: 10 fields, if it calculates 4 columns: 10/4 = 2 base, 2 extra = 3 rows
-        assert_eq!(result, 3);
+        // But with MAX_DETAIL_COLUMNS=3, columns = min(5, 3, 10) = 3
+        // 10 fields / 3 columns = 3 base, 1 extra = 4 rows
+        assert_eq!(result, 4);
     }
 
     #[test]
@@ -5822,7 +5768,99 @@ mod tests {
             Line::from("C"),
             Line::from("D"),
         ];
-        // Width 100, should fit 4+ columns, 4 fields / 4 = 1 row each
-        assert_eq!(calculate_dynamic_height(&fields, 100), 1);
+        // Width 100, should fit many columns, but MAX_DETAIL_COLUMNS=3
+        // 4 fields / 3 columns = 1 base, 1 extra = 2 rows
+        assert_eq!(calculate_dynamic_height(&fields, 100), 2);
+    }
+
+    #[test]
+    fn test_ec2_tags_preferences_shows_tag_columns() {
+        let mut app = crate::app::App::new_without_client("default".to_string(), None);
+        app.current_service = crate::app::Service::Ec2Instances;
+        app.ec2_state.current_instance = Some("i-123".to_string());
+        app.ec2_state.detail_tab = ec2::DetailTab::Tags;
+        app.mode = crate::keymap::Mode::ColumnSelector;
+
+        // Render to a test backend to verify column selector shows tag columns
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                render(f, &app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+
+        // Should show "Key" and "Value" columns, not "Log stream"
+        assert!(content.contains("Key"));
+        assert!(content.contains("Value"));
+        assert!(!content.contains("Log stream"));
+    }
+
+    #[test]
+    fn test_cloudwatch_detail_preferences_shows_stream_columns() {
+        let mut app = crate::app::App::new_without_client("default".to_string(), None);
+        app.current_service = crate::app::Service::CloudWatchLogGroups;
+        app.view_mode = crate::app::ViewMode::Detail;
+        app.mode = crate::keymap::Mode::ColumnSelector;
+
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                render(f, &app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+
+        // Should show "Log stream" for CloudWatch
+        assert!(content.contains("Log stream"));
+    }
+
+    #[test]
+    fn test_ec2_instances_preferences_shows_instance_columns() {
+        let mut app = crate::app::App::new_without_client("default".to_string(), None);
+        app.current_service = crate::app::Service::Ec2Instances;
+        app.mode = crate::keymap::Mode::ColumnSelector;
+
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                render(f, &app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+
+        // Should show EC2 instance columns, not tag columns
+        assert!(content.contains("Columns"));
+        assert!(!content.contains("Log stream"));
     }
 }

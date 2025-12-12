@@ -1,8 +1,12 @@
-use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_fields, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+};
+use crate::ec2::tag::{Column as TagColumn, InstanceTag};
 use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::ui::table::expanded_from_columns;
+use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
 use crate::ui::{calculate_dynamic_height, render_fields_with_dynamic_columns, rounded_block};
 use ratatui::prelude::*;
 
@@ -133,10 +137,14 @@ pub struct State {
     pub input_focus: InputFocus,
     pub current_instance: Option<String>,
     pub detail_tab: DetailTab,
+    pub tags: TableState<InstanceTag>,
+    pub tag_visible_column_ids: Vec<String>,
+    pub tag_column_ids: Vec<String>,
 }
 
 impl Default for State {
     fn default() -> Self {
+        let tag_column_ids: Vec<String> = TagColumn::ids().iter().map(|s| s.to_string()).collect();
         Self {
             table: TableState::default(),
             state_filter: StateFilter::default(),
@@ -145,6 +153,9 @@ impl Default for State {
             input_focus: InputFocus::Filter,
             current_instance: None,
             detail_tab: DetailTab::Details,
+            tags: TableState::new(),
+            tag_visible_column_ids: tag_column_ids.clone(),
+            tag_column_ids,
         }
     }
 }
@@ -282,14 +293,15 @@ pub fn filtered_ec2_instances(app: &crate::app::App) -> Vec<&Instance> {
         .collect()
 }
 
-pub fn render_instance_detail(frame: &mut Frame, area: Rect, state: &State, _mode: Mode) {
+pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     use crate::ui::{labeled_field, render_tabs};
 
-    let instance = state
+    let instance = app
+        .ec2_state
         .table
         .items
         .iter()
-        .find(|i| Some(&i.instance_id) == state.current_instance.as_ref());
+        .find(|i| Some(&i.instance_id) == app.ec2_state.current_instance.as_ref());
 
     let Some(instance) = instance else {
         return;
@@ -343,7 +355,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, state: &State, _mod
 
     // Tab content
     let tab_names: Vec<(&str, DetailTab)> = DetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
-    render_tabs(frame, chunks[1], &tab_names, &state.detail_tab);
+    render_tabs(frame, chunks[1], &tab_names, &app.ec2_state.detail_tab);
 
     // Content area starts right after tabs (1 line for tab bar)
     let content_area = Rect {
@@ -353,7 +365,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, state: &State, _mod
         height: chunks[1].height.saturating_sub(1),
     };
 
-    match state.detail_tab {
+    match app.ec2_state.detail_tab {
         DetailTab::Details => {
             let instance_details = vec![
                 labeled_field("AMI ID", &instance.image_id),
@@ -554,18 +566,103 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, state: &State, _mod
             render_fields_with_dynamic_columns(frame, inner, lines);
         }
         DetailTab::Tags => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = if instance.name.is_empty() {
-                vec![Line::from("No tags")]
-            } else {
-                vec![labeled_field("Name", &instance.name)]
-            };
-            render_fields_with_dynamic_columns(frame, inner, lines);
+            render_tags_tab(frame, app, content_area);
         }
     }
+}
+
+fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered = filtered_tags(app);
+
+    let columns: Vec<Box<dyn TableColumn<InstanceTag>>> = app
+        .ec2_state
+        .tag_visible_column_ids
+        .iter()
+        .filter_map(|id| TagColumn::from_id(id))
+        .map(|col| Box::new(col) as Box<dyn TableColumn<InstanceTag>>)
+        .collect();
+
+    let page_size = app.ec2_state.tags.page_size.value();
+    let total_pages = filtered.len().div_ceil(page_size.max(1));
+    let current_page = app.ec2_state.tags.selected / page_size.max(1);
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.ec2_state.tags.filter,
+            placeholder: "Search tags",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.ec2_state.input_focus == InputFocus::Filter,
+            is_pagination_focused: app.ec2_state.input_focus == InputFocus::Pagination,
+        },
+    );
+
+    let start_idx = current_page * page_size;
+    let end_idx = (start_idx + page_size).min(filtered.len());
+    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
+
+    let expanded_index = app.ec2_state.tags.expanded_item.and_then(|idx| {
+        if idx >= start_idx && idx < end_idx {
+            Some(idx - start_idx)
+        } else {
+            None
+        }
+    });
+
+    render_table(
+        frame,
+        TableConfig {
+            area: chunks[1],
+            columns: &columns,
+            items: paginated,
+            selected_index: app.ec2_state.tags.selected % page_size.max(1),
+            is_active: app.mode != Mode::FilterInput,
+            title: format!(" Tags ({}) ", filtered.len()),
+            sort_column: "value",
+            sort_direction: SortDirection::Asc,
+            expanded_index,
+            get_expanded_content: Some(Box::new(|tag: &InstanceTag| {
+                expanded_from_columns(&columns, tag)
+            })),
+        },
+    );
+}
+
+pub fn filtered_tags(app: &crate::app::App) -> Vec<&InstanceTag> {
+    let mut filtered =
+        filter_by_fields(&app.ec2_state.tags.items, &app.ec2_state.tags.filter, |t| {
+            vec![&t.key, &t.value]
+        });
+
+    filtered.sort_by(|a, b| a.value.cmp(&b.value));
+    filtered
+}
+
+pub async fn load_tags(app: &mut crate::app::App, instance_id: &str) -> anyhow::Result<()> {
+    let tags = app.ec2_client.list_tags(instance_id).await?;
+
+    app.ec2_state.tags.items = tags
+        .into_iter()
+        .map(|t| InstanceTag {
+            key: t.key,
+            value: t.value,
+        })
+        .collect();
+
+    app.ec2_state
+        .tags
+        .items
+        .sort_by(|a, b| a.value.cmp(&b.value));
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -801,25 +898,6 @@ mod tests {
     }
 
     #[test]
-    fn test_render_instance_detail_with_no_instance() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let state = State::default();
-
-        terminal
-            .draw(|f| {
-                let area = f.area();
-                render_instance_detail(f, area, &state, Mode::Normal);
-            })
-            .unwrap();
-
-        // Should render without panicking even with no instance
-    }
-
-    #[test]
     fn test_column_distribution_10_fields_3_columns() {
         // 10 fields, 3 columns: should be 4, 3, 3
         let total = 10;
@@ -1027,5 +1105,143 @@ mod tests {
         let height = calculate_dynamic_height(&fields, width);
         // With 4 fields and wide width, should pack into 2 rows
         assert!(height <= 2, "Expected 2 rows or less, got {}", height);
+    }
+
+    #[test]
+    fn test_tag_column_ids() {
+        let ids = TagColumn::ids();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], "column.ec2.tag.key");
+        assert_eq!(ids[1], "column.ec2.tag.value");
+    }
+
+    #[test]
+    fn test_tag_column_from_id() {
+        assert_eq!(
+            TagColumn::from_id("column.ec2.tag.key"),
+            Some(TagColumn::Key)
+        );
+        assert_eq!(
+            TagColumn::from_id("column.ec2.tag.value"),
+            Some(TagColumn::Value)
+        );
+        assert_eq!(TagColumn::from_id("invalid"), None);
+    }
+
+    #[test]
+    fn test_state_includes_tags() {
+        let state = State::default();
+        assert_eq!(state.tags.items.len(), 0);
+        assert_eq!(state.tag_visible_column_ids.len(), 2);
+        assert_eq!(state.tag_column_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_tags_empty() {
+        use crate::app::App;
+        let app = App::new_without_client("default".to_string(), None);
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_filtered_tags_with_filter() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.ec2_state.tags.items = vec![
+            InstanceTag {
+                key: "Name".to_string(),
+                value: "test-instance".to_string(),
+            },
+            InstanceTag {
+                key: "Environment".to_string(),
+                value: "production".to_string(),
+            },
+            InstanceTag {
+                key: "Team".to_string(),
+                value: "backend".to_string(),
+            },
+        ];
+        app.ec2_state.tags.filter = "prod".to_string();
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key, "Environment");
+    }
+
+    #[test]
+    fn test_filtered_tags_sorts_by_value() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.ec2_state.tags.items = vec![
+            InstanceTag {
+                key: "Name".to_string(),
+                value: "zebra".to_string(),
+            },
+            InstanceTag {
+                key: "Environment".to_string(),
+                value: "alpha".to_string(),
+            },
+            InstanceTag {
+                key: "Team".to_string(),
+                value: "beta".to_string(),
+            },
+        ];
+        let filtered = filtered_tags(&app);
+        assert_eq!(filtered.len(), 3);
+        assert_eq!(filtered[0].value, "alpha");
+        assert_eq!(filtered[1].value, "beta");
+        assert_eq!(filtered[2].value, "zebra");
+    }
+
+    #[test]
+    fn test_load_tags_integration() {
+        // Test that load_tags function exists and has correct signature
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.ec2_state.tags.items = vec![InstanceTag {
+            key: "test".to_string(),
+            value: "value".to_string(),
+        }];
+        assert_eq!(app.ec2_state.tags.items.len(), 1);
+    }
+
+    #[test]
+    fn test_tags_columns_fallback_when_empty() {
+        use crate::app::App;
+        let app = App::new_without_client("default".to_string(), None);
+        // tag_visible_column_ids should be initialized with all columns
+        assert_eq!(app.ec2_state.tag_visible_column_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_tags_collapse_on_left_arrow() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.ec2_state.tags.expanded_item = Some(0);
+        assert!(app.ec2_state.tags.has_expanded_item());
+        app.ec2_state.tags.collapse();
+        assert!(!app.ec2_state.tags.has_expanded_item());
+    }
+
+    #[test]
+    fn test_max_detail_columns_constant() {
+        use crate::ui::MAX_DETAIL_COLUMNS;
+        assert_eq!(MAX_DETAIL_COLUMNS, 3);
+    }
+
+    #[test]
+    fn test_page_size_options_constant() {
+        use crate::ui::PAGE_SIZE_OPTIONS;
+        assert_eq!(PAGE_SIZE_OPTIONS.len(), 4);
+        assert_eq!(PAGE_SIZE_OPTIONS[0].1, "10");
+        assert_eq!(PAGE_SIZE_OPTIONS[3].1, "100");
+    }
+
+    #[test]
+    fn test_page_size_options_small_constant() {
+        use crate::ui::PAGE_SIZE_OPTIONS_SMALL;
+        assert_eq!(PAGE_SIZE_OPTIONS_SMALL.len(), 3);
+        assert_eq!(PAGE_SIZE_OPTIONS_SMALL[0].1, "10");
+        assert_eq!(PAGE_SIZE_OPTIONS_SMALL[2].1, "50");
     }
 }

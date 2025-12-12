@@ -4,11 +4,14 @@ use ratatui::prelude::*;
 use ratatui::style::Color;
 use std::collections::HashMap;
 
+pub mod tag;
+
 pub fn init(i18n: &mut HashMap<String, String>) {
     for col in Column::all() {
         i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
+    tag::init(i18n);
 }
 
 #[derive(Debug, Clone)]

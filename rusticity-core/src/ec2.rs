@@ -21,6 +21,12 @@ pub struct Instance {
     pub alarm_status: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct InstanceTag {
+    pub key: String,
+    pub value: String,
+}
+
 pub struct Ec2Client {
     config: AwsConfig,
 }
@@ -132,5 +138,31 @@ impl Ec2Client {
         }
 
         Ok(instances)
+    }
+
+    pub async fn list_tags(&self, instance_id: &str) -> Result<Vec<InstanceTag>> {
+        let client = self.config.ec2_client().await;
+
+        let response = client
+            .describe_tags()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("resource-id")
+                    .values(instance_id)
+                    .build(),
+            )
+            .send()
+            .await?;
+
+        let mut tags = Vec::new();
+        if let Some(tag_list) = response.tags {
+            for tag in tag_list {
+                if let (Some(key), Some(value)) = (tag.key, tag.value) {
+                    tags.push(InstanceTag { key, value });
+                }
+            }
+        }
+
+        Ok(tags)
     }
 }

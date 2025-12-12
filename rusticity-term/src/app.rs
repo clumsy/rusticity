@@ -2468,6 +2468,10 @@ impl App {
                     self.ec2_state.detail_tab = self.ec2_state.detail_tab.next();
                     if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
                         self.ec2_state.tags.loading = true;
+                    } else if self.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
+                        self.ec2_state.set_metrics_loading(true);
+                        self.ec2_state.set_monitoring_scroll(0);
+                        self.ec2_state.clear_metrics();
                     }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
@@ -2560,6 +2564,10 @@ impl App {
                     self.ec2_state.detail_tab = self.ec2_state.detail_tab.prev();
                     if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
                         self.ec2_state.tags.loading = true;
+                    } else if self.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
+                        self.ec2_state.set_metrics_loading(true);
+                        self.ec2_state.set_monitoring_scroll(0);
+                        self.ec2_state.clear_metrics();
                     }
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
@@ -3098,6 +3106,14 @@ impl App {
                 {
                     self.lambda_state.set_monitoring_scroll(
                         self.lambda_state.monitoring_scroll().saturating_sub(1),
+                    );
+                } else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
+                    && !self.ec2_state.is_metrics_loading()
+                {
+                    self.ec2_state.set_monitoring_scroll(
+                        self.ec2_state.monitoring_scroll().saturating_sub(1),
                     );
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
@@ -4213,6 +4229,13 @@ impl App {
                 {
                     self.lambda_state
                         .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
+                } else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
+                    && !self.ec2_state.is_metrics_loading()
+                {
+                    self.ec2_state
+                        .set_monitoring_scroll((self.ec2_state.monitoring_scroll() + 1).min(5));
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -4696,6 +4719,14 @@ impl App {
                     self.lambda_state.set_monitoring_scroll(
                         self.lambda_state.monitoring_scroll().saturating_sub(1),
                     );
+                } else if self.current_service == Service::Ec2Instances
+                    && self.ec2_state.current_instance.is_some()
+                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
+                    && !self.ec2_state.is_metrics_loading()
+                {
+                    self.ec2_state.set_monitoring_scroll(
+                        self.ec2_state.monitoring_scroll().saturating_sub(1),
+                    );
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -5067,6 +5098,13 @@ impl App {
         {
             self.lambda_state
                 .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
+        } else if self.current_service == Service::Ec2Instances
+            && self.ec2_state.current_instance.is_some()
+            && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
+            && !self.ec2_state.is_metrics_loading()
+        {
+            self.ec2_state
+                .set_monitoring_scroll((self.ec2_state.monitoring_scroll() + 1).min(5));
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {

@@ -259,6 +259,23 @@ async fn main() -> Result<()> {
                             app.ec2_state.tags.loading = false;
                         }
 
+                        // Load EC2 metrics when entering Monitoring tab
+                        if app.current_service == Service::Ec2Instances
+                            && app.ec2_state.current_instance.is_some()
+                            && app.ec2_state.detail_tab == rusticity_term::ui::ec2::DetailTab::Monitoring
+                            && app.ec2_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(instance_id) = &app.ec2_state.current_instance.clone() {
+                                if let Err(e) = rusticity_term::ui::ec2::load_ec2_metrics(&mut app, instance_id).await {
+                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.ec2_state.metrics_loading = false;
+                        }
+
                         // Load ECR repositories when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::EcrRepositories
                             && ((!prev_service_selected || prev_service != Service::EcrRepositories)

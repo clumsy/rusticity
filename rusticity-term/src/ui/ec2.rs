@@ -140,6 +140,14 @@ pub struct State {
     pub tags: TableState<InstanceTag>,
     pub tag_visible_column_ids: Vec<String>,
     pub tag_column_ids: Vec<String>,
+    pub monitoring_scroll: usize,
+    pub metrics_loading: bool,
+    pub metric_data_cpu: Vec<(i64, f64)>,
+    pub metric_data_network_in: Vec<(i64, f64)>,
+    pub metric_data_network_out: Vec<(i64, f64)>,
+    pub metric_data_network_packets_in: Vec<(i64, f64)>,
+    pub metric_data_network_packets_out: Vec<(i64, f64)>,
+    pub metric_data_metadata_no_token: Vec<(i64, f64)>,
 }
 
 impl Default for State {
@@ -156,7 +164,42 @@ impl Default for State {
             tags: TableState::new(),
             tag_visible_column_ids: tag_column_ids.clone(),
             tag_column_ids,
+            monitoring_scroll: 0,
+            metrics_loading: false,
+            metric_data_cpu: Vec::new(),
+            metric_data_network_in: Vec::new(),
+            metric_data_network_out: Vec::new(),
+            metric_data_network_packets_in: Vec::new(),
+            metric_data_network_packets_out: Vec::new(),
+            metric_data_metadata_no_token: Vec::new(),
         }
+    }
+}
+
+impl crate::ui::monitoring::MonitoringState for State {
+    fn is_metrics_loading(&self) -> bool {
+        self.metrics_loading
+    }
+
+    fn set_metrics_loading(&mut self, loading: bool) {
+        self.metrics_loading = loading;
+    }
+
+    fn monitoring_scroll(&self) -> usize {
+        self.monitoring_scroll
+    }
+
+    fn set_monitoring_scroll(&mut self, scroll: usize) {
+        self.monitoring_scroll = scroll;
+    }
+
+    fn clear_metrics(&mut self) {
+        self.metric_data_cpu.clear();
+        self.metric_data_network_in.clear();
+        self.metric_data_network_out.clear();
+        self.metric_data_network_packets_in.clear();
+        self.metric_data_network_packets_out.clear();
+        self.metric_data_metadata_no_token.clear();
     }
 }
 
@@ -511,15 +554,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
             render_fields_with_dynamic_columns(frame, inner, lines);
         }
         DetailTab::Monitoring => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = vec![
-                labeled_field("Monitoring", &instance.monitoring),
-                labeled_field("Status checks", &instance.status_checks),
-            ];
-            render_fields_with_dynamic_columns(frame, inner, lines);
+            render_ec2_monitoring_charts(frame, app, content_area);
         }
         DetailTab::Security => {
             let block = rounded_block();
@@ -665,6 +700,139 @@ pub async fn load_tags(app: &mut crate::app::App, instance_id: &str) -> anyhow::
     Ok(())
 }
 
+pub async fn load_ec2_metrics(app: &mut crate::app::App, instance_id: &str) -> anyhow::Result<()> {
+    app.ec2_state.metric_data_cpu = app.ec2_client.get_cpu_metrics(instance_id).await?;
+    app.ec2_state.metric_data_network_in =
+        app.ec2_client.get_network_in_metrics(instance_id).await?;
+    app.ec2_state.metric_data_network_out =
+        app.ec2_client.get_network_out_metrics(instance_id).await?;
+    app.ec2_state.metric_data_network_packets_in = app
+        .ec2_client
+        .get_network_packets_in_metrics(instance_id)
+        .await?;
+    app.ec2_state.metric_data_network_packets_out = app
+        .ec2_client
+        .get_network_packets_out_metrics(instance_id)
+        .await?;
+    app.ec2_state.metric_data_metadata_no_token = app
+        .ec2_client
+        .get_metadata_no_token_metrics(instance_id)
+        .await?;
+    Ok(())
+}
+
+fn render_ec2_monitoring_charts(frame: &mut Frame, app: &crate::app::App, area: Rect) {
+    use crate::ui::monitoring::render_monitoring_tab;
+
+    let cpu_avg: f64 = if !app.ec2_state.metric_data_cpu.is_empty() {
+        app.ec2_state
+            .metric_data_cpu
+            .iter()
+            .map(|(_, v)| v)
+            .sum::<f64>()
+            / app.ec2_state.metric_data_cpu.len() as f64
+    } else {
+        0.0
+    };
+    let cpu_label = format!("CPU utilization (%) [avg: {:.2}]", cpu_avg);
+
+    let network_in_sum: f64 = app
+        .ec2_state
+        .metric_data_network_in
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let network_in_label = format!("Network in (bytes) [sum: {:.0}]", network_in_sum);
+
+    let network_out_sum: f64 = app
+        .ec2_state
+        .metric_data_network_out
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let network_out_label = format!("Network out (bytes) [sum: {:.0}]", network_out_sum);
+
+    let network_packets_in_sum: f64 = app
+        .ec2_state
+        .metric_data_network_packets_in
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let network_packets_in_label = format!(
+        "Network packets in (count) [sum: {:.0}]",
+        network_packets_in_sum
+    );
+
+    let network_packets_out_sum: f64 = app
+        .ec2_state
+        .metric_data_network_packets_out
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let network_packets_out_label = format!(
+        "Network packets out (count) [sum: {:.0}]",
+        network_packets_out_sum
+    );
+
+    let metadata_no_token_sum: f64 = app
+        .ec2_state
+        .metric_data_metadata_no_token
+        .iter()
+        .map(|(_, v)| v)
+        .sum();
+    let metadata_no_token_label = format!(
+        "Metadata no token (count) [sum: {:.0}]",
+        metadata_no_token_sum
+    );
+
+    render_monitoring_tab(
+        frame,
+        area,
+        &[
+            crate::ui::monitoring::MetricChart {
+                title: &cpu_label,
+                data: &app.ec2_state.metric_data_cpu,
+                y_axis_label: "%",
+                x_axis_label: None,
+            },
+            crate::ui::monitoring::MetricChart {
+                title: &network_in_label,
+                data: &app.ec2_state.metric_data_network_in,
+                y_axis_label: "bytes",
+                x_axis_label: None,
+            },
+            crate::ui::monitoring::MetricChart {
+                title: &network_out_label,
+                data: &app.ec2_state.metric_data_network_out,
+                y_axis_label: "bytes",
+                x_axis_label: None,
+            },
+            crate::ui::monitoring::MetricChart {
+                title: &network_packets_in_label,
+                data: &app.ec2_state.metric_data_network_packets_in,
+                y_axis_label: "count",
+                x_axis_label: None,
+            },
+            crate::ui::monitoring::MetricChart {
+                title: &network_packets_out_label,
+                data: &app.ec2_state.metric_data_network_packets_out,
+                y_axis_label: "count",
+                x_axis_label: None,
+            },
+            crate::ui::monitoring::MetricChart {
+                title: &metadata_no_token_label,
+                data: &app.ec2_state.metric_data_metadata_no_token,
+                y_axis_label: "count",
+                x_axis_label: None,
+            },
+        ],
+        &[],
+        &[],
+        &[],
+        app.ec2_state.monitoring_scroll,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,6 +889,13 @@ mod tests {
         assert_eq!(state.state_filter, StateFilter::AllStates);
         assert_eq!(state.sort_column, Column::LaunchTime);
         assert_eq!(state.sort_direction, SortDirection::Desc);
+        assert!(!state.metrics_loading);
+        assert!(state.metric_data_cpu.is_empty());
+        assert!(state.metric_data_network_in.is_empty());
+        assert!(state.metric_data_network_out.is_empty());
+        assert!(state.metric_data_network_packets_in.is_empty());
+        assert!(state.metric_data_network_packets_out.is_empty());
+        assert!(state.metric_data_metadata_no_token.is_empty());
     }
 
     #[test]

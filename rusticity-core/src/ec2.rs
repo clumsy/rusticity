@@ -165,4 +165,247 @@ impl Ec2Client {
 
         Ok(tags)
     }
+
+    pub async fn get_cpu_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("CPUUtilization")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
+
+    pub async fn get_network_in_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("NetworkIn")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
+
+    pub async fn get_network_out_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("NetworkOut")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
+
+    pub async fn get_network_packets_in_metrics(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("NetworkPacketsIn")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
+
+    pub async fn get_network_packets_out_metrics(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("NetworkPacketsOut")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
+
+    pub async fn get_metadata_no_token_metrics(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+        let now = chrono::Utc::now();
+        let start_time = now - chrono::Duration::hours(3);
+
+        let response = client
+            .get_metric_statistics()
+            .namespace("AWS/EC2")
+            .metric_name("MetadataNoToken")
+            .dimensions(
+                aws_sdk_cloudwatch::types::Dimension::builder()
+                    .name("InstanceId")
+                    .value(instance_id)
+                    .build(),
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                now.timestamp_millis(),
+            ))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .send()
+            .await?;
+
+        let mut data_points = Vec::new();
+        if let Some(datapoints) = response.datapoints {
+            for dp in datapoints {
+                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.average) {
+                    data_points.push((timestamp.secs(), value));
+                }
+            }
+        }
+
+        data_points.sort_by_key(|(ts, _)| *ts);
+        Ok(data_points)
+    }
 }

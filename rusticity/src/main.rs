@@ -620,13 +620,19 @@ async fn main() -> Result<()> {
                                     false
                                 }
 
+                                // Load prefix previews - only for buckets that are expanded
                                 let expanded_prefixes: Vec<(String, String)> = app.s3_state.expanded_prefixes.iter()
                                     .filter_map(|prefix| {
+                                        // Skip if already loaded
                                         if app.s3_state.prefix_preview.contains_key(prefix) {
                                             return None;
                                         }
-                                        // Find which bucket this prefix belongs to
+                                        // Find the bucket by checking which bucket has this prefix in its preview
                                         for bucket in &app.s3_state.buckets.items {
+                                            // Skip if bucket not expanded
+                                            if !app.s3_state.expanded_prefixes.contains(&bucket.name) {
+                                                continue;
+                                            }
                                             let bucket_preview = app.s3_state.bucket_preview.get(&bucket.name);
                                             if find_prefix_in_bucket(prefix, &bucket.name, &bucket_preview, &app.s3_state.prefix_preview) {
                                                 return Some((bucket.name.clone(), prefix.clone()));
@@ -637,9 +643,7 @@ async fn main() -> Result<()> {
                                     .collect();
 
                                 for (bucket, prefix) in expanded_prefixes {
-                                    if let Err(e) = app.load_prefix_preview(bucket.clone(), prefix).await {
-                                        eprintln!("Failed to load prefix preview for bucket {}: {:#}", bucket, e);
-                                    }
+                                    let _ = app.load_prefix_preview(bucket.clone(), prefix).await;
                                 }
                             } else {
                                 // Check if loading prefix preview or full objects
@@ -675,13 +679,11 @@ async fn main() -> Result<()> {
                                     if !expanded_prefixes.is_empty() {
                                         for prefix in expanded_prefixes {
                                             if let Some(bucket) = &app.s3_state.current_bucket.clone() {
-                                                if let Err(e) = app.load_prefix_preview(bucket.clone(), prefix).await {
-                                                    eprintln!("Failed to load prefix preview: {:#}", e);
-                                                }
+                                                let _ = app.load_prefix_preview(bucket.clone(), prefix).await;
                                             }
                                         }
-                                    } else if let Err(e) = app.load_s3_objects().await {
-                                        eprintln!("Failed to load S3 objects: {:#}", e);
+                                    } else {
+                                        let _ = app.load_s3_objects().await;
                                     }
                                 }
                             }

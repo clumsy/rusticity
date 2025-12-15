@@ -50,15 +50,19 @@ use crate::common::{render_pagination_text, render_scrollbar, translate_column, 
 use crate::cw::alarms::AlarmColumn;
 use crate::ec2::Column as Ec2Column;
 use crate::ecr::{image, repo};
+use crate::iam::{RoleColumn, UserColumn};
 use crate::keymap::Mode;
 use crate::lambda::{ApplicationColumn, DeploymentColumn, FunctionColumn, ResourceColumn};
 use crate::s3::BucketColumn;
+use crate::sqs::pipe::Column as SqsPipeColumn;
 use crate::sqs::queue::Column as SqsColumn;
+use crate::sqs::sub::Column as SqsSubscriptionColumn;
+use crate::sqs::tag::Column as SqsTagColumn;
 use crate::sqs::trigger::Column as SqsTriggerColumn;
 use crate::ui::cfn::{
     DetailTab as CfnDetailTab, OutputColumn, ParameterColumn, ResourceColumn as CfnResourceColumn,
 };
-use crate::ui::iam::UserTab;
+use crate::ui::iam::{RoleTab, UserTab};
 use crate::ui::lambda::ApplicationDetailTab;
 use crate::ui::sqs::QueueDetailTab as SqsQueueDetailTab;
 use crate::ui::table::Column as TableColumn;
@@ -89,12 +93,12 @@ pub fn block_height_for(line_count: usize) -> u16 {
 
 pub fn section_header(text: &str, width: u16) -> Line<'static> {
     let text_len = text.len() as u16;
-    // Format: " Section Name ─────────────────────"
-    // space + text + space + dashes = width
-    let remaining = width.saturating_sub(text_len + 2);
+    // Format: "─ Section Name ───────────────────"
+    // dash + space + text + space + dashes = width
+    let remaining = width.saturating_sub(text_len + 3);
     let dashes = "─".repeat(remaining as usize);
     Line::from(vec![
-        Span::raw(" "),
+        Span::raw("─ "),
         Span::raw(text.to_string()),
         Span::raw(format!(" {}", dashes)),
     ])
@@ -130,8 +134,8 @@ pub fn render_tab_spans<'a>(tabs: &[(&'a str, bool)]) -> Vec<Span<'a>> {
 use ratatui::{prelude::*, widgets::*};
 
 // Common UI constants
-pub const SEARCH_ICON: &str = " 🔍 ";
-pub const PREFERENCES_TITLE: &str = " Preferences ";
+pub const SEARCH_ICON: &str = "─ 🔍 ";
+pub const PREFERENCES_TITLE: &str = "Preferences";
 
 // Filter
 pub fn filter_area(filter_text: Vec<Span<'_>>, is_active: bool) -> Paragraph<'_> {
@@ -165,8 +169,16 @@ pub fn rounded_block() -> Block<'static> {
         .border_type(BorderType::Rounded)
 }
 
+pub fn format_title(title: &str) -> String {
+    format!("─ {} ", title.trim())
+}
+
+pub fn titled_block(title: impl Into<String>) -> Block<'static> {
+    rounded_block().title(format_title(&title.into()))
+}
+
 pub fn titled_rounded_block(title: &'static str) -> Block<'static> {
-    rounded_block().title(title)
+    titled_block(title)
 }
 
 pub fn bold_style() -> Style {
@@ -292,7 +304,7 @@ pub fn block(title: &str) -> Block<'_> {
 }
 
 pub fn block_with_style(title: &str, style: Style) -> Block<'_> {
-    block(title).border_style(style)
+    titled_block(title).border_style(style)
 }
 
 /// Renders fields in dynamic columns based on available width
@@ -405,7 +417,7 @@ pub fn calculate_dynamic_height(fields: &[Line], width: u16) -> u16 {
 
 // Render a summary section with labeled fields
 pub fn render_summary(frame: &mut Frame, area: Rect, title: &str, fields: &[(&str, String)]) {
-    let summary_block = block(title).border_type(BorderType::Rounded);
+    let summary_block = titled_block(title);
     let inner = summary_block.inner(area);
     frame.render_widget(summary_block, area);
 
@@ -847,20 +859,29 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
     let (items, title, max_text_len) = if app.current_service == Service::S3Buckets
         && app.s3_state.current_bucket.is_none()
     {
+        let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
-        let items: Vec<ListItem> = app
-            .s3_bucket_column_ids
-            .iter()
-            .filter_map(|col_id| {
-                BucketColumn::from_id(col_id).map(|col| {
-                    let is_visible = app.s3_bucket_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    max_len = max_len.max(len);
-                    item
-                })
-            })
-            .collect();
-        (items, " Preferences ", max_len)
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col_id in &app.s3_bucket_column_ids {
+            if let Some(col) = BucketColumn::from_id(col_id) {
+                let is_visible = app.s3_bucket_visible_column_ids.contains(col_id);
+                let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) =
+            render_page_size_section(app.s3_state.buckets.page_size, PAGE_SIZE_OPTIONS);
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::CloudWatchAlarms {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
@@ -939,85 +960,129 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.view_mode == ViewMode::Detail
         && app.current_service == Service::CloudWatchLogGroups
     {
+        let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
-        let items: Vec<ListItem> = app
-            .cw_log_stream_column_ids
-            .iter()
-            .filter_map(|col_id| {
-                StreamColumn::from_id(col_id).map(|col| {
-                    let is_visible = app.cw_log_stream_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
-                    max_len = max_len.max(len);
-                    item
-                })
-            })
-            .collect();
-        (items, " Preferences ", max_len)
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col_id in &app.cw_log_stream_column_ids {
+            if let Some(col) = StreamColumn::from_id(col_id) {
+                let is_visible = app.cw_log_stream_visible_column_ids.contains(col_id);
+                let (item, len) = render_column_toggle_string(col.name(), is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+        let page_size_enum = match app.log_groups_state.stream_page_size {
+            10 => PageSize::Ten,
+            25 => PageSize::TwentyFive,
+            50 => PageSize::Fifty,
+            _ => PageSize::OneHundred,
+        };
+        let (page_items, page_len) = render_page_size_section(page_size_enum, PAGE_SIZE_OPTIONS);
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::CloudWatchLogGroups {
+        let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
-        let items: Vec<ListItem> = app
-            .cw_log_group_column_ids
-            .iter()
-            .filter_map(|col_id| {
-                LogGroupColumn::from_id(col_id).map(|col| {
-                    let is_visible = app.cw_log_group_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
-                    max_len = max_len.max(len);
-                    item
-                })
-            })
-            .collect();
-        (items, " Preferences ", max_len)
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        for col_id in &app.cw_log_group_column_ids {
+            if let Some(col) = LogGroupColumn::from_id(col_id) {
+                let is_visible = app.cw_log_group_visible_column_ids.contains(col_id);
+                let (item, len) = render_column_toggle_string(col.name(), is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) =
+            render_page_size_section(app.log_groups_state.log_groups.page_size, PAGE_SIZE_OPTIONS);
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::EcrRepositories {
+        let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
-        let items: Vec<ListItem> = if app.ecr_state.current_repository.is_some() {
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        if app.ecr_state.current_repository.is_some() {
             // ECR images columns
-            app.ecr_image_column_ids
-                .iter()
-                .filter_map(|col_id| {
-                    image::Column::from_id(col_id).map(|col| {
-                        let is_visible = app.ecr_image_visible_column_ids.contains(col_id);
-                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                        max_len = max_len.max(len);
-                        item
-                    })
-                })
-                .collect()
+            for col_id in &app.ecr_image_column_ids {
+                if let Some(col) = image::Column::from_id(col_id) {
+                    let is_visible = app.ecr_image_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.ecr_state.images.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
         } else {
             // ECR repository columns
-            app.ecr_repo_column_ids
-                .iter()
-                .filter_map(|col_id| {
-                    repo::Column::from_id(col_id).map(|col| {
-                        let is_visible = app.ecr_repo_visible_column_ids.contains(col_id);
-                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                        max_len = max_len.max(len);
-                        item
-                    })
-                })
-                .collect()
-        };
-        (items, " Preferences ", max_len)
+            for col_id in &app.ecr_repo_column_ids {
+                if let Some(col) = repo::Column::from_id(col_id) {
+                    let is_visible = app.ecr_repo_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.ecr_state.repositories.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::Ec2Instances {
         if app.ec2_state.current_instance.is_some()
             && app.ec2_state.detail_tab == ec2::DetailTab::Tags
         {
+            let mut all_items: Vec<ListItem> = Vec::new();
             let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .ec2_state
-                .tag_column_ids
-                .iter()
-                .filter_map(|col_id| {
-                    use crate::ec2::tag::Column as TagColumn;
-                    TagColumn::from_id(col_id).map(|col| {
-                        let is_visible = app.ec2_state.tag_visible_column_ids.contains(col_id);
-                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                        max_len = max_len.max(len);
-                        item
-                    })
-                })
-                .collect();
-            (items, " Preferences ", max_len)
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.ec2_state.tag_column_ids {
+                use crate::ec2::tag::Column as TagColumn;
+                if let Some(col) = TagColumn::from_id(col_id) {
+                    let is_visible = app.ec2_state.tag_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.ec2_state.tags.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
         } else {
             let mut all_items: Vec<ListItem> = Vec::new();
             let mut max_len = 0;
@@ -1072,22 +1137,117 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             max_len = max_len.max(page_len);
 
             (all_items, " Preferences ", max_len)
-        } else {
-            // Queue list - just columns
+        } else if app.sqs_state.current_queue.is_some()
+            && app.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
+        {
+            // SNS Subscriptions tab - columns + page size
+            let mut all_items: Vec<ListItem> = Vec::new();
             let mut max_len = 0;
-            let items: Vec<ListItem> = app
-                .sqs_column_ids
-                .iter()
-                .filter_map(|col_id| {
-                    SqsColumn::from_id(col_id).map(|col| {
-                        let is_visible = app.sqs_visible_column_ids.contains(col_id);
-                        let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                        max_len = max_len.max(len);
-                        item
-                    })
-                })
-                .collect();
-            (items, " Preferences ", max_len)
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.sqs_state.subscription_column_ids {
+                if let Some(col) = SqsSubscriptionColumn::from_id(col_id) {
+                    let is_visible = app
+                        .sqs_state
+                        .subscription_visible_column_ids
+                        .contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.sqs_state.subscriptions.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        } else if app.sqs_state.current_queue.is_some()
+            && app.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
+        {
+            // EventBridge Pipes tab - columns + page size
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.sqs_state.pipe_column_ids {
+                if let Some(col) = SqsPipeColumn::from_id(col_id) {
+                    let is_visible = app.sqs_state.pipe_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.sqs_state.pipes.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        } else if app.sqs_state.current_queue.is_some()
+            && app.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
+        {
+            // Tagging tab - columns + page size
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.sqs_state.tag_column_ids {
+                if let Some(col) = SqsTagColumn::from_id(col_id) {
+                    let is_visible = app.sqs_state.tag_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.sqs_state.tags.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        } else if app.sqs_state.current_queue.is_none() {
+            // Queue list - columns + page size
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.sqs_column_ids {
+                if let Some(col) = SqsColumn::from_id(col_id) {
+                    let is_visible = app.sqs_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.sqs_state.queues.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        } else {
+            (vec![], " Preferences ", 0)
         }
     } else if app.current_service == Service::LambdaFunctions {
         let mut all_items: Vec<ListItem> = Vec::new();
@@ -1337,38 +1497,116 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
 
-        // Show policy columns only for Permissions tab in user detail view
-        if app.iam_state.current_user.is_some() && app.iam_state.user_tab == UserTab::Permissions {
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
+        // Show different sections based on the current tab in user detail view
+        if app.iam_state.current_user.is_some() {
+            match app.iam_state.user_tab {
+                UserTab::Permissions => {
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
 
-            for col in &app.iam_policy_column_ids {
-                let is_visible = app.iam_policy_visible_column_ids.contains(col);
-                let mut spans = vec![];
-                spans.extend(render_toggle(is_visible));
-                spans.push(Span::raw(" "));
-                spans.push(Span::raw(col.clone()));
-                let text_len = 4 + col.len();
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(text_len);
+                    for col in &app.iam_policy_column_ids {
+                        let is_visible = app.iam_policy_visible_column_ids.contains(col);
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(is_visible));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(col.clone()));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.policies.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                UserTab::Groups => {
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for col in &["Group name", "Attached policies"] {
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(true));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(*col));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.user_group_memberships.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                UserTab::Tags => {
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for col in &["Key", "Value"] {
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(true));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(*col));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.user_tags.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                UserTab::LastAccessed => {
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for col in &["Service", "Policies granting", "Last accessed"] {
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(true));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(*col));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.last_accessed_services.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                _ => {}
             }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.iam_state.policies.page_size, PAGE_SIZE_OPTIONS_SMALL);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
         } else if app.iam_state.current_user.is_none() {
             let (header, header_len) = render_section_header("Columns");
             all_items.push(header);
             max_len = max_len.max(header_len);
 
-            for col in &app.iam_user_column_ids {
-                let is_visible = app.iam_user_visible_column_ids.contains(col);
-                let (item, len) = render_column_toggle_string(col, is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
+            for col_id in &app.iam_user_column_ids {
+                if let Some(col) = UserColumn::from_id(col_id) {
+                    let is_visible = app.iam_user_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.default_name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
 
             all_items.push(ListItem::new(""));
@@ -1383,26 +1621,106 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
 
-        let (header, header_len) = render_section_header("Columns");
-        all_items.push(header);
-        max_len = max_len.max(header_len);
+        // Show different columns based on the current tab
+        if app.iam_state.current_role.is_some() {
+            match app.iam_state.role_tab {
+                RoleTab::Permissions => {
+                    // Show policy columns
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
 
-        for col in &app.iam_role_column_ids {
-            let is_visible = app.iam_role_visible_column_ids.contains(col);
-            let mut spans = vec![];
-            spans.extend(render_toggle(is_visible));
-            spans.push(Span::raw(" "));
-            spans.push(Span::raw(col.clone()));
-            let text_len = 4 + col.len();
-            all_items.push(ListItem::new(Line::from(spans)));
-            max_len = max_len.max(text_len);
+                    for col in &app.iam_policy_column_ids {
+                        let is_visible = app.iam_policy_visible_column_ids.contains(col);
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(is_visible));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(col.clone()));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.policies.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                RoleTab::Tags => {
+                    // Show tag columns (Key, Value)
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for col in &["Key", "Value"] {
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(true)); // Tags always show both columns
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(*col));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.tags.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                RoleTab::LastAccessed => {
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for col in &["Service", "Policies granting", "Last accessed"] {
+                        let mut spans = vec![];
+                        spans.extend(render_toggle(true));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw(*col));
+                        let text_len = 4 + col.len();
+                        all_items.push(ListItem::new(Line::from(spans)));
+                        max_len = max_len.max(text_len);
+                    }
+
+                    all_items.push(ListItem::new(""));
+                    let (page_items, page_len) = render_page_size_section(
+                        app.iam_state.last_accessed_services.page_size,
+                        PAGE_SIZE_OPTIONS_SMALL,
+                    );
+                    all_items.extend(page_items);
+                    max_len = max_len.max(page_len);
+                }
+                _ => {
+                    // Other tabs don't have column preferences
+                }
+            }
+        } else {
+            // Role list view - show role columns
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.iam_role_column_ids {
+                if let Some(col) = RoleColumn::from_id(col_id) {
+                    let is_visible = app.iam_role_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.default_name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.iam_state.roles.page_size, PAGE_SIZE_OPTIONS_SMALL);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
         }
-
-        all_items.push(ListItem::new(""));
-        let (page_items, page_len) =
-            render_page_size_section(app.iam_state.roles.page_size, PAGE_SIZE_OPTIONS_SMALL);
-        all_items.extend(page_items);
-        max_len = max_len.max(page_len);
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::IamUserGroups {
@@ -1492,7 +1810,7 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, popup_area);
     frame.render_widget(
         Block::default()
-            .title(" Error ")
+            .title(format_title("Error"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_type(BorderType::Rounded)
@@ -1627,7 +1945,7 @@ fn render_space_menu(frame: &mut Frame, area: Rect) {
     let paragraph = Paragraph::new(items)
         .block(
             Block::default()
-                .title(" Menu ")
+                .title(format_title("Menu"))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -1676,7 +1994,7 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(" AWS Services ")
+                .title(format_title("AWS Services"))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -1744,11 +2062,11 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(format!(
-                    " Tabs ({}/{}) ",
+                .title(format_title(&format!(
+                    "Tabs ({}/{})",
                     filtered_tabs.len(),
                     app.tabs.len()
-                ))
+                )))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -1768,7 +2086,7 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, chunks[1]);
 
     let preview_block = Block::default()
-        .title(" Preview ")
+        .title(format_title("Preview"))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_type(BorderType::Rounded)
@@ -1990,7 +2308,7 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(" Regions ")
+                .title(format_title("Regions"))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -2039,7 +2357,7 @@ fn render_calendar_picker(frame: &mut Frame, app: &App, area: Rect) {
     let calendar = Monthly::new(date, events)
         .block(
             Block::default()
-                .title(format!(" Select {} ", field_name))
+                .title(format_title(&format!("Select {}", field_name)))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -2061,11 +2379,20 @@ pub fn render_json_highlighted(
     title: &str,
     is_active: bool,
 ) {
+    let total_lines = json_text.lines().count();
+    let line_num_width = total_lines.to_string().len().max(2);
+
     let lines: Vec<Line> = json_text
         .lines()
+        .enumerate()
         .skip(scroll_offset)
-        .map(|line| {
+        .map(|(idx, line)| {
             let mut spans = Vec::new();
+
+            // Add line number gutter
+            let line_num = format!("{:>width$} │ ", idx + 1, width = line_num_width);
+            spans.push(Span::styled(line_num, Style::default().fg(Color::DarkGray)));
+
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
 
@@ -2097,22 +2424,14 @@ pub fn render_json_highlighted(
         })
         .collect();
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(if is_active {
-                    active_border()
-                } else {
-                    Style::default()
-                }),
-        ),
-        area,
-    );
+    let block = titled_block(title).border_style(if is_active {
+        active_border()
+    } else {
+        Style::default()
+    });
 
-    let total_lines = json_text.lines().count();
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+
     if total_lines > 0 {
         render_scrollbar(
             frame,
@@ -2131,57 +2450,32 @@ pub fn render_tags_section<F>(frame: &mut Frame, area: Rect, render_table: F)
 where
     F: FnOnce(&mut Frame, Rect),
 {
-    let chunks = vertical([Constraint::Length(1), Constraint::Min(0)], area);
-
-    frame.render_widget(
-        Paragraph::new(
-            "Tags are key-value pairs that you can add to AWS resources to help identify, organize, or search for resources.",
-        ),
-        chunks[0],
-    );
-
-    render_table(frame, chunks[1]);
+    render_table(frame, area);
 }
 
 // Render a permissions tab with description and policies table
 pub fn render_permissions_section<F>(
     frame: &mut Frame,
     area: Rect,
-    description: &str,
+    _description: &str,
     render_table: F,
 ) where
     F: FnOnce(&mut Frame, Rect),
 {
-    let chunks = vertical([Constraint::Length(1), Constraint::Min(0)], area);
-
-    frame.render_widget(Paragraph::new(description), chunks[0]);
-
-    render_table(frame, chunks[1]);
+    render_table(frame, area);
 }
 
 // Render a last accessed tab with description, note, and table
 pub fn render_last_accessed_section<F>(
     frame: &mut Frame,
     area: Rect,
-    description: &str,
-    note: &str,
+    _description: &str,
+    _note: &str,
     render_table: F,
 ) where
     F: FnOnce(&mut Frame, Rect),
 {
-    let chunks = vertical(
-        [
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ],
-        area,
-    );
-
-    frame.render_widget(Paragraph::new(description), chunks[0]);
-    frame.render_widget(Paragraph::new(note), chunks[1]);
-
-    render_table(frame, chunks[2]);
+    render_table(frame, area);
 }
 
 #[cfg(test)]
@@ -5862,5 +6156,38 @@ mod tests {
         // Should show EC2 instance columns, not tag columns
         assert!(content.contains("Columns"));
         assert!(!content.contains("Log stream"));
+    }
+
+    #[test]
+    fn test_section_header_has_leading_dash() {
+        let line = section_header("Default encryption", 50);
+        let text = line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+
+        // Should start with "─ "
+        assert!(text.starts_with("─ "));
+        // Should contain the section name
+        assert!(text.contains("Default encryption"));
+        // Should end with dashes
+        assert!(text.ends_with('─'));
+    }
+
+    #[test]
+    fn test_section_header_width_calculation() {
+        let width = 60;
+        let line = section_header("Test Section", width);
+        let text = line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+
+        // Total character count should match width (not byte count)
+        assert_eq!(text.chars().count(), width as usize);
+        // Format: "─ Test Section ───...─"
+        assert!(text.starts_with("─ Test Section "));
     }
 }

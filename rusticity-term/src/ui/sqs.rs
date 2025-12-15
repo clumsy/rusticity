@@ -20,8 +20,8 @@ use crate::ui::filter::{
 use crate::ui::monitoring::{render_monitoring_tab, MetricChart, MonitoringState};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
-    calculate_dynamic_height, labeled_field, render_fields_with_dynamic_columns,
-    render_json_highlighted, render_pagination_text, render_tabs, rounded_block,
+    calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
+    render_json_highlighted, render_pagination_text, render_tabs, titled_block,
 };
 use ratatui::widgets::*;
 
@@ -448,7 +448,7 @@ pub fn render_queues(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
 
 fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude::Rect) {
     use ratatui::prelude::*;
-    use ratatui::widgets::{Clear, Paragraph};
+    use ratatui::widgets::Clear;
 
     frame.render_widget(Clear, area);
 
@@ -459,8 +459,6 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
         .iter()
         .find(|q| Some(&q.url) == app.sqs_state.current_queue.as_ref());
 
-    let queue_name = queue.map(|q| q.name.as_str()).unwrap_or("Unknown");
-
     let details_height = queue.map_or(3, |q| {
         let lines = render_details_fields(q);
         calculate_dynamic_height(&lines, area.width.saturating_sub(4)) + 2
@@ -469,27 +467,18 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),              // Queue name
             Constraint::Length(details_height), // Details (dynamic)
             Constraint::Length(1),              // Tabs
             Constraint::Min(0),                 // Tab content
         ])
         .split(area);
 
-    // Queue name header
-    let header = Paragraph::new(queue_name).style(
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(header, chunks[0]);
-
     // Details pane
     if let Some(q) = queue {
         let lines = render_details_fields(q);
-        let block = rounded_block().title(" Details ");
-        let inner = block.inner(chunks[1]);
-        frame.render_widget(block, chunks[1]);
+        let block = titled_block("Details");
+        let inner = block.inner(chunks[0]);
+        frame.render_widget(block, chunks[0]);
         render_fields_with_dynamic_columns(frame, inner, lines);
     }
 
@@ -500,125 +489,114 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
         .map(|tab| (tab.name(), tab))
         .collect();
 
-    render_tabs(frame, chunks[2], &tabs, &app.sqs_state.detail_tab);
+    render_tabs(frame, chunks[1], &tabs, &app.sqs_state.detail_tab);
 
     // Tab content
     match app.sqs_state.detail_tab {
         QueueDetailTab::QueuePolicies => {
-            render_queue_policies_tab(frame, app, chunks[3]);
+            render_queue_policies_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::Monitoring => {
-            if app.sqs_state.metrics_loading {
-                let loading_block = Block::default()
-                    .title(" Monitoring ")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded);
-                let loading_text = Paragraph::new("Loading metrics...")
-                    .block(loading_block)
-                    .alignment(ratatui::layout::Alignment::Center);
-                frame.render_widget(loading_text, chunks[3]);
-            } else {
-                let age_max: f64 = app
-                    .sqs_state
-                    .metric_data
-                    .iter()
-                    .map(|(_, v)| v)
-                    .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                let age_label = format!(
-                    "Age [max: {}]",
-                    if age_max.is_finite() {
-                        format!("{:.0}s", age_max)
-                    } else {
-                        "--".to_string()
-                    }
-                );
+            let age_max: f64 = app
+                .sqs_state
+                .metric_data
+                .iter()
+                .map(|(_, v)| v)
+                .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let age_label = format!(
+                "Age [max: {}]",
+                if age_max.is_finite() {
+                    format!("{:.0}s", age_max)
+                } else {
+                    "--".to_string()
+                }
+            );
 
-                render_monitoring_tab(
-                    frame,
-                    chunks[3],
-                    &[
-                        MetricChart {
-                            title: "Approximate age of oldest message",
-                            data: &app.sqs_state.metric_data,
-                            y_axis_label: "Seconds",
-                            x_axis_label: Some(age_label),
-                        },
-                        MetricChart {
-                            title: "Approximate number of messages delayed",
-                            data: &app.sqs_state.metric_data_delayed,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Approximate number of messages not visible",
-                            data: &app.sqs_state.metric_data_not_visible,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Approximate number of messages visible",
-                            data: &app.sqs_state.metric_data_visible,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Number of empty receives",
-                            data: &app.sqs_state.metric_data_empty_receives,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Number of messages deleted",
-                            data: &app.sqs_state.metric_data_messages_deleted,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Number of messages received",
-                            data: &app.sqs_state.metric_data_messages_received,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Number of messages sent",
-                            data: &app.sqs_state.metric_data_messages_sent,
-                            y_axis_label: "Count",
-                            x_axis_label: None,
-                        },
-                        MetricChart {
-                            title: "Sent message size",
-                            data: &app.sqs_state.metric_data_sent_message_size,
-                            y_axis_label: "Bytes",
-                            x_axis_label: None,
-                        },
-                    ],
-                    &[],
-                    &[],
-                    &[],
-                    app.sqs_state.monitoring_scroll,
-                );
-            }
+            render_monitoring_tab(
+                frame,
+                chunks[2],
+                &[
+                    MetricChart {
+                        title: "Approximate age of oldest message",
+                        data: &app.sqs_state.metric_data,
+                        y_axis_label: "Seconds",
+                        x_axis_label: Some(age_label),
+                    },
+                    MetricChart {
+                        title: "Approximate number of messages delayed",
+                        data: &app.sqs_state.metric_data_delayed,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Approximate number of messages not visible",
+                        data: &app.sqs_state.metric_data_not_visible,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Approximate number of messages visible",
+                        data: &app.sqs_state.metric_data_visible,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Number of empty receives",
+                        data: &app.sqs_state.metric_data_empty_receives,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Number of messages deleted",
+                        data: &app.sqs_state.metric_data_messages_deleted,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Number of messages received",
+                        data: &app.sqs_state.metric_data_messages_received,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Number of messages sent",
+                        data: &app.sqs_state.metric_data_messages_sent,
+                        y_axis_label: "Count",
+                        x_axis_label: None,
+                    },
+                    MetricChart {
+                        title: "Sent message size",
+                        data: &app.sqs_state.metric_data_sent_message_size,
+                        y_axis_label: "Bytes",
+                        x_axis_label: None,
+                    },
+                ],
+                &[],
+                &[],
+                &[],
+                app.sqs_state.monitoring_scroll,
+            );
         }
         QueueDetailTab::SnsSubscriptions => {
-            render_subscriptions_tab(frame, app, chunks[3]);
+            render_subscriptions_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::LambdaTriggers => {
-            render_lambda_triggers_tab(frame, app, chunks[3]);
+            render_lambda_triggers_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::EventBridgePipes => {
-            render_eventbridge_pipes_tab(frame, app, chunks[3]);
+            render_eventbridge_pipes_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::DeadLetterQueue => {
-            render_dead_letter_queue_tab(frame, app, chunks[3]);
+            render_dead_letter_queue_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::Tagging => {
-            render_tags_tab(frame, app, chunks[3]);
+            render_tags_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::Encryption => {
-            render_encryption_tab(frame, app, chunks[3]);
+            render_encryption_tab(frame, app, chunks[2]);
         }
         QueueDetailTab::DeadLetterQueueRedriveTasks => {
-            render_dlq_redrive_tasks_tab(frame, app, chunks[3]);
+            render_dlq_redrive_tasks_tab(frame, app, chunks[2]);
         }
     }
 }
@@ -716,7 +694,7 @@ fn render_queue_policies_tab(frame: &mut ratatui::Frame, app: &App, area: ratatu
         chunks[0],
         &app.sqs_state.policy_document,
         app.sqs_state.policy_scroll,
-        " Access policy ",
+        "Access policy",
         true,
     );
 }
@@ -779,7 +757,7 @@ fn render_lambda_triggers_tab(frame: &mut ratatui::Frame, app: &App, area: ratat
             items: paginated,
             selected_index: app.sqs_state.triggers.selected % page_size.max(1),
             is_active: app.mode != Mode::FilterInput,
-            title: format!(" Lambda triggers ({}) ", filtered.len()),
+            title: format_title(&format!("Lambda triggers ({})", filtered.len())),
             sort_column: "last_modified",
             sort_direction: SortDirection::Asc,
             expanded_index,
@@ -861,7 +839,7 @@ fn render_eventbridge_pipes_tab(
             items: paginated,
             selected_index: app.sqs_state.pipes.selected % page_size.max(1),
             is_active: app.mode != Mode::FilterInput,
-            title: format!(" EventBridge Pipes ({}) ", filtered.len()),
+            title: format_title(&format!("EventBridge Pipes ({})", filtered.len())),
             sort_column: "last_modified",
             sort_direction: SortDirection::Asc,
             expanded_index,
@@ -928,7 +906,7 @@ fn render_tags_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelude
             items: paginated,
             selected_index: app.sqs_state.tags.selected % page_size.max(1),
             is_active: app.mode != Mode::FilterInput,
-            title: format!(" Tagging ({}) ", filtered.len()),
+            title: format_title(&format!("Tagging ({})", filtered.len())),
             sort_column: "value",
             sort_direction: SortDirection::Asc,
             expanded_index,
@@ -985,7 +963,7 @@ fn render_subscriptions_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui
             items: paginated,
             selected_index: app.sqs_state.subscriptions.selected % page_size.max(1),
             is_active: app.mode != Mode::FilterInput,
-            title: format!(" SNS subscriptions ({}) ", filtered.len()),
+            title: format_title(&format!("SNS subscriptions ({})", filtered.len())),
             sort_column: "subscription_arn",
             sort_direction: SortDirection::Asc,
             expanded_index,
@@ -1085,7 +1063,7 @@ fn render_dead_letter_queue_tab(
                     .constraints([Constraint::Length(height), Constraint::Min(0)])
                     .split(area);
 
-                let block = rounded_block().title(" Dead-letter queue ");
+                let block = titled_block("Dead-letter queue");
                 let inner = block.inner(chunks[0]);
                 frame.render_widget(block, chunks[0]);
                 render_fields_with_dynamic_columns(frame, inner, lines);
@@ -1100,7 +1078,7 @@ fn render_dead_letter_queue_tab(
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let block = rounded_block().title(" Dead-letter queue ");
+    let block = titled_block("Dead-letter queue");
     let inner = block.inner(chunks[0]);
     frame.render_widget(block, chunks[0]);
     frame.render_widget(Paragraph::new("No dead-letter queue configured"), inner);
@@ -1121,7 +1099,7 @@ fn render_encryption_tab(frame: &mut ratatui::Frame, app: &App, area: ratatui::p
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let block = rounded_block().title(" Encryption ");
+    let block = titled_block("Encryption");
     let inner = block.inner(chunks[0]);
     frame.render_widget(block, chunks[0]);
 
@@ -1166,7 +1144,7 @@ fn render_dlq_redrive_tasks_tab(
             .constraints([Constraint::Length(height), Constraint::Min(0)])
             .split(area);
 
-        let block = rounded_block().title(" Dead-letter queue redrive status ");
+        let block = titled_block("Dead-letter queue redrive status");
         let inner = block.inner(chunks[0]);
         frame.render_widget(block, chunks[0]);
         render_fields_with_dynamic_columns(frame, inner, lines);
@@ -1215,7 +1193,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
     let end_idx = (start_idx + page_size).min(filtered.len());
     let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-    let title = format!(" Queues ({}) ", filtered.len());
+    let title = format_title(&format!("Queues ({})", filtered.len()));
 
     let columns: Vec<Box<dyn Column<Queue>>> = app
         .sqs_visible_column_ids
@@ -2216,7 +2194,7 @@ mod tests {
     #[test]
     fn test_rounded_block_used_for_details_pane() {
         // Verify rounded_block helper creates proper bordered block
-        let block = rounded_block().title(" Details ");
+        let block = titled_block("Details");
         let area = Rect::new(0, 0, 80, 10);
         let inner = block.inner(area);
         assert_eq!(inner.width, 78); // 2 less for borders

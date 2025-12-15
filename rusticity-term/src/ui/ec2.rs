@@ -7,7 +7,10 @@ use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
-use crate::ui::{calculate_dynamic_height, render_fields_with_dynamic_columns, rounded_block};
+use crate::ui::{
+    calculate_dynamic_height, format_title, render_fields_with_dynamic_columns, rounded_block,
+    titled_block,
+};
 use ratatui::prelude::*;
 
 pub const FILTER_CONTROLS: [InputFocus; 3] = [
@@ -390,7 +393,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
         .split(area);
 
     // Instance summary
-    let summary_block = rounded_block().title(" Instance summary ");
+    let summary_block = titled_block("Instance summary");
     let summary_inner = summary_block.inner(chunks[0]);
     frame.render_widget(summary_block, chunks[0]);
 
@@ -522,17 +525,17 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
                     .split(content_area)
             };
 
-            let details_block = rounded_block().title(" Instance details ");
+            let details_block = titled_block("Instance details");
             let details_inner = details_block.inner(sections[0]);
             frame.render_widget(details_block, sections[0]);
             render_fields_with_dynamic_columns(frame, details_inner, instance_details);
 
-            let placement_block = rounded_block().title(" Host and placement group ");
+            let placement_block = titled_block("Host and placement group");
             let placement_inner = placement_block.inner(sections[1]);
             frame.render_widget(placement_block, sections[1]);
             render_fields_with_dynamic_columns(frame, placement_inner, placement);
 
-            let capacity_block = rounded_block().title(" Capacity reservation ");
+            let capacity_block = titled_block("Capacity reservation");
             let capacity_inner = capacity_block.inner(sections[2]);
             frame.render_widget(capacity_block, sections[2]);
             render_fields_with_dynamic_columns(frame, capacity_inner, capacity);
@@ -660,7 +663,7 @@ fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
             items: paginated,
             selected_index: app.ec2_state.tags.selected % page_size.max(1),
             is_active: app.mode != Mode::FilterInput,
-            title: format!(" Tags ({}) ", filtered.len()),
+            title: format_title(&format!("Tags ({})", filtered.len())),
             sort_column: "value",
             sort_direction: SortDirection::Asc,
             expanded_index,
@@ -1257,11 +1260,13 @@ mod tests {
 
     #[test]
     fn test_rounded_block_helper_creates_block_with_title() {
+        use crate::ui::titled_block;
+        use ratatui::prelude::Rect;
         // Verify rounded_block helper can be used with title
-        let block = rounded_block().title(" Instance summary ");
+        let block = titled_block("Instance summary");
         let area = Rect::new(0, 0, 50, 10);
         let inner = block.inner(area);
-        // Inner area should be 2 smaller on each dimension due to borders
+        // Inner area: 50 - 2 (borders) - 2 (padding) = 46 width
         assert_eq!(inner.width, 48);
         assert_eq!(inner.height, 8);
     }

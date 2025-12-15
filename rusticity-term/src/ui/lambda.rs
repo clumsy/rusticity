@@ -17,7 +17,7 @@ use crate::ui::table::{
     expanded_from_columns, plain_expanded_content, render_table, Column as TableColumn, TableConfig,
 };
 use crate::ui::{
-    calculate_dynamic_height, format_expansion_text, labeled_field,
+    calculate_dynamic_height, format_expansion_text, format_title, labeled_field,
     render_fields_with_dynamic_columns, render_tabs, rounded_block, section_header, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
@@ -385,7 +385,7 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
     let end_idx = (start_idx + page_size).min(filtered.len());
     let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-    let title = format!(" Lambda functions ({}) ", filtered.len());
+    let title = format_title(&format!("Lambda functions ({})", filtered.len()));
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaFunction>>> = vec![];
     for col_id in &app.lambda_state.function_visible_column_ids {
@@ -472,7 +472,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     // Function overview
     if !overview_lines.is_empty() {
         let overview_block = Block::default()
-            .title(" Function overview ")
+            .title(format_title("Function overview"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default());
@@ -552,7 +552,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Code properties section
                 let code_block = Block::default()
-                    .title(" Code properties ")
+                    .title(format_title("Code properties"))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded);
 
@@ -563,7 +563,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Runtime settings section
                 let runtime_block = Block::default()
-                    .title(" Runtime settings ")
+                    .title(format_title("Runtime settings"))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded);
 
@@ -574,7 +574,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Layers section
                 let layer_refs: Vec<&Layer> = func.layers.iter().collect();
-                let title = format!(" Layers ({}) ", layer_refs.len());
+                let title = format_title(&format!("Layers ({})", layer_refs.len()));
 
                 let columns: Vec<Box<dyn TableColumn<Layer>>> = vec![
                     Box::new(LayerColumn::MergeOrder),
@@ -614,18 +614,6 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
     } else if app.lambda_state.detail_tab == DetailTab::Monitor {
-        if app.lambda_state.metrics_loading {
-            let loading_block = Block::default()
-                .title(" Monitoring ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded);
-            let loading_text = Paragraph::new("Loading metrics...")
-                .block(loading_block)
-                .alignment(ratatui::layout::Alignment::Center);
-            frame.render_widget(loading_text, chunks[2]);
-            return;
-        }
-
         render_lambda_monitoring_charts(frame, app, chunks[2]);
     } else if app.lambda_state.detail_tab == DetailTab::Configuration {
         // Configuration tab
@@ -660,7 +648,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
                 );
 
                 let config_block = Block::default()
-                    .title(" General configuration ")
+                    .title(format_title("General configuration"))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default());
@@ -744,7 +732,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let end_idx = (start_idx + page_size).min(filtered.len());
         let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-        let title = format!(" Versions ({}) ", filtered.len());
+        let title = format_title(&format!("Versions ({})", filtered.len()));
 
         let mut columns: Vec<Box<dyn TableColumn<Version>>> = vec![];
         for col_name in &app.lambda_state.version_visible_column_ids {
@@ -859,7 +847,7 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         let end_idx = (start_idx + page_size).min(filtered.len());
         let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-        let title = format!(" Aliases ({}) ", filtered.len());
+        let title = format_title(&format!("Aliases ({})", filtered.len()));
 
         let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
         for col_name in &app.lambda_state.alias_visible_column_ids {
@@ -1024,7 +1012,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
                     .find(|a| a.name == *alias_name)
                 {
                     let overview_block = Block::default()
-                        .title(" Function overview ")
+                        .title(format_title("Function overview"))
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .border_style(Style::default());
@@ -1041,7 +1029,7 @@ pub fn render_alias_detail(frame: &mut Frame, app: &App, area: Rect) {
     // General configuration
     if !config_lines.is_empty() {
         let config_block = Block::default()
-            .title(" General configuration ")
+            .title(format_title("General configuration"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded);
 
@@ -1099,7 +1087,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
     // Function overview
     if !overview_lines.is_empty() {
         let overview_block = Block::default()
-            .title(" Function overview ")
+            .title(format_title("Function overview"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default());
@@ -1166,7 +1154,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Code properties section
                 let code_block = Block::default()
-                    .title(" Code properties ")
+                    .title(format_title("Code properties"))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded);
 
@@ -1177,7 +1165,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Runtime settings section
                 let runtime_block = Block::default()
-                    .title(" Runtime settings ")
+                    .title(format_title("Runtime settings"))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded);
 
@@ -1189,7 +1177,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                 // Layers section (empty table)
                 let layers: Vec<Layer> = vec![];
                 let layer_refs: Vec<&Layer> = layers.iter().collect();
-                let title = format!(" Layers ({}) ", layer_refs.len());
+                let title = format_title(&format!("Layers ({})", layer_refs.len()));
 
                 let columns: Vec<Box<dyn TableColumn<Layer>>> = vec![
                     Box::new(LayerColumn::MergeOrder),
@@ -1232,7 +1220,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
         // Monitor tab - render same charts as function detail
         if app.lambda_state.metrics_loading {
             let loading_block = Block::default()
-                .title(" Monitor ")
+                .title(format_title("Monitor"))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded);
             let loading_text = Paragraph::new("Loading metrics...")
@@ -1276,7 +1264,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                         .split(chunks[2]);
 
                     let config_block = Block::default()
-                        .title(" General configuration ")
+                        .title(format_title("General configuration"))
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .border_style(Style::default());
@@ -1352,7 +1340,7 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     let end_idx = (start_idx + page_size).min(filtered.len());
                     let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-                    let title = format!(" Aliases ({}) ", filtered.len());
+                    let title = format_title(&format!("Aliases ({})", filtered.len()));
 
                     let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
                     for col_name in &app.lambda_state.alias_visible_column_ids {
@@ -1440,7 +1428,7 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
     let end_idx = (start_idx + page_size).min(filtered.len());
     let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-    let title = format!(" Applications ({}) ", filtered.len());
+    let title = format_title(&format!("Applications ({})", filtered.len()));
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaApplication>>> = vec![];
     for col_id in &app.lambda_application_visible_column_ids {
@@ -2431,8 +2419,10 @@ mod tests {
 
     #[test]
     fn test_rounded_block_helper_usage() {
+        use crate::ui::titled_block;
+        use ratatui::prelude::Rect;
         // Verify rounded_block helper creates proper block structure
-        let block = rounded_block().title(" Function overview ");
+        let block = titled_block("Function overview");
         let area = Rect::new(0, 0, 100, 20);
         let inner = block.inner(area);
         assert_eq!(inner.width, 98); // 2 less for borders

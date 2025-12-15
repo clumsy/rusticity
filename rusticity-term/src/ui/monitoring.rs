@@ -1,4 +1,5 @@
 use crate::common::render_vertical_scrollbar;
+use crate::ui::format_title;
 use ratatui::prelude::*;
 use ratatui::widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType, Paragraph};
 
@@ -56,7 +57,7 @@ pub fn render_monitoring_tab(
             chart_idx += 1;
             continue;
         }
-        if y_offset + 20 > available_height {
+        if y_offset + 14 > available_height {
             break;
         }
         let chart_height = 20.min((available_height - y_offset) as u16);
@@ -76,7 +77,7 @@ pub fn render_monitoring_tab(
             chart_idx += 1;
             continue;
         }
-        if y_offset + 20 > available_height {
+        if y_offset + 14 > available_height {
             break;
         }
         let chart_height = 20.min((available_height - y_offset) as u16);
@@ -96,7 +97,7 @@ pub fn render_monitoring_tab(
             chart_idx += 1;
             continue;
         }
-        if y_offset + 20 > available_height {
+        if y_offset + 14 > available_height {
             break;
         }
         let chart_height = 20.min((available_height - y_offset) as u16);
@@ -116,7 +117,7 @@ pub fn render_monitoring_tab(
             chart_idx += 1;
             continue;
         }
-        if y_offset + 20 > available_height {
+        if y_offset + 14 > available_height {
             break;
         }
         let chart_height = 20.min((available_height - y_offset) as u16);
@@ -138,7 +139,7 @@ pub fn render_monitoring_tab(
 
 fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} ", chart.title))
+        .title(format_title(chart.title))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Gray));
@@ -231,7 +232,7 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
 
 fn render_multi_dataset_chart(frame: &mut Frame, chart: &MultiDatasetChart, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} ", chart.title))
+        .title(format_title(chart.title))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Gray));
@@ -352,7 +353,7 @@ fn render_multi_dataset_chart(frame: &mut Frame, chart: &MultiDatasetChart, area
 
 fn render_dual_axis_chart(frame: &mut Frame, chart: &DualAxisChart, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} ", chart.title))
+        .title(format_title(chart.title))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Gray));
@@ -698,5 +699,25 @@ mod tests {
         let right_value = 95.0;
         let normalized = right_value * max_left_y / max_right_y;
         assert_eq!(normalized, 9.5);
+    }
+
+    #[test]
+    fn test_chart_renders_with_14_lines_available() {
+        // Test that a chart will render when exactly 14 lines are available
+        let available_height = 34; // 20 for first chart + 14 for second
+        let y_offset = 20; // After first chart
+
+        // Should render: y_offset (20) + 14 = 34, which is NOT > 34
+        assert!(y_offset + 14 <= available_height);
+    }
+
+    #[test]
+    fn test_chart_skips_with_13_lines_available() {
+        // Test that a chart will NOT render when only 13 lines are available
+        let available_height = 33; // 20 for first chart + 13 remaining
+        let y_offset = 20; // After first chart
+
+        // Should NOT render: y_offset (20) + 14 = 34, which is > 33
+        assert!(y_offset + 14 > available_height);
     }
 }

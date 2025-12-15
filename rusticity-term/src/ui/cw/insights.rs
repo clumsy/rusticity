@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::common::{format_timestamp, render_horizontal_scrollbar, render_vertical_scrollbar};
 use crate::keymap::Mode;
-use crate::ui::vertical;
+use crate::ui::{format_title, vertical};
 use ratatui::{prelude::*, widgets::*};
 
 pub struct State {
@@ -159,7 +159,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
     };
 
     let block = Block::default()
-        .title(" Logs Insights ")
+        .title(format_title("Logs Insights"))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style);
@@ -395,10 +395,10 @@ fn render_results_pane(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let results_block = Block::default()
-        .title(format!(
-            " Logs ({}) ",
+        .title(format_title(&format!(
+            "Logs ({})",
             app.insights_state.insights.query_results.len()
-        ))
+        )))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style);

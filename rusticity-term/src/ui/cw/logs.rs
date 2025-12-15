@@ -9,7 +9,7 @@ use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
 use crate::ui::{
-    calculate_dynamic_height, filter_area, get_cursor, labeled_field,
+    calculate_dynamic_height, filter_area, format_title, get_cursor, labeled_field,
     render_fields_with_dynamic_columns, render_tabs,
 };
 use ratatui::{prelude::*, widgets::*};
@@ -302,7 +302,7 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
-        title: format!(" Log groups ({}) ", filtered_count),
+        title: format_title(&format!("Log groups ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|group: &LogGroup| {
             expanded_from_columns(&columns, group)
@@ -389,7 +389,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some(group) = selected_log_group(app) {
         let detail_block = Block::default()
-            .title(" Log group details ")
+            .title(format_title("Log group details"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default());
@@ -490,9 +490,18 @@ fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, border_sty
 
     let filtered_streams = filtered_log_streams(app);
     let count = filtered_streams.len();
-    let page_size = 20;
+    let page_size = app.log_groups_state.stream_page_size;
     let total_pages = count.div_ceil(page_size);
-    let current_page = app.log_groups_state.selected_stream / page_size;
+    let current_page = app
+        .log_groups_state
+        .stream_current_page
+        .min(total_pages.saturating_sub(1));
+
+    // Paginate the filtered streams
+    let start_idx = current_page * page_size;
+    let end_idx = (start_idx + page_size).min(count);
+    let paginated_streams = filtered_streams[start_idx..end_idx].to_vec();
+
     let pagination = render_pagination_text(current_page, total_pages);
 
     crate::ui::filter::render_filter_bar(
@@ -550,19 +559,20 @@ fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, border_sty
     };
 
     let config = TableConfig {
-        items: filtered_streams,
+        items: paginated_streams,
         selected_index: app.log_groups_state.selected_stream,
         expanded_index: app.log_groups_state.expanded_stream,
         columns: &columns,
         sort_column,
         sort_direction,
-        title: format!(" Log streams ({}) ", count_display),
+        title: format_title(&format!("Log streams ({})", count_display)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|stream: &LogStream| {
             expanded_from_columns(&columns, stream)
         })),
         is_active: border_style.fg == Some(Color::Green)
-            && app.log_groups_state.input_focus != InputFocus::Filter,
+            && (app.mode != Mode::FilterInput
+                || app.log_groups_state.input_focus != InputFocus::Filter),
     };
 
     render_table(frame, config);
@@ -646,7 +656,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
 
     let date_range = Paragraph::new(Line::from(date_range_text)).block(
         Block::default()
-            .title(" Date range ")
+            .title(format_title("Date range"))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(date_border_style),
@@ -815,17 +825,16 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
         .header(header)
         .block(
             Block::default()
-                .title(format!(" Log events ({}) ", visible_events.len()))
+                .title(format_title(&format!(
+                    "Log events ({})",
+                    visible_events.len()
+                )))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(border_style),
         )
         .column_spacing(1)
-        .row_highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .row_highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("");
 
     let mut state = TableState::default();

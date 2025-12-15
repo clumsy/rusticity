@@ -1,7 +1,7 @@
 use crate::app::{App, ViewMode};
 use crate::common::{
-    filter_by_field, filter_by_fields, render_pagination_text, CyclicEnum, InputFocus,
-    SortDirection,
+    filter_by_field, filter_by_fields, format_duration_seconds, render_pagination_text, CyclicEnum,
+    InputFocus, SortDirection,
 };
 use crate::iam::{
     GroupColumn, GroupUser, GroupUserColumn, IamGroup, IamRole, IamUser, LastAccessedService,
@@ -14,14 +14,15 @@ use crate::ui::table::{
     expanded_from_columns, plain_expanded_content, render_table, Column, TableConfig,
 };
 use crate::ui::{
-    block_height_for, calculate_dynamic_height, filter_area, format_duration, get_cursor,
-    labeled_field, render_fields_with_dynamic_columns, render_json_highlighted,
-    render_last_accessed_section, render_permissions_section, render_search_filter, render_summary,
-    render_tabs, render_tags_section, rounded_block, vertical,
+    block_height_for, calculate_dynamic_height, format_title, labeled_field,
+    render_fields_with_dynamic_columns, render_json_highlighted, render_last_accessed_section,
+    render_permissions_section, render_search_filter, render_summary, render_tabs,
+    render_tags_section, titled_block, vertical,
 };
 use ratatui::{prelude::*, widgets::*};
 
 pub const POLICY_TYPE_DROPDOWN: InputFocus = InputFocus::Dropdown("PolicyType");
+pub const HISTORY_FILTER: InputFocus = InputFocus::Dropdown("HistoryFilter");
 pub const POLICY_FILTER_CONTROLS: [InputFocus; 3] = [
     InputFocus::Filter,
     POLICY_TYPE_DROPDOWN,
@@ -29,6 +30,14 @@ pub const POLICY_FILTER_CONTROLS: [InputFocus; 3] = [
 ];
 
 pub const ROLE_FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
+
+pub const USER_SIMPLE_FILTER_CONTROLS: [InputFocus; 2] =
+    [InputFocus::Filter, InputFocus::Pagination];
+
+pub const USER_LAST_ACCESSED_FILTER_CONTROLS: [InputFocus; 3] =
+    [InputFocus::Filter, HISTORY_FILTER, InputFocus::Pagination];
+
+pub const GROUP_FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UserTab {
@@ -142,6 +151,7 @@ pub struct State {
     pub users: TableState<IamUser>,
     pub current_user: Option<String>,
     pub user_tab: UserTab,
+    pub user_input_focus: InputFocus,
     pub roles: TableState<IamRole>,
     pub current_role: Option<String>,
     pub role_tab: RoleTab,
@@ -149,6 +159,7 @@ pub struct State {
     pub groups: TableState<IamGroup>,
     pub current_group: Option<String>,
     pub group_tab: GroupTab,
+    pub group_input_focus: InputFocus,
     pub policies: TableState<Policy>,
     pub policy_type_filter: String,
     pub policy_input_focus: InputFocus,
@@ -164,6 +175,7 @@ pub struct State {
     pub last_accessed_services: TableState<LastAccessedService>,
     pub last_accessed_filter: String,
     pub last_accessed_history_filter: AccessHistoryFilter,
+    pub last_accessed_input_focus: InputFocus,
     pub revoke_sessions_scroll: usize,
 }
 
@@ -179,6 +191,7 @@ impl State {
             users: TableState::new(),
             current_user: None,
             user_tab: UserTab::Permissions,
+            user_input_focus: InputFocus::Filter,
             roles: TableState::new(),
             current_role: None,
             role_tab: RoleTab::Permissions,
@@ -186,6 +199,7 @@ impl State {
             groups: TableState::new(),
             current_group: None,
             group_tab: GroupTab::Users,
+            group_input_focus: InputFocus::Filter,
             policies: TableState::new(),
             policy_type_filter: "All types".to_string(),
             policy_input_focus: InputFocus::Filter,
@@ -201,6 +215,7 @@ impl State {
             last_accessed_services: TableState::new(),
             last_accessed_filter: String::new(),
             last_accessed_history_filter: AccessHistoryFilter::NoFilter,
+            last_accessed_input_focus: InputFocus::Filter,
             revoke_sessions_scroll: 0,
         }
     }
@@ -219,17 +234,11 @@ pub fn render_users(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = vertical(
         [
-            Constraint::Length(1), // Description
             Constraint::Length(3), // Filter
             Constraint::Min(0),    // Table
         ],
         area,
     );
-
-    // Description
-    let desc = Paragraph::new("An IAM user is an identity with long-term credentials that is used to interact with AWS in an account.")
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(desc, chunks[0]);
 
     // Filter
     let filtered_users = filtered_iam_users(app);
@@ -237,7 +246,7 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
     let page_size = app.iam_state.users.page_size.value();
     render_search_filter(
         frame,
-        chunks[1],
+        chunks[0],
         &app.iam_state.users.filter,
         app.mode == Mode::FilterInput,
         app.iam_state.users.selected,
@@ -276,8 +285,8 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "User name",
         sort_direction: SortDirection::Asc,
-        title: format!(" Users ({}) ", filtered_count),
-        area: chunks[2],
+        title: format_title(&format!("Users ({})", filtered_count)),
+        area: chunks[1],
         get_expanded_content: Some(Box::new(|user: &&IamUser| {
             expanded_from_columns(&columns, user)
         })),
@@ -319,7 +328,6 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = vertical(
         [
-            Constraint::Length(1),              // Group name
             Constraint::Length(summary_height), // Summary
             Constraint::Length(1),              // Tabs
             Constraint::Min(0),                 // Content
@@ -328,13 +336,6 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     if let Some(group_name) = &app.iam_state.current_group {
-        let label = Paragraph::new(group_name.as_str()).style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-        frame.render_widget(label, chunks[0]);
-
         // Summary section
         if let Some(group) = app
             .iam_state
@@ -345,7 +346,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         {
             render_summary(
                 frame,
-                chunks[1],
+                chunks[0],
                 " Summary ",
                 &[
                     ("User group name: ", group.group_name.clone()),
@@ -364,43 +365,30 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
         // Tabs
         let tabs: Vec<(&str, GroupTab)> =
             GroupTab::ALL.iter().map(|tab| (tab.name(), *tab)).collect();
-        render_tabs(frame, chunks[2], &tabs, &app.iam_state.group_tab);
+        render_tabs(frame, chunks[1], &tabs, &app.iam_state.group_tab);
 
         // Content area based on selected tab
         match app.iam_state.group_tab {
             GroupTab::Users => {
-                render_group_users_tab(frame, app, chunks[3]);
+                render_group_users_tab(frame, app, chunks[2]);
             }
             GroupTab::Permissions => {
                 render_permissions_section(
                     frame,
-                    chunks[3],
+                    chunks[2],
                     "You can attach up to 10 managed policies.",
                     |f, area| render_policies_table(f, app, area),
                 );
             }
             GroupTab::AccessAdvisor => {
-                render_group_access_advisor_tab(frame, app, chunks[3]);
+                render_group_access_advisor_tab(frame, app, chunks[2]);
             }
         }
     }
 }
 
 pub fn render_group_users_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(1), // Description
-            Constraint::Min(0),    // Table
-        ],
-        area,
-    );
-
-    frame.render_widget(
-        Paragraph::new("An IAM user is an entity that you create in AWS to represent the person or application that uses it to interact with AWS."),
-        chunks[0],
-    );
-
-    render_group_users_table(frame, app, chunks[1]);
+    render_group_users_table(frame, app, area);
 }
 
 pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -476,7 +464,10 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "User name",
         sort_direction: SortDirection::Asc,
-        title: format!(" Users ({}) ", app.iam_state.group_users.items.len()),
+        title: format_title(&format!(
+            "Users ({})",
+            app.iam_state.group_users.items.len()
+        )),
         area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
         get_expanded_content: Some(Box::new(|user: &GroupUser| {
@@ -491,39 +482,18 @@ pub fn render_group_users_table(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_group_access_advisor_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(1), // Description
-            Constraint::Min(0),    // Table with filters
-        ],
-        area,
-    );
-
-    frame.render_widget(
-        Paragraph::new(
-            "IAM reports activity for services and management actions. Learn more about action last accessed information. To see actions, choose the appropriate service name from the list."
-        ),
-        chunks[0],
-    );
-
-    render_last_accessed_table(frame, app, chunks[1]);
+    render_last_accessed_table(frame, app, area);
 }
 
 pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = vertical(
         [
-            Constraint::Length(1), // Description
             Constraint::Length(3), // Filter
             Constraint::Min(0),    // Table
         ],
         area,
     );
 
-    let desc = Paragraph::new("A user group is a collection of IAM users. Use groups to specify permissions for a collection of users.")
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(desc, chunks[0]);
-
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
     let page_size = app.iam_state.groups.page_size.value();
     let filtered_groups: Vec<_> = app
         .iam_state
@@ -546,38 +516,19 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.iam_state.groups.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    let filter_width = (chunks[1].width as usize).saturating_sub(4);
-    let pagination_len = pagination.len();
-    let available_space = filter_width.saturating_sub(pagination_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.groups.filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        first_line_spans.push(Span::raw(&app.iam_state.groups.filter));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    let content_len = if app.iam_state.groups.filter.is_empty() && app.mode != Mode::FilterInput {
-        6
-    } else {
-        app.iam_state.groups.filter.len() + cursor.len()
-    };
-
-    if content_len < available_space {
-        first_line_spans.push(Span::raw(
-            " ".repeat(available_space.saturating_sub(content_len)),
-        ));
-    }
-    first_line_spans.push(Span::styled(
-        pagination,
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[1]);
+    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.iam_state.groups.filter,
+            placeholder: "Search",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.iam_state.group_input_focus == InputFocus::Filter,
+            is_pagination_focused: app.iam_state.group_input_focus == InputFocus::Pagination,
+        },
+    );
 
     let scroll_offset = app.iam_state.groups.scroll_offset;
     let page_groups: Vec<&IamGroup> = filtered_groups
@@ -616,8 +567,11 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Group name",
         sort_direction: SortDirection::Asc,
-        title: format!(" User groups ({}) ", app.iam_state.groups.items.len()),
-        area: chunks[2],
+        title: format_title(&format!(
+            "User groups ({})",
+            app.iam_state.groups.items.len()
+        )),
+        area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
         get_expanded_content: Some(Box::new(|group: &IamGroup| {
             expanded_from_columns(&columns, group)
@@ -630,16 +584,11 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = vertical(
         [
-            Constraint::Length(1), // Description
             Constraint::Length(3), // Filter
             Constraint::Min(0),    // Table
         ],
         area,
     );
-
-    let desc = Paragraph::new("An IAM role is an identity you can create that has specific permissions with credentials that are valid for short durations. Roles can be assumed by entities that you trust.")
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(desc, chunks[0]);
 
     // Filter with CFN pattern
     let page_size = app.iam_state.roles.page_size.value();
@@ -658,7 +607,7 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
 
     render_simple_filter(
         frame,
-        chunks[1],
+        chunks[0],
         SimpleFilterConfig {
             filter_text: &app.iam_state.roles.filter,
             placeholder: "Search",
@@ -678,20 +627,9 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let mut columns: Vec<Box<dyn Column<IamRole>>> = vec![];
-    for col in &app.iam_role_visible_column_ids {
-        let column = match col.as_str() {
-            "Role name" => Some(RoleColumn::RoleName),
-            "Path" => Some(RoleColumn::Path),
-            "Description" => Some(RoleColumn::Description),
-            "Trusted entities" => Some(RoleColumn::TrustedEntities),
-            "Creation time" => Some(RoleColumn::CreationTime),
-            "ARN" => Some(RoleColumn::Arn),
-            "Max CLI/API session" => Some(RoleColumn::MaxSessionDuration),
-            "Last activity" => Some(RoleColumn::LastActivity),
-            _ => None,
-        };
-        if let Some(c) = column {
-            columns.push(Box::new(c));
+    for col_id in &app.iam_role_visible_column_ids {
+        if let Some(col) = RoleColumn::from_id(col_id) {
+            columns.push(Box::new(col));
         }
     }
 
@@ -710,8 +648,8 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Role name",
         sort_direction: SortDirection::Asc,
-        title: format!(" Roles ({}) ", filtered_count),
-        area: chunks[2],
+        title: format_title(&format!("Roles ({})", filtered_count)),
+        area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
         get_expanded_content: Some(Box::new(|role: &IamRole| {
             expanded_from_columns(&columns, role)
@@ -733,23 +671,12 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = vertical(
         [
-            Constraint::Length(1),              // Role name
             Constraint::Length(summary_height), // Summary
             Constraint::Length(1),              // Tabs
             Constraint::Min(0),                 // Content
         ],
         area,
     );
-
-    // Role name label
-    if let Some(role_name) = &app.iam_state.current_role {
-        let label = Paragraph::new(role_name.as_str()).style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-        frame.render_widget(label, chunks[0]);
-    }
 
     // Summary section
     if let Some(role_name) = &app.iam_state.current_role {
@@ -762,12 +689,12 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
         {
             let formatted_duration = role
                 .max_session_duration
-                .map(|d| format_duration(d as u64))
+                .map(format_duration_seconds)
                 .unwrap_or_default();
 
             render_summary(
                 frame,
-                chunks[1],
+                chunks[0],
                 " Summary ",
                 &[
                     ("ARN: ", role.arn.clone()),
@@ -783,7 +710,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
     // Tabs
     render_tabs(
         frame,
-        chunks[2],
+        chunks[1],
         &RoleTab::ALL
             .iter()
             .map(|tab| (tab.name(), *tab))
@@ -796,34 +723,15 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
         RoleTab::Permissions => {
             render_permissions_section(
                 frame,
-                chunks[3],
+                chunks[2],
                 "You can attach up to 10 managed policies.",
                 |f, area| render_policies_table(f, app, area),
             );
         }
         RoleTab::TrustRelationships => {
-            let chunks_inner = vertical(
-                [
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                ],
-                chunks[3],
-            );
-
-            frame.render_widget(
-                Paragraph::new("Trusted entities").style(Style::default().fg(Color::Cyan).bold()),
-                chunks_inner[0],
-            );
-
-            frame.render_widget(
-                Paragraph::new("Entities that can assume this role under specified conditions."),
-                chunks_inner[1],
-            );
-
             render_json_highlighted(
                 frame,
-                chunks_inner[2],
+                chunks[2],
                 &app.iam_state.trust_policy_document,
                 app.iam_state.trust_policy_scroll,
                 " Trust Policy ",
@@ -831,37 +739,9 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
             );
         }
         RoleTab::Tags => {
-            render_tags_section(frame, chunks[3], |f, area| render_tags_table(f, app, area));
+            render_tags_section(frame, chunks[2], |f, area| render_tags_table(f, app, area));
         }
         RoleTab::RevokeSessions => {
-            let chunks_inner = vertical(
-                [
-                    Constraint::Length(1),
-                    Constraint::Length(2),
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                ],
-                chunks[3],
-            );
-
-            frame.render_widget(
-                Paragraph::new("Revoke all active sessions")
-                    .style(Style::default().fg(Color::Cyan).bold()),
-                chunks_inner[0],
-            );
-
-            frame.render_widget(
-                Paragraph::new(
-                    "If you choose Revoke active sessions, IAM attaches an inline policy named AWSRevokeOlderSessions to this role. This policy denies access to all currently active sessions for this role. You can continue to create new sessions based on this role. If you need to undo this action later, you can remove the inline policy."
-                ).wrap(ratatui::widgets::Wrap { trim: true }),
-                chunks_inner[1],
-            );
-
-            frame.render_widget(
-                Paragraph::new("Here is an example of the AWSRevokeOlderSessions policy that is created after you choose Revoke active sessions:"),
-                chunks_inner[2],
-            );
-
             let example_policy = r#"{
     "Version": "2012-10-17",
     "Statement": [
@@ -884,7 +764,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
 
             render_json_highlighted(
                 frame,
-                chunks_inner[3],
+                chunks[2],
                 example_policy,
                 app.iam_state.revoke_sessions_scroll,
                 " Example Policy ",
@@ -894,7 +774,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
         RoleTab::LastAccessed => {
             render_last_accessed_section(
                 frame,
-                chunks[3],
+                chunks[2],
                 "Last accessed information shows the services that this role can access and when those services were last accessed. Review this data to remove unused permissions.",
                 "IAM reports activity for services and management actions. Learn more about action last accessed information. To see actions, choose the appropriate service name from the list.",
                 |f, area| render_last_accessed_table(f, app, area),
@@ -938,7 +818,6 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = vertical(
         [
-            Constraint::Length(1),              // User name
             Constraint::Length(summary_height), // Summary
             Constraint::Length(1),              // Tabs
             Constraint::Min(0),                 // Content
@@ -946,22 +825,12 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
 
-    // User name label
-    if let Some(user_name) = &app.iam_state.current_user {
-        let label = Paragraph::new(user_name.as_str()).style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-        frame.render_widget(label, chunks[0]);
-    }
-
     // Summary section
     if !summary_lines.is_empty() {
-        let summary_block = rounded_block().title(" Summary ");
+        let summary_block = titled_block("Summary");
 
-        let summary_inner = summary_block.inner(chunks[1]);
-        frame.render_widget(summary_block, chunks[1]);
+        let summary_inner = summary_block.inner(chunks[0]);
+        frame.render_widget(summary_block, chunks[0]);
 
         render_fields_with_dynamic_columns(frame, summary_inner, summary_lines);
     }
@@ -969,7 +838,7 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
     // Tabs
     render_tabs(
         frame,
-        chunks[2],
+        chunks[1],
         &UserTab::ALL
             .iter()
             .map(|tab| (tab.name(), *tab))
@@ -979,15 +848,22 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     // Content area - Permissions tab
     if app.iam_state.user_tab == UserTab::Permissions {
-        render_permissions_tab(frame, app, chunks[3]);
+        render_permissions_tab(frame, app, chunks[2]);
     } else if app.iam_state.user_tab == UserTab::Groups {
-        render_user_groups_tab(frame, app, chunks[3]);
+        render_user_groups_tab(frame, app, chunks[2]);
     } else if app.iam_state.user_tab == UserTab::Tags {
-        render_tags_section(frame, chunks[3], |f, area| {
+        render_tags_section(frame, chunks[2], |f, area| {
             render_user_tags_table(f, app, area)
         });
+    } else if app.iam_state.user_tab == UserTab::SecurityCredentials {
+        let block = titled_block("Security Credentials");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let text = Paragraph::new("Security credentials information is not yet implemented.");
+        frame.render_widget(text, inner);
     } else if app.iam_state.user_tab == UserTab::LastAccessed {
-        render_user_last_accessed_tab(frame, app, chunks[3]);
+        render_user_last_accessed_tab(frame, app, chunks[2]);
     }
 }
 
@@ -1003,17 +879,9 @@ pub fn render_permissions_tab(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_policy_view(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
-    let chunks = vertical([Constraint::Length(1), Constraint::Min(0)], area);
-
-    let policy_name = app.iam_state.current_policy.as_deref().unwrap_or("");
-    frame.render_widget(
-        Paragraph::new(policy_name).style(Style::default().fg(Color::Cyan).bold()),
-        chunks[0],
-    );
-
     render_json_highlighted(
         frame,
-        chunks[1],
+        area,
         &app.iam_state.policy_document,
         app.iam_state.policy_scroll,
         " Policy Document ",
@@ -1024,14 +892,13 @@ pub fn render_policy_view(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = vertical(
         [
-            Constraint::Length(3), // Filter with dropdown and pagination
+            Constraint::Length(3), // Filter bar
             Constraint::Min(0),    // Table
         ],
         area,
     );
 
-    // Filter
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
+    // Filter policies
     let page_size = app.iam_state.policies.page_size.value();
     let filtered_policies: Vec<_> = app
         .iam_state
@@ -1059,49 +926,29 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
     let total_pages = filtered_count.div_ceil(page_size);
     let current_page = app.iam_state.policies.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
-    let dropdown = format!("Type: {}", app.iam_state.policy_type_filter);
+    let policy_type_text = format!("Type: {}", app.iam_state.policy_type_filter);
 
-    let filter_width = (chunks[0].width as usize).saturating_sub(4);
-    let right_content = format!("{} ⋮ {}", dropdown, pagination);
-    let right_len = right_content.len();
-    let available_space = filter_width.saturating_sub(right_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.policies.filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        let display_text = if app.iam_state.policies.filter.len() > available_space {
-            format!(
-                "...{}",
-                &app.iam_state.policies.filter
-                    [app.iam_state.policies.filter.len() - available_space + 3..]
-            )
-        } else {
-            app.iam_state.policies.filter.clone()
-        };
-        first_line_spans.push(Span::raw(display_text));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    first_line_spans.push(Span::raw(
-        " ".repeat(
-            available_space.saturating_sub(
-                first_line_spans
-                    .iter()
-                    .map(|s| s.content.len())
-                    .sum::<usize>(),
-            ),
-        ),
-    ));
-    first_line_spans.push(Span::styled(
-        right_content,
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[0]);
+    use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
+    render_filter_bar(
+        frame,
+        FilterConfig {
+            filter_text: &app.iam_state.policies.filter,
+            placeholder: "Search",
+            mode: app.mode,
+            is_input_focused: app.iam_state.policy_input_focus == InputFocus::Filter,
+            controls: vec![
+                FilterControl {
+                    text: policy_type_text,
+                    is_focused: app.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN,
+                },
+                FilterControl {
+                    text: pagination.clone(),
+                    is_focused: app.iam_state.policy_input_focus == InputFocus::Pagination,
+                },
+            ],
+            area: chunks[0],
+        },
+    );
 
     // Table
     let scroll_offset = app.iam_state.policies.scroll_offset;
@@ -1141,7 +988,7 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Policy name",
         sort_direction: SortDirection::Asc,
-        title: format!(" Permissions policies ({}) ", filtered_count),
+        title: format_title(&format!("Permissions policies ({})", filtered_count)),
         area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
         get_expanded_content: Some(Box::new(|policy: &Policy| {
@@ -1150,6 +997,24 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     render_table(frame, config);
+
+    // Render dropdown for policy type when focused (after table so it appears on top)
+    if app.mode == Mode::FilterInput && app.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN {
+        use crate::common::render_dropdown;
+        let policy_types = ["All types", "AWS managed", "Customer managed"];
+        let selected_idx = policy_types
+            .iter()
+            .position(|&t| t == app.iam_state.policy_type_filter)
+            .unwrap_or(0);
+        let controls_after = pagination.len() as u16 + 3;
+        render_dropdown(
+            frame,
+            &policy_types,
+            selected_idx,
+            chunks[0],
+            controls_after,
+        );
+    }
 }
 
 pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -1162,7 +1027,6 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Filter
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
     let page_size = app.iam_state.tags.page_size.value();
     let filtered_tags: Vec<_> = app
         .iam_state
@@ -1188,38 +1052,19 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.iam_state.tags.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    let filter_width = (chunks[0].width as usize).saturating_sub(4);
-    let pagination_len = pagination.len();
-    let available_space = filter_width.saturating_sub(pagination_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.tags.filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        first_line_spans.push(Span::raw(&app.iam_state.tags.filter));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    let content_len = if app.iam_state.tags.filter.is_empty() && app.mode != Mode::FilterInput {
-        6
-    } else {
-        app.iam_state.tags.filter.len() + cursor.len()
-    };
-
-    if content_len < available_space {
-        first_line_spans.push(Span::raw(
-            " ".repeat(available_space.saturating_sub(content_len)),
-        ));
-    }
-    first_line_spans.push(Span::styled(
-        pagination,
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[0]);
+    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.iam_state.tags.filter,
+            placeholder: "Search",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.iam_state.role_input_focus == InputFocus::Filter,
+            is_pagination_focused: app.iam_state.role_input_focus == InputFocus::Pagination,
+        },
+    );
 
     // Table using common render_table
     let scroll_offset = app.iam_state.tags.scroll_offset;
@@ -1248,7 +1093,7 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
-        title: format!(" Tags ({}) ", app.iam_state.tags.items.len()),
+        title: format_title(&format!("Tags ({})", app.iam_state.tags.items.len())),
         area: chunks[1],
         is_active: true,
         get_expanded_content: Some(Box::new(|tag: &RoleTag| {
@@ -1260,21 +1105,7 @@ pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_user_groups_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(1), // Description
-            Constraint::Min(0),    // Table
-        ],
-        area,
-    );
-
-    let desc = Paragraph::new(
-        "A user group is a collection of IAM users. Use groups to specify permissions for a collection of users. A user can be a member of up to 10 groups at a time.",
-    )
-    .style(Style::default().fg(Color::White));
-    frame.render_widget(desc, chunks[0]);
-
-    render_user_groups_table(frame, app, chunks[1]);
+    render_user_groups_table(frame, app, area);
 }
 
 pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -1286,7 +1117,6 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
 
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
     let page_size = app.iam_state.user_group_memberships.page_size.value();
     let filtered_groups: Vec<_> = app
         .iam_state
@@ -1309,40 +1139,19 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.iam_state.user_group_memberships.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    let filter_width = (chunks[0].width as usize).saturating_sub(4);
-    let pagination_len = pagination.len();
-    let available_space = filter_width.saturating_sub(pagination_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.user_group_memberships.filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        first_line_spans.push(Span::raw(&app.iam_state.user_group_memberships.filter));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    let content_len = if app.iam_state.user_group_memberships.filter.is_empty()
-        && app.mode != Mode::FilterInput
-    {
-        6
-    } else {
-        app.iam_state.user_group_memberships.filter.len() + cursor.len()
-    };
-
-    if content_len < available_space {
-        first_line_spans.push(Span::raw(
-            " ".repeat(available_space.saturating_sub(content_len)),
-        ));
-    }
-    first_line_spans.push(Span::styled(
-        pagination,
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[0]);
+    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.iam_state.user_group_memberships.filter,
+            placeholder: "Search",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.iam_state.user_input_focus == InputFocus::Filter,
+            is_pagination_focused: app.iam_state.user_input_focus == InputFocus::Pagination,
+        },
+    );
 
     let scroll_offset = app.iam_state.user_group_memberships.scroll_offset;
     let page_groups: Vec<&UserGroup> = filtered_groups
@@ -1376,10 +1185,10 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
-        title: format!(
-            " User groups membership ({}) ",
+        title: format_title(&format!(
+            "User groups membership ({})",
             app.iam_state.user_group_memberships.items.len()
-        ),
+        )),
         area: chunks[1],
         is_active: true,
         get_expanded_content: Some(Box::new(|group: &UserGroup| {
@@ -1394,30 +1203,7 @@ pub fn render_user_groups_table(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_user_last_accessed_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(1), // Description
-            Constraint::Length(1), // Note above table
-            Constraint::Min(0),    // Table with filters
-        ],
-        area,
-    );
-
-    frame.render_widget(
-        Paragraph::new(
-            "Last accessed information shows the services that this user can access and when those services were last accessed. Review this data to remove unused permissions."
-        ),
-        chunks[0],
-    );
-
-    frame.render_widget(
-        Paragraph::new(
-            "IAM reports activity for services and management actions. Learn more about action last accessed information. To see actions, choose the appropriate service name from the list."
-        ),
-        chunks[1],
-    );
-
-    render_last_accessed_table(frame, app, chunks[2]);
+    render_last_accessed_table(frame, app, area);
 }
 
 pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
@@ -1430,7 +1216,6 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Filter
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
     let page_size = app.iam_state.user_tags.page_size.value();
     let filtered_tags: Vec<_> = app
         .iam_state
@@ -1456,39 +1241,19 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
     let current_page = app.iam_state.user_tags.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
-    let filter_width = (chunks[0].width as usize).saturating_sub(4);
-    let pagination_len = pagination.len();
-    let available_space = filter_width.saturating_sub(pagination_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.user_tags.filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        first_line_spans.push(Span::raw(&app.iam_state.user_tags.filter));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    let content_len = if app.iam_state.user_tags.filter.is_empty() && app.mode != Mode::FilterInput
-    {
-        6
-    } else {
-        app.iam_state.user_tags.filter.len() + cursor.len()
-    };
-
-    if content_len < available_space {
-        first_line_spans.push(Span::raw(
-            " ".repeat(available_space.saturating_sub(content_len)),
-        ));
-    }
-    first_line_spans.push(Span::styled(
-        pagination,
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[0]);
+    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.iam_state.user_tags.filter,
+            placeholder: "Search",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.iam_state.user_input_focus == InputFocus::Filter,
+            is_pagination_focused: app.iam_state.user_input_focus == InputFocus::Pagination,
+        },
+    );
 
     // Table using common render_table
     let scroll_offset = app.iam_state.user_tags.scroll_offset;
@@ -1517,7 +1282,7 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
-        title: format!(" Tags ({}) ", app.iam_state.user_tags.items.len()),
+        title: format_title(&format!("Tags ({})", app.iam_state.user_tags.items.len())),
         area: chunks[1],
         is_active: true,
         get_expanded_content: Some(Box::new(|tag: &UserTag| {
@@ -1531,14 +1296,13 @@ pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = vertical(
         [
-            Constraint::Length(3), // Filter with dropdown and pagination
+            Constraint::Length(3), // Filter bar
             Constraint::Min(0),    // Table
         ],
         area,
     );
 
-    // Filter
-    let cursor = get_cursor(app.mode == Mode::FilterInput);
+    // Filter services
     let page_size = app.iam_state.last_accessed_services.page_size.value();
     let filtered_services: Vec<_> = app
         .iam_state
@@ -1570,51 +1334,33 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
     let total_pages = filtered_count.div_ceil(page_size);
     let current_page = app.iam_state.last_accessed_services.selected / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
-    let dropdown = format!(
-        "Filter by services access history: {}",
+
+    let history_filter_text = format!(
+        "Filter by access history: {}",
         app.iam_state.last_accessed_history_filter.name()
     );
 
-    let filter_width = (chunks[0].width as usize).saturating_sub(4);
-    let right_content = format!("{} ⋮ {}", dropdown, pagination);
-    let right_len = right_content.len();
-    let available_space = filter_width.saturating_sub(right_len + 1);
-
-    let mut first_line_spans = vec![];
-    if app.iam_state.last_accessed_filter.is_empty() && app.mode != Mode::FilterInput {
-        first_line_spans.push(Span::styled("Search", Style::default().fg(Color::DarkGray)));
-    } else {
-        let display_text = if app.iam_state.last_accessed_filter.len() > available_space {
-            format!(
-                "...{}",
-                &app.iam_state.last_accessed_filter
-                    [app.iam_state.last_accessed_filter.len() - available_space + 3..]
-            )
-        } else {
-            app.iam_state.last_accessed_filter.clone()
-        };
-        first_line_spans.push(Span::raw(display_text));
-    }
-    if app.mode == Mode::FilterInput {
-        first_line_spans.push(Span::raw(cursor));
-    }
-
-    first_line_spans.push(Span::raw(
-        " ".repeat(
-            available_space.saturating_sub(
-                first_line_spans
-                    .iter()
-                    .map(|s| s.content.len())
-                    .sum::<usize>(),
-            ),
-        ),
-    ));
-    first_line_spans.push(Span::styled(
-        right_content,
-        Style::default().fg(Color::DarkGray),
-    ));
-    let filter = filter_area(first_line_spans, app.mode == Mode::FilterInput);
-    frame.render_widget(filter, chunks[0]);
+    use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
+    render_filter_bar(
+        frame,
+        FilterConfig {
+            filter_text: &app.iam_state.last_accessed_filter,
+            placeholder: "Search",
+            mode: app.mode,
+            is_input_focused: app.iam_state.last_accessed_input_focus == InputFocus::Filter,
+            controls: vec![
+                FilterControl {
+                    text: history_filter_text,
+                    is_focused: app.iam_state.last_accessed_input_focus == HISTORY_FILTER,
+                },
+                FilterControl {
+                    text: pagination.clone(),
+                    is_focused: app.iam_state.last_accessed_input_focus == InputFocus::Pagination,
+                },
+            ],
+            area: chunks[0],
+        },
+    );
 
     // Table using common render_table
     let scroll_offset = app.iam_state.last_accessed_services.scroll_offset;
@@ -1654,10 +1400,10 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Last accessed",
         sort_direction: SortDirection::Desc,
-        title: format!(
-            " Allowed services ({}) ",
+        title: format_title(&format!(
+            "Allowed services ({})",
             app.iam_state.last_accessed_services.items.len()
-        ),
+        )),
         area: chunks[1],
         is_active: true,
         get_expanded_content: Some(Box::new(|service: &LastAccessedService| {
@@ -1669,6 +1415,24 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     render_table(frame, config);
+
+    // Render dropdown for history filter when focused (after table so it appears on top)
+    if app.mode == Mode::FilterInput && app.iam_state.last_accessed_input_focus == HISTORY_FILTER {
+        use crate::common::render_dropdown;
+        let filter_names: Vec<&str> = AccessHistoryFilter::ALL.iter().map(|f| f.name()).collect();
+        let selected_idx = AccessHistoryFilter::ALL
+            .iter()
+            .position(|f| *f == app.iam_state.last_accessed_history_filter)
+            .unwrap_or(0);
+        let controls_after = pagination.len() as u16 + 3;
+        render_dropdown(
+            frame,
+            &filter_names,
+            selected_idx,
+            chunks[0],
+            controls_after,
+        );
+    }
 }
 
 // IAM-specific helper functions
@@ -2008,7 +1772,7 @@ mod tests {
     #[test]
     fn test_rounded_block_for_summary() {
         use ratatui::prelude::Rect;
-        let block = rounded_block().title(" Summary ");
+        let block = titled_block("Summary");
         let area = Rect::new(0, 0, 60, 15);
         let inner = block.inner(area);
         assert_eq!(inner.width, 58);

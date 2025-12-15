@@ -9,8 +9,9 @@ use crate::table::TableState;
 use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
-    block_height_for, calculate_dynamic_height, labeled_field, render_fields_with_dynamic_columns,
-    render_json_highlighted, render_tabs, rounded_block,
+    block_height_for, calculate_dynamic_height, format_title, labeled_field,
+    render_fields_with_dynamic_columns, render_json_highlighted, render_tabs, rounded_block,
+    titled_block,
 };
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::cfn::{StackOutput, StackParameter, StackResource};
@@ -435,7 +436,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         columns: &columns,
         sort_column: app.cfn_state.sort_column.default_name(),
         sort_direction: app.cfn_state.sort_direction,
-        title: format!(" Stacks ({}) ", filtered_count),
+        title: format_title(&format!("Stacks ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|stack: &&CfnStack| {
             expanded_from_columns(&columns, stack)
@@ -476,7 +477,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         .find(|s| &s.name == stack_name);
 
     if stack.is_none() {
-        let paragraph = Paragraph::new("Stack not found").block(rounded_block().title(" Error "));
+        let paragraph = Paragraph::new("Stack not found").block(titled_block("Error"));
         frame.render_widget(paragraph, area);
         return;
     }
@@ -486,31 +487,27 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Stack name
             Constraint::Length(1), // Tabs
             Constraint::Min(0),    // Content
         ])
         .split(area);
 
-    // Render stack name
-    frame.render_widget(Paragraph::new(stack.name.clone()), chunks[0]);
-
     // Render tabs
     let tabs: Vec<_> = DetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
-    render_tabs(frame, chunks[1], &tabs, &app.cfn_state.detail_tab);
+    render_tabs(frame, chunks[0], &tabs, &app.cfn_state.detail_tab);
 
     // Render content based on selected tab
     match app.cfn_state.detail_tab {
         DetailTab::StackInfo => {
-            render_stack_info(frame, app, stack, chunks[2]);
+            render_stack_info(frame, app, stack, chunks[1]);
         }
         DetailTab::GitSync => {
-            render_git_sync(frame, app, stack, chunks[2]);
+            render_git_sync(frame, app, stack, chunks[1]);
         }
         DetailTab::Template => {
             render_json_highlighted(
                 frame,
-                chunks[2],
+                chunks[1],
                 &app.cfn_state.template_body,
                 app.cfn_state.template_scroll,
                 " Template ",
@@ -518,19 +515,19 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
             );
         }
         DetailTab::Parameters => {
-            render_parameters(frame, app, chunks[2]);
+            render_parameters(frame, app, chunks[1]);
         }
         DetailTab::Outputs => {
-            render_outputs(frame, app, chunks[2]);
+            render_outputs(frame, app, chunks[1]);
         }
         DetailTab::Resources => {
-            render_resources(frame, app, chunks[2]);
+            render_resources(frame, app, chunks[1]);
         }
         _ => {
             let paragraph =
                 Paragraph::new(format!("{} - Coming soon", app.cfn_state.detail_tab.name()))
                     .block(rounded_block());
-            frame.render_widget(paragraph, chunks[2]);
+            frame.render_widget(paragraph, chunks[1]);
         }
     }
 }
@@ -716,7 +713,7 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
         .map(|(label, value)| labeled_field(label, *value))
         .collect();
 
-    let overview_block = rounded_block().title(" Overview ");
+    let overview_block = titled_block("Overview");
     let overview_inner = overview_block.inner(sections[0]);
     frame.render_widget(overview_block, sections[0]);
     render_fields_with_dynamic_columns(frame, overview_inner, overview_lines);
@@ -740,14 +737,14 @@ pub fn render_stack_info(frame: &mut Frame, app: &App, stack: &CfnStack, area: R
     );
 
     // Render rollback configuration
-    let rollback_block = rounded_block().title(" Rollback configuration ");
+    let rollback_block = titled_block("Rollback configuration");
     let rollback_inner = rollback_block.inner(sections[3]);
     frame.render_widget(rollback_block, sections[3]);
     render_fields_with_dynamic_columns(frame, rollback_inner, rollback_lines);
 
     // Render notification options
     let notifications = Paragraph::new(notification_lines.join("\n"))
-        .block(rounded_block().title(" Notification options "))
+        .block(titled_block("Notification options"))
         .wrap(Wrap { trim: true });
     frame.render_widget(notifications, sections[4]);
 }
@@ -797,7 +794,7 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Key",
         sort_direction: SortDirection::Asc,
-        title: format!(" Tags ({}) ", filtered_count),
+        title: format_title(&format!("Tags ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|tag: &(String, String)| {
             expanded_from_columns(&columns, tag)
@@ -832,7 +829,7 @@ fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &CfnStack, area: Rect)
         .map(|&(label, value)| labeled_field(label, value))
         .collect();
 
-    let block = rounded_block().title(" Git sync ");
+    let block = titled_block("Git sync");
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, sections[0]);
 }
@@ -1090,9 +1087,9 @@ mod tests {
 
     #[test]
     fn test_rounded_block_for_rollback_config() {
-        use crate::ui::rounded_block;
+        use crate::ui::titled_block;
         use ratatui::prelude::Rect;
-        let block = rounded_block().title(" Rollback configuration ");
+        let block = titled_block("Rollback configuration");
         let area = Rect::new(0, 0, 90, 8);
         let inner = block.inner(area);
         assert_eq!(inner.width, 88);
@@ -1198,7 +1195,7 @@ pub fn render_parameters(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Key",
         sort_direction: SortDirection::Asc,
-        title: format!(" Parameters ({}) ", filtered_count),
+        title: format_title(&format!("Parameters ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|param: &StackParameter| {
             expanded_from_columns(&columns, param)
@@ -1294,7 +1291,7 @@ pub fn render_outputs(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Key",
         sort_direction: SortDirection::Asc,
-        title: format!(" Outputs ({}) ", filtered_count),
+        title: format_title(&format!("Outputs ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|output: &StackOutput| {
             expanded_from_columns(&columns, output)
@@ -1368,7 +1365,7 @@ pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
         columns: &columns,
         sort_column: "Logical ID",
         sort_direction: SortDirection::Asc,
-        title: format!(" Resources ({}) ", filtered_count),
+        title: format_title(&format!("Resources ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|resource: &StackResource| {
             expanded_from_columns(&columns, resource)

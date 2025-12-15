@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 
-use super::styles;
+use super::{rounded_block, styles};
 use crate::common::{render_scrollbar, t, SortDirection};
 
 pub const CURSOR_COLLAPSED: &str = "►";
@@ -110,6 +110,12 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         Style::default()
     };
 
+    let title_style = if config.is_active {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default()
+    };
+
     // Headers with sort indicators
     let header_cells = config.columns.iter().enumerate().map(|(i, col)| {
         let mut name = col.name().to_string();
@@ -214,12 +220,9 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     let table = Table::new(all_rows, widths)
         .header(header)
         .block(
-            Block::default()
-                .title(config.title)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(border_style)
-                .border_type(BorderType::Rounded),
+            rounded_block()
+                .title(Span::styled(config.title, title_style))
+                .border_style(border_style),
         )
         .column_spacing(1)
         .row_highlight_style(styles::highlight());

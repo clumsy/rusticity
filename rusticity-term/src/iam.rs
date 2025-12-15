@@ -165,7 +165,55 @@ pub enum UserColumn {
 }
 
 impl UserColumn {
-    pub fn from_id(id: ColumnId) -> Option<Self> {
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::UserName => "column.iam.user.user_name",
+            Self::Path => "column.iam.user.path",
+            Self::Groups => "column.iam.user.groups",
+            Self::LastActivity => "column.iam.user.last_activity",
+            Self::Mfa => "column.iam.user.mfa",
+            Self::PasswordAge => "column.iam.user.password_age",
+            Self::ConsoleLastSignIn => "column.iam.user.console_last_sign_in",
+            Self::AccessKeyId => "column.iam.user.access_key_id",
+            Self::ActiveKeyAge => "column.iam.user.active_key_age",
+            Self::AccessKeyLastUsed => "column.iam.user.access_key_last_used",
+            Self::Arn => "column.iam.user.arn",
+            Self::CreationTime => "column.iam.user.creation_time",
+            Self::ConsoleAccess => "column.iam.user.console_access",
+            Self::SigningCerts => "column.iam.user.signing_certs",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            Self::UserName => "User name",
+            Self::Path => "Path",
+            Self::Groups => "Groups",
+            Self::LastActivity => "Last activity",
+            Self::Mfa => "MFA",
+            Self::PasswordAge => "Password age",
+            Self::ConsoleLastSignIn => "Console last sign-in",
+            Self::AccessKeyId => "Access key ID",
+            Self::ActiveKeyAge => "Active key age",
+            Self::AccessKeyLastUsed => "Access key last used",
+            Self::Arn => "ARN",
+            Self::CreationTime => "Creation time",
+            Self::ConsoleAccess => "Console access",
+            Self::SigningCerts => "Signing certificates",
+        }
+    }
+
+    pub fn name(&self) -> String {
+        let key = self.id();
+        let translated = t(key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "column.iam.user.user_name" => Some(Self::UserName),
             "column.iam.user.path" => Some(Self::Path),
@@ -259,6 +307,20 @@ pub enum RoleColumn {
 }
 
 impl RoleColumn {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "column.iam.role.role_name" => Some(Self::RoleName),
+            "column.iam.role.path" => Some(Self::Path),
+            "column.iam.role.trusted_entities" => Some(Self::TrustedEntities),
+            "column.iam.role.last_activity" => Some(Self::LastActivity),
+            "column.iam.role.arn" => Some(Self::Arn),
+            "column.iam.role.creation_time" => Some(Self::CreationTime),
+            "column.iam.role.description" => Some(Self::Description),
+            "column.iam.role.max_session_duration" => Some(Self::MaxSessionDuration),
+            _ => None,
+        }
+    }
+
     pub fn id(&self) -> ColumnId {
         match self {
             Self::RoleName => "column.iam.role.role_name",
@@ -285,6 +347,16 @@ impl RoleColumn {
         }
     }
 
+    pub fn name(&self) -> String {
+        let key = self.id();
+        let translated = t(key);
+        if translated == key {
+            self.default_name().to_string()
+        } else {
+            translated
+        }
+    }
+
     pub fn all() -> [RoleColumn; 8] {
         [
             Self::RoleName,
@@ -295,6 +367,18 @@ impl RoleColumn {
             Self::CreationTime,
             Self::Description,
             Self::MaxSessionDuration,
+        ]
+    }
+
+    pub fn ids() -> Vec<ColumnId> {
+        Self::all().iter().map(|c| c.id()).collect()
+    }
+
+    pub fn visible() -> Vec<ColumnId> {
+        vec![
+            Self::RoleName.id(),
+            Self::TrustedEntities.id(),
+            Self::CreationTime.id(),
         ]
     }
 }
@@ -476,7 +560,20 @@ impl Column<IamGroup> for GroupColumn {
 }
 
 impl Column<IamRole> for RoleColumn {
-    fn name(&self) -> &str {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::RoleName => "column.iam.role.role_name",
+            Self::Path => "column.iam.role.path",
+            Self::TrustedEntities => "column.iam.role.trusted_entities",
+            Self::LastActivity => "column.iam.role.last_activity",
+            Self::Arn => "column.iam.role.arn",
+            Self::CreationTime => "column.iam.role.creation_time",
+            Self::Description => "column.iam.role.description",
+            Self::MaxSessionDuration => "column.iam.role.max_session_duration",
+        }
+    }
+
+    fn default_name(&self) -> &'static str {
         match self {
             Self::RoleName => "Role name",
             Self::Path => "Path",

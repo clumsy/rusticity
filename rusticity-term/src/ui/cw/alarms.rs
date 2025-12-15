@@ -3,7 +3,7 @@ use crate::common::{ColumnId, CyclicEnum, InputFocus};
 use crate::cw::{Alarm, AlarmColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{render_table, Column, TableConfig};
-use crate::ui::vertical;
+use crate::ui::{format_title, vertical};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -211,7 +211,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let count = filtered_alarms.len();
-    let title = format!(" Alarms ({}) ", count);
+    let title = format_title(&format!("Alarms ({})", count));
 
     let columns: Vec<Box<dyn Column<Alarm>>> = app
         .cw_alarm_visible_column_ids

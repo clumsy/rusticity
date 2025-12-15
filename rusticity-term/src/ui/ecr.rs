@@ -7,8 +7,8 @@ use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-use crate::ui::render_tabs;
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::{format_title, render_tabs};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -171,7 +171,7 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         Tab::Private => "Private",
         Tab::Public => "Public",
     };
-    let title = format!(" {} repositories ({}) ", tab_label, filtered.len());
+    let title = format_title(&format!("{} repositories ({})", tab_label, filtered.len()));
 
     // Define columns
     let columns: Vec<Box<dyn Column<EcrRepository>>> = app
@@ -280,7 +280,7 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
     let end_idx = (start_idx + page_size).min(filtered.len());
     let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
 
-    let title = format!(" Images ({}) ", filtered.len());
+    let title = format_title(&format!("Images ({})", filtered.len()));
 
     // Define columns
     let columns: Vec<Box<dyn Column<EcrImage>>> = app

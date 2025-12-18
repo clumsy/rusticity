@@ -419,7 +419,9 @@ mod tests {
         let help_text = " ↑↓ scroll ⋮ ←→ toggle ⋮ ⏎ open ⋮ ^o console ⋮ p preferences ⋮ ^p print ⋮ ^r refresh ⋮ ^w close ⋮ q quit ";
         let help_width: usize = help_text.len();
 
-        let version_text = "RUSTICITY v0.1.4 (#1234567)";
+        let version = env!("CARGO_PKG_VERSION");
+        let commit = option_env!("GIT_HASH").unwrap_or("unknown");
+        let version_text = format!("RUSTICITY v{} (#{})", version, commit);
         let version_width: usize = version_text.len();
 
         // Simulate terminal width of 200

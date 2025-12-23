@@ -28,16 +28,21 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> ColumnId {
+    const ID_NAME: &'static str = "column.sqs.pipe.name";
+    const ID_STATUS: &'static str = "column.sqs.pipe.status";
+    const ID_TARGET: &'static str = "column.sqs.pipe.target";
+    const ID_LAST_MODIFIED: &'static str = "column.sqs.pipe.last_modified";
+
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Column::Name => "column.sqs.pipe.name",
-            Column::Status => "column.sqs.pipe.status",
-            Column::Target => "column.sqs.pipe.target",
-            Column::LastModified => "column.sqs.pipe.last_modified",
+            Column::Name => Self::ID_NAME,
+            Column::Status => Self::ID_STATUS,
+            Column::Target => Self::ID_TARGET,
+            Column::LastModified => Self::ID_LAST_MODIFIED,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Pipe name",
             Column::Status => "Status",
@@ -52,15 +57,15 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.sqs.pipe.name" => Some(Column::Name),
-            "column.sqs.pipe.status" => Some(Column::Status),
-            "column.sqs.pipe.target" => Some(Column::Target),
-            "column.sqs.pipe.last_modified" => Some(Column::LastModified),
+            Self::ID_NAME => Some(Column::Name),
+            Self::ID_STATUS => Some(Column::Status),
+            Self::ID_TARGET => Some(Column::Target),
+            Self::ID_LAST_MODIFIED => Some(Column::LastModified),
             _ => None,
         }
     }
 
-    pub fn all() -> [Column; 4] {
+    pub const fn all() -> [Column; 4] {
         [
             Column::Name,
             Column::Status,

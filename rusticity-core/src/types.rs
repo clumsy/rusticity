@@ -9,6 +9,8 @@ pub struct LogGroup {
     pub retention_days: Option<i32>,
     pub log_class: Option<String>,
     pub arn: Option<String>,
+    pub log_group_arn: Option<String>,
+    pub deletion_protection_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

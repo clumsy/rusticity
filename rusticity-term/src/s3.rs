@@ -72,15 +72,19 @@ pub enum BucketColumn {
 }
 
 impl BucketColumn {
-    pub fn id(&self) -> &'static str {
+    const ID_NAME: &'static str = "column.s3.bucket.name";
+    const ID_REGION: &'static str = "column.s3.bucket.region";
+    const ID_CREATION_DATE: &'static str = "column.s3.bucket.creation_date";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            BucketColumn::Name => "column.s3.bucket.name",
-            BucketColumn::Region => "column.s3.bucket.region",
-            BucketColumn::CreationDate => "column.s3.bucket.creation_date",
+            BucketColumn::Name => Self::ID_NAME,
+            BucketColumn::Region => Self::ID_REGION,
+            BucketColumn::CreationDate => Self::ID_CREATION_DATE,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             BucketColumn::Name => "Name",
             BucketColumn::Region => "Region",
@@ -88,7 +92,7 @@ impl BucketColumn {
         }
     }
 
-    pub fn all() -> [BucketColumn; 3] {
+    pub const fn all() -> [BucketColumn; 3] {
         [
             BucketColumn::Name,
             BucketColumn::Region,
@@ -102,9 +106,9 @@ impl BucketColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.s3.bucket.name" => Some(BucketColumn::Name),
-            "column.s3.bucket.region" => Some(BucketColumn::Region),
-            "column.s3.bucket.creation_date" => Some(BucketColumn::CreationDate),
+            Self::ID_NAME => Some(BucketColumn::Name),
+            Self::ID_REGION => Some(BucketColumn::Region),
+            Self::ID_CREATION_DATE => Some(BucketColumn::CreationDate),
             _ => None,
         }
     }
@@ -148,17 +152,23 @@ pub enum ObjectColumn {
 }
 
 impl ObjectColumn {
-    pub fn id(&self) -> &'static str {
+    const ID_KEY: &'static str = "column.s3.object.key";
+    const ID_TYPE: &'static str = "column.s3.object.type";
+    const ID_LAST_MODIFIED: &'static str = "column.s3.object.last_modified";
+    const ID_SIZE: &'static str = "column.s3.object.size";
+    const ID_STORAGE_CLASS: &'static str = "column.s3.object.storage_class";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            ObjectColumn::Key => "column.s3.object.key",
-            ObjectColumn::Type => "column.s3.object.type",
-            ObjectColumn::LastModified => "column.s3.object.last_modified",
-            ObjectColumn::Size => "column.s3.object.size",
-            ObjectColumn::StorageClass => "column.s3.object.storage_class",
+            ObjectColumn::Key => Self::ID_KEY,
+            ObjectColumn::Type => Self::ID_TYPE,
+            ObjectColumn::LastModified => Self::ID_LAST_MODIFIED,
+            ObjectColumn::Size => Self::ID_SIZE,
+            ObjectColumn::StorageClass => Self::ID_STORAGE_CLASS,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             ObjectColumn::Key => "Name",
             ObjectColumn::Type => "Type",
@@ -168,7 +178,7 @@ impl ObjectColumn {
         }
     }
 
-    pub fn all() -> [ObjectColumn; 5] {
+    pub const fn all() -> [ObjectColumn; 5] {
         [
             ObjectColumn::Key,
             ObjectColumn::Type,
@@ -180,11 +190,11 @@ impl ObjectColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.s3.object.key" => Some(ObjectColumn::Key),
-            "column.s3.object.type" => Some(ObjectColumn::Type),
-            "column.s3.object.last_modified" => Some(ObjectColumn::LastModified),
-            "column.s3.object.size" => Some(ObjectColumn::Size),
-            "column.s3.object.storage_class" => Some(ObjectColumn::StorageClass),
+            Self::ID_KEY => Some(ObjectColumn::Key),
+            Self::ID_TYPE => Some(ObjectColumn::Type),
+            Self::ID_LAST_MODIFIED => Some(ObjectColumn::LastModified),
+            Self::ID_SIZE => Some(ObjectColumn::Size),
+            Self::ID_STORAGE_CLASS => Some(ObjectColumn::StorageClass),
             _ => None,
         }
     }

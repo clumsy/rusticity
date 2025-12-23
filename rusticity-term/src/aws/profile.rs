@@ -1,5 +1,6 @@
 use crate::common::SortDirection;
 use crate::ui::filter_area;
+use crate::ui::format_title;
 use crate::ui::table::{render_table, Column as TableColumn, TableConfig};
 use ratatui::{prelude::*, widgets::*};
 
@@ -185,7 +186,7 @@ pub fn render_profile_picker(
         columns: &columns,
         sort_column: "Profile",
         sort_direction: SortDirection::Asc,
-        title: " Profiles (^R to fetch accounts) ".to_string(),
+        title: format_title("Profiles (^R to fetch accounts)"),
         area: chunks[1],
         get_expanded_content: None,
         is_active: true,

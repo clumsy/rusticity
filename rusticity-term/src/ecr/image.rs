@@ -42,19 +42,27 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> &'static str {
+    const ID_TAG: &'static str = "column.ecr.image.tag";
+    const ID_ARTIFACT_TYPE: &'static str = "column.ecr.image.artifact_type";
+    const ID_PUSHED_AT: &'static str = "column.ecr.image.pushed_at";
+    const ID_SIZE_MB: &'static str = "column.ecr.image.size_mb";
+    const ID_URI: &'static str = "column.ecr.image.uri";
+    const ID_DIGEST: &'static str = "column.ecr.image.digest";
+    const ID_LAST_PULL_TIME: &'static str = "column.ecr.image.last_pull_time";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            Column::Tag => "column.ecr.image.tag",
-            Column::ArtifactType => "column.ecr.image.artifact_type",
-            Column::PushedAt => "column.ecr.image.pushed_at",
-            Column::SizeMb => "column.ecr.image.size_mb",
-            Column::Uri => "column.ecr.image.uri",
-            Column::Digest => "column.ecr.image.digest",
-            Column::LastPullTime => "column.ecr.image.last_pull_time",
+            Column::Tag => Self::ID_TAG,
+            Column::ArtifactType => Self::ID_ARTIFACT_TYPE,
+            Column::PushedAt => Self::ID_PUSHED_AT,
+            Column::SizeMb => Self::ID_SIZE_MB,
+            Column::Uri => Self::ID_URI,
+            Column::Digest => Self::ID_DIGEST,
+            Column::LastPullTime => Self::ID_LAST_PULL_TIME,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Tag => "Image tag",
             Column::ArtifactType => "Artifact type",
@@ -66,7 +74,7 @@ impl Column {
         }
     }
 
-    pub fn all() -> [Column; 7] {
+    pub const fn all() -> [Column; 7] {
         [
             Column::Tag,
             Column::ArtifactType,
@@ -84,13 +92,13 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.ecr.image.tag" => Some(Column::Tag),
-            "column.ecr.image.artifact_type" => Some(Column::ArtifactType),
-            "column.ecr.image.pushed_at" => Some(Column::PushedAt),
-            "column.ecr.image.size_mb" => Some(Column::SizeMb),
-            "column.ecr.image.uri" => Some(Column::Uri),
-            "column.ecr.image.digest" => Some(Column::Digest),
-            "column.ecr.image.last_pull_time" => Some(Column::LastPullTime),
+            Self::ID_TAG => Some(Column::Tag),
+            Self::ID_ARTIFACT_TYPE => Some(Column::ArtifactType),
+            Self::ID_PUSHED_AT => Some(Column::PushedAt),
+            Self::ID_SIZE_MB => Some(Column::SizeMb),
+            Self::ID_URI => Some(Column::Uri),
+            Self::ID_DIGEST => Some(Column::Digest),
+            Self::ID_LAST_PULL_TIME => Some(Column::LastPullTime),
             _ => None,
         }
     }

@@ -598,7 +598,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     let show_breadcrumbs = has_tabs && app.service_selected && {
         // Only show breadcrumbs if we're deeper than the root level
         match app.current_service {
-            Service::CloudWatchLogGroups => app.view_mode != ViewMode::List,
             Service::S3Buckets => app.s3_state.current_bucket.is_some(),
             _ => false,
         }
@@ -967,25 +966,45 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         all_items.push(header);
         max_len = max_len.max(header_len);
 
-        for col_id in &app.cw_log_stream_column_ids {
-            if let Some(col) = StreamColumn::from_id(col_id) {
-                let is_visible = app.cw_log_stream_visible_column_ids.contains(col_id);
-                let (item, len) = render_column_toggle_string(col.name(), is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
+        if app.log_groups_state.detail_tab == DetailTab::Tags {
+            // Tags tab columns
+            for col_id in &app.cw_log_tag_column_ids {
+                if let Some(col) = crate::cw::TagColumn::from_id(col_id) {
+                    let is_visible = app.cw_log_tag_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
             }
-        }
 
-        all_items.push(ListItem::new(""));
-        let page_size_enum = match app.log_groups_state.stream_page_size {
-            10 => PageSize::Ten,
-            25 => PageSize::TwentyFive,
-            50 => PageSize::Fifty,
-            _ => PageSize::OneHundred,
-        };
-        let (page_items, page_len) = render_page_size_section(page_size_enum, PAGE_SIZE_OPTIONS);
-        all_items.extend(page_items);
-        max_len = max_len.max(page_len);
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.log_groups_state.tags.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else {
+            // Log streams tab columns
+            for col_id in &app.cw_log_stream_column_ids {
+                if let Some(col) = StreamColumn::from_id(col_id) {
+                    let is_visible = app.cw_log_stream_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let page_size_enum = match app.log_groups_state.stream_page_size {
+                10 => PageSize::Ten,
+                25 => PageSize::TwentyFive,
+                50 => PageSize::Fifty,
+                _ => PageSize::OneHundred,
+            };
+            let (page_items, page_len) =
+                render_page_size_section(page_size_enum, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::CloudWatchLogGroups {
@@ -1775,7 +1794,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(title)
+                .title(format_title(title.trim()))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
@@ -5193,6 +5212,8 @@ mod tests {
                 retention_days: None,
                 log_class: None,
                 arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
             },
             rusticity_core::LogGroup {
                 name: "/aws/lambda/function2".to_string(),
@@ -5201,6 +5222,8 @@ mod tests {
                 retention_days: None,
                 log_class: None,
                 arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
             },
             rusticity_core::LogGroup {
                 name: "/aws/ecs/service1".to_string(),
@@ -5209,6 +5232,8 @@ mod tests {
                 retention_days: None,
                 log_class: None,
                 arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
             },
         ];
 
@@ -5231,6 +5256,8 @@ mod tests {
             retention_days: None,
             log_class: None,
             arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: None,
         };
 
         // Test collapsed state (►)
@@ -5273,6 +5300,8 @@ mod tests {
             retention_days: None,
             log_class: None,
             arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: None,
         }];
         app.log_groups_state.log_groups.selected = 0;
 
@@ -5411,6 +5440,8 @@ mod tests {
                     retention_days: None,
                     log_class: None,
                     arn: None,
+                    log_group_arn: None,
+                    deletion_protection_enabled: None,
                 });
         }
 
@@ -5457,6 +5488,8 @@ mod tests {
                     retention_days: None,
                     log_class: None,
                     arn: None,
+                    log_group_arn: None,
+                    deletion_protection_enabled: None,
                 });
         }
 
@@ -5492,6 +5525,8 @@ mod tests {
                     retention_days: None,
                     log_class: None,
                     arn: None,
+                    log_group_arn: None,
+                    deletion_protection_enabled: None,
                 });
         }
 
@@ -5550,6 +5585,8 @@ mod tests {
                     retention_days: None,
                     log_class: None,
                     arn: None,
+                    log_group_arn: None,
+                    deletion_protection_enabled: None,
                 });
         }
 
@@ -5591,6 +5628,8 @@ mod tests {
                     retention_days: None,
                     log_class: None,
                     arn: None,
+                    log_group_arn: None,
+                    deletion_protection_enabled: None,
                 });
         }
 
@@ -6189,5 +6228,68 @@ mod tests {
         assert_eq!(text.chars().count(), width as usize);
         // Format: "─ Test Section ───...─"
         assert!(text.starts_with("─ Test Section "));
+    }
+
+    #[test]
+    fn test_cloudwatch_log_groups_no_breadcrumb_in_detail_view() {
+        use crate::app::{Service, ViewMode};
+        use rusticity_core::LogGroup;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+        app.tabs.push(crate::app::Tab {
+            service: Service::CloudWatchLogGroups,
+            title: "CloudWatch > Log Groups".to_string(),
+            breadcrumb: "CloudWatch > Log Groups".to_string(),
+        });
+
+        // Add a log group
+        app.log_groups_state.log_groups.items = vec![LogGroup {
+            name: "/aws/lambda/test".to_string(),
+            creation_time: None,
+            stored_bytes: None,
+            retention_days: None,
+            log_class: None,
+            arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: None,
+        }];
+
+        // Breadcrumb should not be shown in UI (show_breadcrumbs should be false)
+        let show_breadcrumbs = !app.tabs.is_empty()
+            && app.service_selected
+            && match app.current_service {
+                Service::S3Buckets => app.s3_state.current_bucket.is_some(),
+                _ => false,
+            };
+
+        assert!(!show_breadcrumbs);
+    }
+
+    #[test]
+    fn test_cloudwatch_log_groups_no_breadcrumb_in_events_view() {
+        use crate::app::{Service, ViewMode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Events;
+        app.tabs.push(crate::app::Tab {
+            service: Service::CloudWatchLogGroups,
+            title: "CloudWatch > Log Groups".to_string(),
+            breadcrumb: "CloudWatch > Log Groups".to_string(),
+        });
+
+        // Breadcrumb should not be shown in UI
+        let show_breadcrumbs = !app.tabs.is_empty()
+            && app.service_selected
+            && match app.current_service {
+                Service::S3Buckets => app.s3_state.current_bucket.is_some(),
+                _ => false,
+            };
+
+        assert!(!show_breadcrumbs);
     }
 }

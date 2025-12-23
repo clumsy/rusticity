@@ -165,26 +165,41 @@ pub enum UserColumn {
 }
 
 impl UserColumn {
-    pub fn id(&self) -> &'static str {
+    const ID_USER_NAME: &'static str = "column.iam.user.user_name";
+    const ID_PATH: &'static str = "column.iam.user.path";
+    const ID_GROUPS: &'static str = "column.iam.user.groups";
+    const ID_LAST_ACTIVITY: &'static str = "column.iam.user.last_activity";
+    const ID_MFA: &'static str = "column.iam.user.mfa";
+    const ID_PASSWORD_AGE: &'static str = "column.iam.user.password_age";
+    const ID_CONSOLE_LAST_SIGN_IN: &'static str = "column.iam.user.console_last_sign_in";
+    const ID_ACCESS_KEY_ID: &'static str = "column.iam.user.access_key_id";
+    const ID_ACTIVE_KEY_AGE: &'static str = "column.iam.user.active_key_age";
+    const ID_ACCESS_KEY_LAST_USED: &'static str = "column.iam.user.access_key_last_used";
+    const ID_ARN: &'static str = "column.iam.user.arn";
+    const ID_CREATION_TIME: &'static str = "column.iam.user.creation_time";
+    const ID_CONSOLE_ACCESS: &'static str = "column.iam.user.console_access";
+    const ID_SIGNING_CERTS: &'static str = "column.iam.user.signing_certs";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            Self::UserName => "column.iam.user.user_name",
-            Self::Path => "column.iam.user.path",
-            Self::Groups => "column.iam.user.groups",
-            Self::LastActivity => "column.iam.user.last_activity",
-            Self::Mfa => "column.iam.user.mfa",
-            Self::PasswordAge => "column.iam.user.password_age",
-            Self::ConsoleLastSignIn => "column.iam.user.console_last_sign_in",
-            Self::AccessKeyId => "column.iam.user.access_key_id",
-            Self::ActiveKeyAge => "column.iam.user.active_key_age",
-            Self::AccessKeyLastUsed => "column.iam.user.access_key_last_used",
-            Self::Arn => "column.iam.user.arn",
-            Self::CreationTime => "column.iam.user.creation_time",
-            Self::ConsoleAccess => "column.iam.user.console_access",
-            Self::SigningCerts => "column.iam.user.signing_certs",
+            Self::UserName => Self::ID_USER_NAME,
+            Self::Path => Self::ID_PATH,
+            Self::Groups => Self::ID_GROUPS,
+            Self::LastActivity => Self::ID_LAST_ACTIVITY,
+            Self::Mfa => Self::ID_MFA,
+            Self::PasswordAge => Self::ID_PASSWORD_AGE,
+            Self::ConsoleLastSignIn => Self::ID_CONSOLE_LAST_SIGN_IN,
+            Self::AccessKeyId => Self::ID_ACCESS_KEY_ID,
+            Self::ActiveKeyAge => Self::ID_ACTIVE_KEY_AGE,
+            Self::AccessKeyLastUsed => Self::ID_ACCESS_KEY_LAST_USED,
+            Self::Arn => Self::ID_ARN,
+            Self::CreationTime => Self::ID_CREATION_TIME,
+            Self::ConsoleAccess => Self::ID_CONSOLE_ACCESS,
+            Self::SigningCerts => Self::ID_SIGNING_CERTS,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Self::UserName => "User name",
             Self::Path => "Path",
@@ -215,20 +230,20 @@ impl UserColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.iam.user.user_name" => Some(Self::UserName),
-            "column.iam.user.path" => Some(Self::Path),
-            "column.iam.user.groups" => Some(Self::Groups),
-            "column.iam.user.last_activity" => Some(Self::LastActivity),
-            "column.iam.user.mfa" => Some(Self::Mfa),
-            "column.iam.user.password_age" => Some(Self::PasswordAge),
-            "column.iam.user.console_last_sign_in" => Some(Self::ConsoleLastSignIn),
-            "column.iam.user.access_key_id" => Some(Self::AccessKeyId),
-            "column.iam.user.active_key_age" => Some(Self::ActiveKeyAge),
-            "column.iam.user.access_key_last_used" => Some(Self::AccessKeyLastUsed),
-            "column.iam.user.arn" => Some(Self::Arn),
-            "column.iam.user.creation_time" => Some(Self::CreationTime),
-            "column.iam.user.console_access" => Some(Self::ConsoleAccess),
-            "column.iam.user.signing_certs" => Some(Self::SigningCerts),
+            Self::ID_USER_NAME => Some(Self::UserName),
+            Self::ID_PATH => Some(Self::Path),
+            Self::ID_GROUPS => Some(Self::Groups),
+            Self::ID_LAST_ACTIVITY => Some(Self::LastActivity),
+            Self::ID_MFA => Some(Self::Mfa),
+            Self::ID_PASSWORD_AGE => Some(Self::PasswordAge),
+            Self::ID_CONSOLE_LAST_SIGN_IN => Some(Self::ConsoleLastSignIn),
+            Self::ID_ACCESS_KEY_ID => Some(Self::AccessKeyId),
+            Self::ID_ACTIVE_KEY_AGE => Some(Self::ActiveKeyAge),
+            Self::ID_ACCESS_KEY_LAST_USED => Some(Self::AccessKeyLastUsed),
+            Self::ID_ARN => Some(Self::Arn),
+            Self::ID_CREATION_TIME => Some(Self::CreationTime),
+            Self::ID_CONSOLE_ACCESS => Some(Self::ConsoleAccess),
+            Self::ID_SIGNING_CERTS => Some(Self::SigningCerts),
             _ => None,
         }
     }
@@ -307,30 +322,39 @@ pub enum RoleColumn {
 }
 
 impl RoleColumn {
+    const ID_ROLE_NAME: &'static str = "column.iam.role.role_name";
+    const ID_PATH: &'static str = "column.iam.role.path";
+    const ID_TRUSTED_ENTITIES: &'static str = "column.iam.role.trusted_entities";
+    const ID_LAST_ACTIVITY: &'static str = "column.iam.role.last_activity";
+    const ID_ARN: &'static str = "column.iam.role.arn";
+    const ID_CREATION_TIME: &'static str = "column.iam.role.creation_time";
+    const ID_DESCRIPTION: &'static str = "column.iam.role.description";
+    const ID_MAX_SESSION_DURATION: &'static str = "column.iam.role.max_session_duration";
+
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.iam.role.role_name" => Some(Self::RoleName),
-            "column.iam.role.path" => Some(Self::Path),
-            "column.iam.role.trusted_entities" => Some(Self::TrustedEntities),
-            "column.iam.role.last_activity" => Some(Self::LastActivity),
-            "column.iam.role.arn" => Some(Self::Arn),
-            "column.iam.role.creation_time" => Some(Self::CreationTime),
-            "column.iam.role.description" => Some(Self::Description),
-            "column.iam.role.max_session_duration" => Some(Self::MaxSessionDuration),
+            Self::ID_ROLE_NAME => Some(Self::RoleName),
+            Self::ID_PATH => Some(Self::Path),
+            Self::ID_TRUSTED_ENTITIES => Some(Self::TrustedEntities),
+            Self::ID_LAST_ACTIVITY => Some(Self::LastActivity),
+            Self::ID_ARN => Some(Self::Arn),
+            Self::ID_CREATION_TIME => Some(Self::CreationTime),
+            Self::ID_DESCRIPTION => Some(Self::Description),
+            Self::ID_MAX_SESSION_DURATION => Some(Self::MaxSessionDuration),
             _ => None,
         }
     }
 
-    pub fn id(&self) -> ColumnId {
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Self::RoleName => "column.iam.role.role_name",
-            Self::Path => "column.iam.role.path",
-            Self::TrustedEntities => "column.iam.role.trusted_entities",
-            Self::LastActivity => "column.iam.role.last_activity",
-            Self::Arn => "column.iam.role.arn",
-            Self::CreationTime => "column.iam.role.creation_time",
-            Self::Description => "column.iam.role.description",
-            Self::MaxSessionDuration => "column.iam.role.max_session_duration",
+            Self::RoleName => Self::ID_ROLE_NAME,
+            Self::Path => Self::ID_PATH,
+            Self::TrustedEntities => Self::ID_TRUSTED_ENTITIES,
+            Self::LastActivity => Self::ID_LAST_ACTIVITY,
+            Self::Arn => Self::ID_ARN,
+            Self::CreationTime => Self::ID_CREATION_TIME,
+            Self::Description => Self::ID_DESCRIPTION,
+            Self::MaxSessionDuration => Self::ID_MAX_SESSION_DURATION,
         }
     }
 
@@ -423,27 +447,12 @@ pub enum LastAccessedServiceColumn {
 
 impl<'a> Column<&'a IamUser> for UserColumn {
     fn id(&self) -> &'static str {
-        match self {
-            Self::UserName => "column.iam.user.user_name",
-            Self::Path => "column.iam.user.path",
-            Self::Groups => "column.iam.user.groups",
-            Self::LastActivity => "column.iam.user.last_activity",
-            Self::Mfa => "column.iam.user.mfa",
-            Self::PasswordAge => "column.iam.user.password_age",
-            Self::ConsoleLastSignIn => "column.iam.user.console_last_sign_in",
-            Self::AccessKeyId => "column.iam.user.access_key_id",
-            Self::ActiveKeyAge => "column.iam.user.active_key_age",
-            Self::AccessKeyLastUsed => "column.iam.user.access_key_last_used",
-            Self::Arn => "column.iam.user.arn",
-            Self::CreationTime => "column.iam.user.creation_time",
-            Self::ConsoleAccess => "column.iam.user.console_access",
-            Self::SigningCerts => "column.iam.user.signing_certs",
-        }
+        UserColumn::id(self)
     }
 
     fn default_name(&self) -> &'static str {
-        match self {
-            Self::UserName => "User name",
+        UserColumn::default_name(self)
+    }
             Self::Path => "Path",
             Self::Groups => "Groups",
             Self::LastActivity => "Last activity",

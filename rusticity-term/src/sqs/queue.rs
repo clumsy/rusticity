@@ -64,28 +64,46 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> ColumnId {
+    const ID_NAME: &'static str = "column.sqs.queue.name";
+    const ID_TYPE: &'static str = "column.sqs.queue.type";
+    const ID_CREATED: &'static str = "column.sqs.queue.created";
+    const ID_MESSAGES_AVAILABLE: &'static str = "column.sqs.queue.messages_available";
+    const ID_MESSAGES_IN_FLIGHT: &'static str = "column.sqs.queue.messages_in_flight";
+    const ID_ENCRYPTION: &'static str = "column.sqs.queue.encryption";
+    const ID_CONTENT_BASED_DEDUPLICATION: &'static str =
+        "column.sqs.queue.content_based_deduplication";
+    const ID_LAST_UPDATED: &'static str = "column.sqs.queue.last_updated";
+    const ID_VISIBILITY_TIMEOUT: &'static str = "column.sqs.queue.visibility_timeout";
+    const ID_MESSAGE_RETENTION_PERIOD: &'static str = "column.sqs.queue.message_retention_period";
+    const ID_MAXIMUM_MESSAGE_SIZE: &'static str = "column.sqs.queue.maximum_message_size";
+    const ID_DELIVERY_DELAY: &'static str = "column.sqs.queue.delivery_delay";
+    const ID_RECEIVE_MESSAGE_WAIT_TIME: &'static str = "column.sqs.queue.receive_message_wait_time";
+    const ID_HIGH_THROUGHPUT_FIFO: &'static str = "column.sqs.queue.high_throughput_fifo";
+    const ID_DEDUPLICATION_SCOPE: &'static str = "column.sqs.queue.deduplication_scope";
+    const ID_FIFO_THROUGHPUT_LIMIT: &'static str = "column.sqs.queue.fifo_throughput_limit";
+
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Column::Name => "column.sqs.queue.name",
-            Column::Type => "column.sqs.queue.type",
-            Column::Created => "column.sqs.queue.created",
-            Column::MessagesAvailable => "column.sqs.queue.messages_available",
-            Column::MessagesInFlight => "column.sqs.queue.messages_in_flight",
-            Column::Encryption => "column.sqs.queue.encryption",
-            Column::ContentBasedDeduplication => "column.sqs.queue.content_based_deduplication",
-            Column::LastUpdated => "column.sqs.queue.last_updated",
-            Column::VisibilityTimeout => "column.sqs.queue.visibility_timeout",
-            Column::MessageRetentionPeriod => "column.sqs.queue.message_retention_period",
-            Column::MaximumMessageSize => "column.sqs.queue.maximum_message_size",
-            Column::DeliveryDelay => "column.sqs.queue.delivery_delay",
-            Column::ReceiveMessageWaitTime => "column.sqs.queue.receive_message_wait_time",
-            Column::HighThroughputFifo => "column.sqs.queue.high_throughput_fifo",
-            Column::DeduplicationScope => "column.sqs.queue.deduplication_scope",
-            Column::FifoThroughputLimit => "column.sqs.queue.fifo_throughput_limit",
+            Column::Name => Self::ID_NAME,
+            Column::Type => Self::ID_TYPE,
+            Column::Created => Self::ID_CREATED,
+            Column::MessagesAvailable => Self::ID_MESSAGES_AVAILABLE,
+            Column::MessagesInFlight => Self::ID_MESSAGES_IN_FLIGHT,
+            Column::Encryption => Self::ID_ENCRYPTION,
+            Column::ContentBasedDeduplication => Self::ID_CONTENT_BASED_DEDUPLICATION,
+            Column::LastUpdated => Self::ID_LAST_UPDATED,
+            Column::VisibilityTimeout => Self::ID_VISIBILITY_TIMEOUT,
+            Column::MessageRetentionPeriod => Self::ID_MESSAGE_RETENTION_PERIOD,
+            Column::MaximumMessageSize => Self::ID_MAXIMUM_MESSAGE_SIZE,
+            Column::DeliveryDelay => Self::ID_DELIVERY_DELAY,
+            Column::ReceiveMessageWaitTime => Self::ID_RECEIVE_MESSAGE_WAIT_TIME,
+            Column::HighThroughputFifo => Self::ID_HIGH_THROUGHPUT_FIFO,
+            Column::DeduplicationScope => Self::ID_DEDUPLICATION_SCOPE,
+            Column::FifoThroughputLimit => Self::ID_FIFO_THROUGHPUT_LIMIT,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Name",
             Column::Type => "Type",
@@ -112,24 +130,22 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.sqs.queue.name" => Some(Column::Name),
-            "column.sqs.queue.type" => Some(Column::Type),
-            "column.sqs.queue.created" => Some(Column::Created),
-            "column.sqs.queue.messages_available" => Some(Column::MessagesAvailable),
-            "column.sqs.queue.messages_in_flight" => Some(Column::MessagesInFlight),
-            "column.sqs.queue.encryption" => Some(Column::Encryption),
-            "column.sqs.queue.content_based_deduplication" => {
-                Some(Column::ContentBasedDeduplication)
-            }
-            "column.sqs.queue.last_updated" => Some(Column::LastUpdated),
-            "column.sqs.queue.visibility_timeout" => Some(Column::VisibilityTimeout),
-            "column.sqs.queue.message_retention_period" => Some(Column::MessageRetentionPeriod),
-            "column.sqs.queue.maximum_message_size" => Some(Column::MaximumMessageSize),
-            "column.sqs.queue.delivery_delay" => Some(Column::DeliveryDelay),
-            "column.sqs.queue.receive_message_wait_time" => Some(Column::ReceiveMessageWaitTime),
-            "column.sqs.queue.high_throughput_fifo" => Some(Column::HighThroughputFifo),
-            "column.sqs.queue.deduplication_scope" => Some(Column::DeduplicationScope),
-            "column.sqs.queue.fifo_throughput_limit" => Some(Column::FifoThroughputLimit),
+            Self::ID_NAME => Some(Column::Name),
+            Self::ID_TYPE => Some(Column::Type),
+            Self::ID_CREATED => Some(Column::Created),
+            Self::ID_MESSAGES_AVAILABLE => Some(Column::MessagesAvailable),
+            Self::ID_MESSAGES_IN_FLIGHT => Some(Column::MessagesInFlight),
+            Self::ID_ENCRYPTION => Some(Column::Encryption),
+            Self::ID_CONTENT_BASED_DEDUPLICATION => Some(Column::ContentBasedDeduplication),
+            Self::ID_LAST_UPDATED => Some(Column::LastUpdated),
+            Self::ID_VISIBILITY_TIMEOUT => Some(Column::VisibilityTimeout),
+            Self::ID_MESSAGE_RETENTION_PERIOD => Some(Column::MessageRetentionPeriod),
+            Self::ID_MAXIMUM_MESSAGE_SIZE => Some(Column::MaximumMessageSize),
+            Self::ID_DELIVERY_DELAY => Some(Column::DeliveryDelay),
+            Self::ID_RECEIVE_MESSAGE_WAIT_TIME => Some(Column::ReceiveMessageWaitTime),
+            Self::ID_HIGH_THROUGHPUT_FIFO => Some(Column::HighThroughputFifo),
+            Self::ID_DEDUPLICATION_SCOPE => Some(Column::DeduplicationScope),
+            Self::ID_FIFO_THROUGHPUT_LIMIT => Some(Column::FifoThroughputLimit),
             _ => None,
         }
     }

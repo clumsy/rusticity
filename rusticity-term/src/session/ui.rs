@@ -1,6 +1,7 @@
 use super::Session;
 use crate::common::SortDirection;
 use crate::ui::filter_area;
+use crate::ui::format_title;
 use crate::ui::table::{self};
 use ratatui::prelude::{Color, Constraint, Direction, Layout, Span, Style};
 use ratatui::widgets::Clear;
@@ -85,7 +86,7 @@ pub fn render_session_picker(
         columns: &columns,
         sort_column: "Timestamp",
         sort_direction: SortDirection::Desc,
-        title: " Sessions ".to_string(),
+        title: format_title("Sessions"),
         area: chunks[1],
         get_expanded_content: None,
         is_active: true,

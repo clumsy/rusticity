@@ -213,6 +213,21 @@ async fn main() -> Result<()> {
                             app.sqs_state.tags.loading = false;
                         }
 
+                        // Load CloudWatch Log Group tags when tab is switched
+                        if app.current_service == Service::CloudWatchLogGroups
+                            && app.view_mode == ViewMode::Detail
+                            && app.log_groups_state.detail_tab == rusticity_term::ui::cw::logs::DetailTab::Tags
+                            && app.log_groups_state.tags.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_log_group_tags().await {
+                                app.error_message = Some(format!("Failed to load tags: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.log_groups_state.tags.loading = false;
+                        }
+
                         // Load CloudWatch Alarms when service is switched to and empty
                         if app.service_selected && app.current_service == Service::CloudWatchAlarms
                             && (!prev_service_selected || prev_service != Service::CloudWatchAlarms)

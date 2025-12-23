@@ -132,10 +132,11 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordRight),
             KeyCode::Left => Some(Action::PageUp),
             KeyCode::Right => Some(Action::PageDown),
+            KeyCode::Char(' ') => Some(Action::ToggleFilterCheckbox),
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::DeleteWord)
             }
-            KeyCode::Char(c) => Some(Action::FilterInput(c)),
+            KeyCode::Char(c) if c != ' ' => Some(Action::FilterInput(c)),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             _ => None,
         },
@@ -485,6 +486,29 @@ mod tests {
             action,
             Some(Action::Yank),
             "y should yank (copy) selected item"
+        );
+    }
+
+    #[test]
+    fn test_space_toggles_checkbox_in_filter_input() {
+        let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::FilterInput);
+        assert_eq!(
+            action,
+            Some(Action::ToggleFilterCheckbox),
+            "Space should toggle checkbox in FilterInput mode"
+        );
+    }
+
+    #[test]
+    fn test_space_not_added_to_filter_text() {
+        // Space should toggle checkbox, not be added to filter text
+        let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::FilterInput);
+        assert_ne!(
+            action,
+            Some(Action::FilterInput(' ')),
+            "Space should not be added to filter text"
         );
     }
 }

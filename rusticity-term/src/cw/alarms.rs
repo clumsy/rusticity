@@ -68,28 +68,45 @@ pub enum AlarmColumn {
 }
 
 impl AlarmColumn {
-    pub fn id(&self) -> &'static str {
+    const ID_NAME: &'static str = "column.cw.alarm.name";
+    const ID_STATE: &'static str = "column.cw.alarm.state";
+    const ID_LAST_STATE_UPDATE: &'static str = "column.cw.alarm.last_state_update";
+    const ID_DESCRIPTION: &'static str = "column.cw.alarm.description";
+    const ID_CONDITIONS: &'static str = "column.cw.alarm.conditions";
+    const ID_ACTIONS: &'static str = "column.cw.alarm.actions";
+    const ID_STATE_DETAILS: &'static str = "column.cw.alarm.state_details";
+    const ID_METRIC_NAME: &'static str = "column.cw.alarm.metric_name";
+    const ID_NAMESPACE: &'static str = "column.cw.alarm.namespace";
+    const ID_STATISTIC: &'static str = "column.cw.alarm.statistic";
+    const ID_PERIOD: &'static str = "column.cw.alarm.period";
+    const ID_RESOURCE: &'static str = "column.cw.alarm.resource";
+    const ID_DIMENSIONS: &'static str = "column.cw.alarm.dimensions";
+    const ID_EXPRESSION: &'static str = "column.cw.alarm.expression";
+    const ID_TYPE: &'static str = "column.cw.alarm.type";
+    const ID_CROSS_ACCOUNT: &'static str = "column.cw.alarm.cross_account";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            AlarmColumn::Name => "column.cw.alarm.name",
-            AlarmColumn::State => "column.cw.alarm.state",
-            AlarmColumn::LastStateUpdate => "column.cw.alarm.last_state_update",
-            AlarmColumn::Description => "column.cw.alarm.description",
-            AlarmColumn::Conditions => "column.cw.alarm.conditions",
-            AlarmColumn::Actions => "column.cw.alarm.actions",
-            AlarmColumn::StateDetails => "column.cw.alarm.state_details",
-            AlarmColumn::MetricName => "column.cw.alarm.metric_name",
-            AlarmColumn::Namespace => "column.cw.alarm.namespace",
-            AlarmColumn::Statistic => "column.cw.alarm.statistic",
-            AlarmColumn::Period => "column.cw.alarm.period",
-            AlarmColumn::Resource => "column.cw.alarm.resource",
-            AlarmColumn::Dimensions => "column.cw.alarm.dimensions",
-            AlarmColumn::Expression => "column.cw.alarm.expression",
-            AlarmColumn::Type => "column.cw.alarm.type",
-            AlarmColumn::CrossAccount => "column.cw.alarm.cross_account",
+            AlarmColumn::Name => Self::ID_NAME,
+            AlarmColumn::State => Self::ID_STATE,
+            AlarmColumn::LastStateUpdate => Self::ID_LAST_STATE_UPDATE,
+            AlarmColumn::Description => Self::ID_DESCRIPTION,
+            AlarmColumn::Conditions => Self::ID_CONDITIONS,
+            AlarmColumn::Actions => Self::ID_ACTIONS,
+            AlarmColumn::StateDetails => Self::ID_STATE_DETAILS,
+            AlarmColumn::MetricName => Self::ID_METRIC_NAME,
+            AlarmColumn::Namespace => Self::ID_NAMESPACE,
+            AlarmColumn::Statistic => Self::ID_STATISTIC,
+            AlarmColumn::Period => Self::ID_PERIOD,
+            AlarmColumn::Resource => Self::ID_RESOURCE,
+            AlarmColumn::Dimensions => Self::ID_DIMENSIONS,
+            AlarmColumn::Expression => Self::ID_EXPRESSION,
+            AlarmColumn::Type => Self::ID_TYPE,
+            AlarmColumn::CrossAccount => Self::ID_CROSS_ACCOUNT,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             AlarmColumn::Name => "Name",
             AlarmColumn::State => "State",
@@ -137,22 +154,22 @@ impl AlarmColumn {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.cw.alarm.name" => Some(AlarmColumn::Name),
-            "column.cw.alarm.state" => Some(AlarmColumn::State),
-            "column.cw.alarm.last_state_update" => Some(AlarmColumn::LastStateUpdate),
-            "column.cw.alarm.description" => Some(AlarmColumn::Description),
-            "column.cw.alarm.conditions" => Some(AlarmColumn::Conditions),
-            "column.cw.alarm.actions" => Some(AlarmColumn::Actions),
-            "column.cw.alarm.state_details" => Some(AlarmColumn::StateDetails),
-            "column.cw.alarm.metric_name" => Some(AlarmColumn::MetricName),
-            "column.cw.alarm.namespace" => Some(AlarmColumn::Namespace),
-            "column.cw.alarm.statistic" => Some(AlarmColumn::Statistic),
-            "column.cw.alarm.period" => Some(AlarmColumn::Period),
-            "column.cw.alarm.resource" => Some(AlarmColumn::Resource),
-            "column.cw.alarm.dimensions" => Some(AlarmColumn::Dimensions),
-            "column.cw.alarm.expression" => Some(AlarmColumn::Expression),
-            "column.cw.alarm.type" => Some(AlarmColumn::Type),
-            "column.cw.alarm.cross_account" => Some(AlarmColumn::CrossAccount),
+            Self::ID_NAME => Some(AlarmColumn::Name),
+            Self::ID_STATE => Some(AlarmColumn::State),
+            Self::ID_LAST_STATE_UPDATE => Some(AlarmColumn::LastStateUpdate),
+            Self::ID_DESCRIPTION => Some(AlarmColumn::Description),
+            Self::ID_CONDITIONS => Some(AlarmColumn::Conditions),
+            Self::ID_ACTIONS => Some(AlarmColumn::Actions),
+            Self::ID_STATE_DETAILS => Some(AlarmColumn::StateDetails),
+            Self::ID_METRIC_NAME => Some(AlarmColumn::MetricName),
+            Self::ID_NAMESPACE => Some(AlarmColumn::Namespace),
+            Self::ID_STATISTIC => Some(AlarmColumn::Statistic),
+            Self::ID_PERIOD => Some(AlarmColumn::Period),
+            Self::ID_RESOURCE => Some(AlarmColumn::Resource),
+            Self::ID_DIMENSIONS => Some(AlarmColumn::Dimensions),
+            Self::ID_EXPRESSION => Some(AlarmColumn::Expression),
+            Self::ID_TYPE => Some(AlarmColumn::Type),
+            Self::ID_CROSS_ACCOUNT => Some(AlarmColumn::CrossAccount),
             _ => None,
         }
     }

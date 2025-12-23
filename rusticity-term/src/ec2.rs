@@ -127,66 +127,121 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> &'static str {
+    const ID_INSTANCE_ID: &'static str = "column.ec2.instance.instance_id";
+    const ID_NAME: &'static str = "column.ec2.instance.name";
+    const ID_INSTANCE_STATE: &'static str = "column.ec2.instance.state";
+    const ID_INSTANCE_TYPE: &'static str = "column.ec2.instance.instance_type";
+    const ID_STATUS_CHECK: &'static str = "column.ec2.instance.status_check";
+    const ID_ALARM_STATUS: &'static str = "column.ec2.instance.alarm_status";
+    const ID_AVAILABILITY_ZONE: &'static str = "column.ec2.instance.availability_zone";
+    const ID_PUBLIC_IPV4_DNS: &'static str = "column.ec2.instance.public_ipv4_dns";
+    const ID_PUBLIC_IPV4_ADDRESS: &'static str = "column.ec2.instance.public_ipv4_address";
+    const ID_ELASTIC_IP: &'static str = "column.ec2.instance.elastic_ip";
+    const ID_IPV6_IPS: &'static str = "column.ec2.instance.ipv6_ips";
+    const ID_MONITORING: &'static str = "column.ec2.instance.monitoring";
+    const ID_SECURITY_GROUP_NAME: &'static str = "column.ec2.instance.security_group_name";
+    const ID_KEY_NAME: &'static str = "column.ec2.instance.key_name";
+    const ID_LAUNCH_TIME: &'static str = "column.ec2.instance.launch_time";
+    const ID_PLATFORM_DETAILS: &'static str = "column.ec2.instance.platform_details";
+    const ID_PRIVATE_DNS_NAME: &'static str = "column.ec2.instance.private_dns_name";
+    const ID_PRIVATE_IP_ADDRESS: &'static str = "column.ec2.instance.private_ip_address";
+    const ID_SECURITY_GROUP_IDS: &'static str = "column.ec2.instance.security_group_ids";
+    const ID_OWNER_ID: &'static str = "column.ec2.instance.owner_id";
+    const ID_VOLUME_ID: &'static str = "column.ec2.instance.volume_id";
+    const ID_ROOT_DEVICE_NAME: &'static str = "column.ec2.instance.root_device_name";
+    const ID_ROOT_DEVICE_TYPE: &'static str = "column.ec2.instance.root_device_type";
+    const ID_EBS_OPTIMIZED: &'static str = "column.ec2.instance.ebs_optimized";
+    const ID_IMAGE_ID: &'static str = "column.ec2.instance.image_id";
+    const ID_KERNEL_ID: &'static str = "column.ec2.instance.kernel_id";
+    const ID_RAMDISK_ID: &'static str = "column.ec2.instance.ramdisk_id";
+    const ID_AMI_LAUNCH_INDEX: &'static str = "column.ec2.instance.ami_launch_index";
+    const ID_RESERVATION_ID: &'static str = "column.ec2.instance.reservation_id";
+    const ID_VPC_ID: &'static str = "column.ec2.instance.vpc_id";
+    const ID_SUBNET_IDS: &'static str = "column.ec2.instance.subnet_ids";
+    const ID_INSTANCE_LIFECYCLE: &'static str = "column.ec2.instance.instance_lifecycle";
+    const ID_ARCHITECTURE: &'static str = "column.ec2.instance.architecture";
+    const ID_VIRTUALIZATION_TYPE: &'static str = "column.ec2.instance.virtualization_type";
+    const ID_PLATFORM: &'static str = "column.ec2.instance.platform";
+    const ID_IAM_INSTANCE_PROFILE_ARN: &'static str =
+        "column.ec2.instance.iam_instance_profile_arn";
+    const ID_TENANCY: &'static str = "column.ec2.instance.tenancy";
+    const ID_AFFINITY: &'static str = "column.ec2.instance.affinity";
+    const ID_HOST_ID: &'static str = "column.ec2.instance.host_id";
+    const ID_PLACEMENT_GROUP: &'static str = "column.ec2.instance.placement_group";
+    const ID_PARTITION_NUMBER: &'static str = "column.ec2.instance.partition_number";
+    const ID_CAPACITY_RESERVATION_ID: &'static str = "column.ec2.instance.capacity_reservation_id";
+    const ID_STATE_TRANSITION_REASON_CODE: &'static str =
+        "column.ec2.instance.state_transition_reason_code";
+    const ID_STATE_TRANSITION_REASON_MESSAGE: &'static str =
+        "column.ec2.instance.state_transition_reason_message";
+    const ID_STOP_HIBERNATION_BEHAVIOR: &'static str =
+        "column.ec2.instance.stop_hibernation_behavior";
+    const ID_OUTPOST_ARN: &'static str = "column.ec2.instance.outpost_arn";
+    const ID_PRODUCT_CODES: &'static str = "column.ec2.instance.product_codes";
+    const ID_AVAILABILITY_ZONE_ID: &'static str = "column.ec2.instance.availability_zone_id";
+    const ID_IMDSV2: &'static str = "column.ec2.instance.imdsv2";
+    const ID_USAGE_OPERATION: &'static str = "column.ec2.instance.usage_operation";
+    const ID_MANAGED: &'static str = "column.ec2.instance.managed";
+    const ID_OPERATOR: &'static str = "column.ec2.instance.operator";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            Column::InstanceId => "column.ec2.instance.instance_id",
-            Column::Name => "column.ec2.instance.name",
-            Column::InstanceState => "column.ec2.instance.state",
-            Column::InstanceType => "column.ec2.instance.instance_type",
-            Column::StatusCheck => "column.ec2.instance.status_check",
-            Column::AlarmStatus => "column.ec2.instance.alarm_status",
-            Column::AvailabilityZone => "column.ec2.instance.availability_zone",
-            Column::PublicIpv4Dns => "column.ec2.instance.public_ipv4_dns",
-            Column::PublicIpv4Address => "column.ec2.instance.public_ipv4_address",
-            Column::ElasticIp => "column.ec2.instance.elastic_ip",
-            Column::Ipv6Ips => "column.ec2.instance.ipv6_ips",
-            Column::Monitoring => "column.ec2.instance.monitoring",
-            Column::SecurityGroupName => "column.ec2.instance.security_group_name",
-            Column::KeyName => "column.ec2.instance.key_name",
-            Column::LaunchTime => "column.ec2.instance.launch_time",
-            Column::PlatformDetails => "column.ec2.instance.platform_details",
-            Column::PrivateDnsName => "column.ec2.instance.private_dns_name",
-            Column::PrivateIpAddress => "column.ec2.instance.private_ip_address",
-            Column::SecurityGroupIds => "column.ec2.instance.security_group_ids",
-            Column::OwnerId => "column.ec2.instance.owner_id",
-            Column::VolumeId => "column.ec2.instance.volume_id",
-            Column::RootDeviceName => "column.ec2.instance.root_device_name",
-            Column::RootDeviceType => "column.ec2.instance.root_device_type",
-            Column::EbsOptimized => "column.ec2.instance.ebs_optimized",
-            Column::ImageId => "column.ec2.instance.image_id",
-            Column::KernelId => "column.ec2.instance.kernel_id",
-            Column::RamdiskId => "column.ec2.instance.ramdisk_id",
-            Column::AmiLaunchIndex => "column.ec2.instance.ami_launch_index",
-            Column::ReservationId => "column.ec2.instance.reservation_id",
-            Column::VpcId => "column.ec2.instance.vpc_id",
-            Column::SubnetIds => "column.ec2.instance.subnet_ids",
-            Column::InstanceLifecycle => "column.ec2.instance.instance_lifecycle",
-            Column::Architecture => "column.ec2.instance.architecture",
-            Column::VirtualizationType => "column.ec2.instance.virtualization_type",
-            Column::Platform => "column.ec2.instance.platform",
-            Column::IamInstanceProfileArn => "column.ec2.instance.iam_instance_profile_arn",
-            Column::Tenancy => "column.ec2.instance.tenancy",
-            Column::Affinity => "column.ec2.instance.affinity",
-            Column::HostId => "column.ec2.instance.host_id",
-            Column::PlacementGroup => "column.ec2.instance.placement_group",
-            Column::PartitionNumber => "column.ec2.instance.partition_number",
-            Column::CapacityReservationId => "column.ec2.instance.capacity_reservation_id",
-            Column::StateTransitionReasonCode => "column.ec2.instance.state_transition_reason_code",
-            Column::StateTransitionReasonMessage => {
-                "column.ec2.instance.state_transition_reason_message"
-            }
-            Column::StopHibernationBehavior => "column.ec2.instance.stop_hibernation_behavior",
-            Column::OutpostArn => "column.ec2.instance.outpost_arn",
-            Column::ProductCodes => "column.ec2.instance.product_codes",
-            Column::AvailabilityZoneId => "column.ec2.instance.availability_zone_id",
-            Column::Imdsv2 => "column.ec2.instance.imdsv2",
-            Column::UsageOperation => "column.ec2.instance.usage_operation",
-            Column::Managed => "column.ec2.instance.managed",
-            Column::Operator => "column.ec2.instance.operator",
+            Column::InstanceId => Self::ID_INSTANCE_ID,
+            Column::Name => Self::ID_NAME,
+            Column::InstanceState => Self::ID_INSTANCE_STATE,
+            Column::InstanceType => Self::ID_INSTANCE_TYPE,
+            Column::StatusCheck => Self::ID_STATUS_CHECK,
+            Column::AlarmStatus => Self::ID_ALARM_STATUS,
+            Column::AvailabilityZone => Self::ID_AVAILABILITY_ZONE,
+            Column::PublicIpv4Dns => Self::ID_PUBLIC_IPV4_DNS,
+            Column::PublicIpv4Address => Self::ID_PUBLIC_IPV4_ADDRESS,
+            Column::ElasticIp => Self::ID_ELASTIC_IP,
+            Column::Ipv6Ips => Self::ID_IPV6_IPS,
+            Column::Monitoring => Self::ID_MONITORING,
+            Column::SecurityGroupName => Self::ID_SECURITY_GROUP_NAME,
+            Column::KeyName => Self::ID_KEY_NAME,
+            Column::LaunchTime => Self::ID_LAUNCH_TIME,
+            Column::PlatformDetails => Self::ID_PLATFORM_DETAILS,
+            Column::PrivateDnsName => Self::ID_PRIVATE_DNS_NAME,
+            Column::PrivateIpAddress => Self::ID_PRIVATE_IP_ADDRESS,
+            Column::SecurityGroupIds => Self::ID_SECURITY_GROUP_IDS,
+            Column::OwnerId => Self::ID_OWNER_ID,
+            Column::VolumeId => Self::ID_VOLUME_ID,
+            Column::RootDeviceName => Self::ID_ROOT_DEVICE_NAME,
+            Column::RootDeviceType => Self::ID_ROOT_DEVICE_TYPE,
+            Column::EbsOptimized => Self::ID_EBS_OPTIMIZED,
+            Column::ImageId => Self::ID_IMAGE_ID,
+            Column::KernelId => Self::ID_KERNEL_ID,
+            Column::RamdiskId => Self::ID_RAMDISK_ID,
+            Column::AmiLaunchIndex => Self::ID_AMI_LAUNCH_INDEX,
+            Column::ReservationId => Self::ID_RESERVATION_ID,
+            Column::VpcId => Self::ID_VPC_ID,
+            Column::SubnetIds => Self::ID_SUBNET_IDS,
+            Column::InstanceLifecycle => Self::ID_INSTANCE_LIFECYCLE,
+            Column::Architecture => Self::ID_ARCHITECTURE,
+            Column::VirtualizationType => Self::ID_VIRTUALIZATION_TYPE,
+            Column::Platform => Self::ID_PLATFORM,
+            Column::IamInstanceProfileArn => Self::ID_IAM_INSTANCE_PROFILE_ARN,
+            Column::Tenancy => Self::ID_TENANCY,
+            Column::Affinity => Self::ID_AFFINITY,
+            Column::HostId => Self::ID_HOST_ID,
+            Column::PlacementGroup => Self::ID_PLACEMENT_GROUP,
+            Column::PartitionNumber => Self::ID_PARTITION_NUMBER,
+            Column::CapacityReservationId => Self::ID_CAPACITY_RESERVATION_ID,
+            Column::StateTransitionReasonCode => Self::ID_STATE_TRANSITION_REASON_CODE,
+            Column::StateTransitionReasonMessage => Self::ID_STATE_TRANSITION_REASON_MESSAGE,
+            Column::StopHibernationBehavior => Self::ID_STOP_HIBERNATION_BEHAVIOR,
+            Column::OutpostArn => Self::ID_OUTPOST_ARN,
+            Column::ProductCodes => Self::ID_PRODUCT_CODES,
+            Column::AvailabilityZoneId => Self::ID_AVAILABILITY_ZONE_ID,
+            Column::Imdsv2 => Self::ID_IMDSV2,
+            Column::UsageOperation => Self::ID_USAGE_OPERATION,
+            Column::Managed => Self::ID_MANAGED,
+            Column::Operator => Self::ID_OPERATOR,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::InstanceId => "Instance ID",
             Column::Name => "Name",
@@ -249,69 +304,63 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.ec2.instance.instance_id" => Some(Column::InstanceId),
-            "column.ec2.instance.name" => Some(Column::Name),
-            "column.ec2.instance.state" => Some(Column::InstanceState),
-            "column.ec2.instance.instance_type" => Some(Column::InstanceType),
-            "column.ec2.instance.status_check" => Some(Column::StatusCheck),
-            "column.ec2.instance.alarm_status" => Some(Column::AlarmStatus),
-            "column.ec2.instance.availability_zone" => Some(Column::AvailabilityZone),
-            "column.ec2.instance.public_ipv4_dns" => Some(Column::PublicIpv4Dns),
-            "column.ec2.instance.public_ipv4_address" => Some(Column::PublicIpv4Address),
-            "column.ec2.instance.elastic_ip" => Some(Column::ElasticIp),
-            "column.ec2.instance.ipv6_ips" => Some(Column::Ipv6Ips),
-            "column.ec2.instance.monitoring" => Some(Column::Monitoring),
-            "column.ec2.instance.security_group_name" => Some(Column::SecurityGroupName),
-            "column.ec2.instance.key_name" => Some(Column::KeyName),
-            "column.ec2.instance.launch_time" => Some(Column::LaunchTime),
-            "column.ec2.instance.platform_details" => Some(Column::PlatformDetails),
-            "column.ec2.instance.private_dns_name" => Some(Column::PrivateDnsName),
-            "column.ec2.instance.private_ip_address" => Some(Column::PrivateIpAddress),
-            "column.ec2.instance.security_group_ids" => Some(Column::SecurityGroupIds),
-            "column.ec2.instance.owner_id" => Some(Column::OwnerId),
-            "column.ec2.instance.volume_id" => Some(Column::VolumeId),
-            "column.ec2.instance.root_device_name" => Some(Column::RootDeviceName),
-            "column.ec2.instance.root_device_type" => Some(Column::RootDeviceType),
-            "column.ec2.instance.ebs_optimized" => Some(Column::EbsOptimized),
-            "column.ec2.instance.image_id" => Some(Column::ImageId),
-            "column.ec2.instance.kernel_id" => Some(Column::KernelId),
-            "column.ec2.instance.ramdisk_id" => Some(Column::RamdiskId),
-            "column.ec2.instance.ami_launch_index" => Some(Column::AmiLaunchIndex),
-            "column.ec2.instance.reservation_id" => Some(Column::ReservationId),
-            "column.ec2.instance.vpc_id" => Some(Column::VpcId),
-            "column.ec2.instance.subnet_ids" => Some(Column::SubnetIds),
-            "column.ec2.instance.instance_lifecycle" => Some(Column::InstanceLifecycle),
-            "column.ec2.instance.architecture" => Some(Column::Architecture),
-            "column.ec2.instance.virtualization_type" => Some(Column::VirtualizationType),
-            "column.ec2.instance.platform" => Some(Column::Platform),
-            "column.ec2.instance.iam_instance_profile_arn" => Some(Column::IamInstanceProfileArn),
-            "column.ec2.instance.tenancy" => Some(Column::Tenancy),
-            "column.ec2.instance.affinity" => Some(Column::Affinity),
-            "column.ec2.instance.host_id" => Some(Column::HostId),
-            "column.ec2.instance.placement_group" => Some(Column::PlacementGroup),
-            "column.ec2.instance.partition_number" => Some(Column::PartitionNumber),
-            "column.ec2.instance.capacity_reservation_id" => Some(Column::CapacityReservationId),
-            "column.ec2.instance.state_transition_reason_code" => {
-                Some(Column::StateTransitionReasonCode)
-            }
-            "column.ec2.instance.state_transition_reason_message" => {
-                Some(Column::StateTransitionReasonMessage)
-            }
-            "column.ec2.instance.stop_hibernation_behavior" => {
-                Some(Column::StopHibernationBehavior)
-            }
-            "column.ec2.instance.outpost_arn" => Some(Column::OutpostArn),
-            "column.ec2.instance.product_codes" => Some(Column::ProductCodes),
-            "column.ec2.instance.availability_zone_id" => Some(Column::AvailabilityZoneId),
-            "column.ec2.instance.imdsv2" => Some(Column::Imdsv2),
-            "column.ec2.instance.usage_operation" => Some(Column::UsageOperation),
-            "column.ec2.instance.managed" => Some(Column::Managed),
-            "column.ec2.instance.operator" => Some(Column::Operator),
+            Self::ID_INSTANCE_ID => Some(Column::InstanceId),
+            Self::ID_NAME => Some(Column::Name),
+            Self::ID_INSTANCE_STATE => Some(Column::InstanceState),
+            Self::ID_INSTANCE_TYPE => Some(Column::InstanceType),
+            Self::ID_STATUS_CHECK => Some(Column::StatusCheck),
+            Self::ID_ALARM_STATUS => Some(Column::AlarmStatus),
+            Self::ID_AVAILABILITY_ZONE => Some(Column::AvailabilityZone),
+            Self::ID_PUBLIC_IPV4_DNS => Some(Column::PublicIpv4Dns),
+            Self::ID_PUBLIC_IPV4_ADDRESS => Some(Column::PublicIpv4Address),
+            Self::ID_ELASTIC_IP => Some(Column::ElasticIp),
+            Self::ID_IPV6_IPS => Some(Column::Ipv6Ips),
+            Self::ID_MONITORING => Some(Column::Monitoring),
+            Self::ID_SECURITY_GROUP_NAME => Some(Column::SecurityGroupName),
+            Self::ID_KEY_NAME => Some(Column::KeyName),
+            Self::ID_LAUNCH_TIME => Some(Column::LaunchTime),
+            Self::ID_PLATFORM_DETAILS => Some(Column::PlatformDetails),
+            Self::ID_PRIVATE_DNS_NAME => Some(Column::PrivateDnsName),
+            Self::ID_PRIVATE_IP_ADDRESS => Some(Column::PrivateIpAddress),
+            Self::ID_SECURITY_GROUP_IDS => Some(Column::SecurityGroupIds),
+            Self::ID_OWNER_ID => Some(Column::OwnerId),
+            Self::ID_VOLUME_ID => Some(Column::VolumeId),
+            Self::ID_ROOT_DEVICE_NAME => Some(Column::RootDeviceName),
+            Self::ID_ROOT_DEVICE_TYPE => Some(Column::RootDeviceType),
+            Self::ID_EBS_OPTIMIZED => Some(Column::EbsOptimized),
+            Self::ID_IMAGE_ID => Some(Column::ImageId),
+            Self::ID_KERNEL_ID => Some(Column::KernelId),
+            Self::ID_RAMDISK_ID => Some(Column::RamdiskId),
+            Self::ID_AMI_LAUNCH_INDEX => Some(Column::AmiLaunchIndex),
+            Self::ID_RESERVATION_ID => Some(Column::ReservationId),
+            Self::ID_VPC_ID => Some(Column::VpcId),
+            Self::ID_SUBNET_IDS => Some(Column::SubnetIds),
+            Self::ID_INSTANCE_LIFECYCLE => Some(Column::InstanceLifecycle),
+            Self::ID_ARCHITECTURE => Some(Column::Architecture),
+            Self::ID_VIRTUALIZATION_TYPE => Some(Column::VirtualizationType),
+            Self::ID_PLATFORM => Some(Column::Platform),
+            Self::ID_IAM_INSTANCE_PROFILE_ARN => Some(Column::IamInstanceProfileArn),
+            Self::ID_TENANCY => Some(Column::Tenancy),
+            Self::ID_AFFINITY => Some(Column::Affinity),
+            Self::ID_HOST_ID => Some(Column::HostId),
+            Self::ID_PLACEMENT_GROUP => Some(Column::PlacementGroup),
+            Self::ID_PARTITION_NUMBER => Some(Column::PartitionNumber),
+            Self::ID_CAPACITY_RESERVATION_ID => Some(Column::CapacityReservationId),
+            Self::ID_STATE_TRANSITION_REASON_CODE => Some(Column::StateTransitionReasonCode),
+            Self::ID_STATE_TRANSITION_REASON_MESSAGE => Some(Column::StateTransitionReasonMessage),
+            Self::ID_STOP_HIBERNATION_BEHAVIOR => Some(Column::StopHibernationBehavior),
+            Self::ID_OUTPOST_ARN => Some(Column::OutpostArn),
+            Self::ID_PRODUCT_CODES => Some(Column::ProductCodes),
+            Self::ID_AVAILABILITY_ZONE_ID => Some(Column::AvailabilityZoneId),
+            Self::ID_IMDSV2 => Some(Column::Imdsv2),
+            Self::ID_USAGE_OPERATION => Some(Column::UsageOperation),
+            Self::ID_MANAGED => Some(Column::Managed),
+            Self::ID_OPERATOR => Some(Column::Operator),
             _ => None,
         }
     }
 
-    pub fn all() -> [Column; 52] {
+    pub const fn all() -> [Column; 52] {
         [
             Column::InstanceId,
             Column::Name,

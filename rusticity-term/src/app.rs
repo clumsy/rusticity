@@ -135,6 +135,8 @@ pub struct App {
     pub cw_log_stream_column_ids: Vec<ColumnId>,
     pub cw_log_event_visible_column_ids: Vec<ColumnId>,
     pub cw_log_event_column_ids: Vec<ColumnId>,
+    pub cw_log_tag_visible_column_ids: Vec<ColumnId>,
+    pub cw_log_tag_column_ids: Vec<ColumnId>,
     pub cw_alarm_visible_column_ids: Vec<ColumnId>,
     pub cw_alarm_column_ids: Vec<ColumnId>,
     pub s3_bucket_visible_column_ids: Vec<ColumnId>,
@@ -352,6 +354,26 @@ fn toggle_iam_page_size_only(idx: usize, base_idx: usize, page_size: &mut PageSi
         *page_size = PageSize::TwentyFive;
     } else if idx == base_idx + 2 {
         *page_size = PageSize::Fifty;
+    }
+}
+
+/// Helper to cycle to next preference section (Columns -> PageSize -> Columns)
+fn cycle_preference_next(current_idx: &mut usize, num_columns: usize) {
+    let page_size_idx = num_columns + 2;
+    if *current_idx < page_size_idx {
+        *current_idx = page_size_idx;
+    } else {
+        *current_idx = 0;
+    }
+}
+
+/// Helper to cycle to previous preference section (Columns <- PageSize <- Columns)
+fn cycle_preference_prev(current_idx: &mut usize, num_columns: usize) {
+    let page_size_idx = num_columns + 2;
+    if *current_idx >= page_size_idx {
+        *current_idx = 0;
+    } else {
+        *current_idx = page_size_idx;
     }
 }
 
@@ -620,6 +642,8 @@ impl App {
             cw_log_stream_column_ids: StreamColumn::ids(),
             cw_log_event_visible_column_ids: EventColumn::default_visible(),
             cw_log_event_column_ids: EventColumn::ids(),
+            cw_log_tag_visible_column_ids: crate::cw::TagColumn::ids(),
+            cw_log_tag_column_ids: crate::cw::TagColumn::ids(),
             cw_alarm_visible_column_ids: [
                 AlarmColumn::Name,
                 AlarmColumn::State,
@@ -792,6 +816,8 @@ impl App {
             cw_log_stream_column_ids: StreamColumn::ids(),
             cw_log_event_visible_column_ids: EventColumn::default_visible(),
             cw_log_event_column_ids: EventColumn::ids(),
+            cw_log_tag_visible_column_ids: crate::cw::TagColumn::ids(),
+            cw_log_tag_column_ids: crate::cw::TagColumn::ids(),
             cw_alarm_visible_column_ids: [
                 AlarmColumn::Name,
                 AlarmColumn::State,
@@ -2061,30 +2087,56 @@ impl App {
                     }
                 } else if self.view_mode == ViewMode::Detail {
                     let idx = self.column_selector_index;
-                    if idx > 0 && idx <= self.cw_log_stream_column_ids.len() {
-                        if let Some(col) = self.cw_log_stream_column_ids.get(idx - 1) {
-                            if let Some(pos) = self
-                                .cw_log_stream_visible_column_ids
-                                .iter()
-                                .position(|c| c == col)
-                            {
-                                self.cw_log_stream_visible_column_ids.remove(pos);
-                            } else {
-                                self.cw_log_stream_visible_column_ids.push(*col);
+                    if self.log_groups_state.detail_tab == DetailTab::Tags {
+                        // Tags tab
+                        if idx > 0 && idx <= self.cw_log_tag_column_ids.len() {
+                            if let Some(col) = self.cw_log_tag_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cw_log_tag_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    self.cw_log_tag_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cw_log_tag_visible_column_ids.push(*col);
+                                }
                             }
+                        } else if idx == self.cw_log_tag_column_ids.len() + 3 {
+                            self.log_groups_state.tags.page_size = PageSize::Ten;
+                        } else if idx == self.cw_log_tag_column_ids.len() + 4 {
+                            self.log_groups_state.tags.page_size = PageSize::TwentyFive;
+                        } else if idx == self.cw_log_tag_column_ids.len() + 5 {
+                            self.log_groups_state.tags.page_size = PageSize::Fifty;
+                        } else if idx == self.cw_log_tag_column_ids.len() + 6 {
+                            self.log_groups_state.tags.page_size = PageSize::OneHundred;
                         }
-                    } else if idx == self.cw_log_stream_column_ids.len() + 3 {
-                        self.log_groups_state.stream_page_size = 10;
-                        self.log_groups_state.stream_current_page = 0;
-                    } else if idx == self.cw_log_stream_column_ids.len() + 4 {
-                        self.log_groups_state.stream_page_size = 25;
-                        self.log_groups_state.stream_current_page = 0;
-                    } else if idx == self.cw_log_stream_column_ids.len() + 5 {
-                        self.log_groups_state.stream_page_size = 50;
-                        self.log_groups_state.stream_current_page = 0;
-                    } else if idx == self.cw_log_stream_column_ids.len() + 6 {
-                        self.log_groups_state.stream_page_size = 100;
-                        self.log_groups_state.stream_current_page = 0;
+                    } else {
+                        // Log streams tab
+                        if idx > 0 && idx <= self.cw_log_stream_column_ids.len() {
+                            if let Some(col) = self.cw_log_stream_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cw_log_stream_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    self.cw_log_stream_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cw_log_stream_visible_column_ids.push(*col);
+                                }
+                            }
+                        } else if idx == self.cw_log_stream_column_ids.len() + 3 {
+                            self.log_groups_state.stream_page_size = 10;
+                            self.log_groups_state.stream_current_page = 0;
+                        } else if idx == self.cw_log_stream_column_ids.len() + 4 {
+                            self.log_groups_state.stream_page_size = 25;
+                            self.log_groups_state.stream_current_page = 0;
+                        } else if idx == self.cw_log_stream_column_ids.len() + 5 {
+                            self.log_groups_state.stream_page_size = 50;
+                            self.log_groups_state.stream_current_page = 0;
+                        } else if idx == self.cw_log_stream_column_ids.len() + 6 {
+                            self.log_groups_state.stream_page_size = 100;
+                            self.log_groups_state.stream_current_page = 0;
+                        }
                     }
                 } else if self.current_service == Service::CloudFormationStacks {
                     let idx = self.column_selector_index;
@@ -2511,6 +2563,30 @@ impl App {
                     } else {
                         self.column_selector_index = 0;
                     }
+                } else if self.current_service == Service::CloudWatchLogGroups {
+                    if self.view_mode == ViewMode::Events {
+                        // Events view: only columns, no sections to cycle
+                    } else if self.view_mode == ViewMode::Detail {
+                        if self.log_groups_state.detail_tab == DetailTab::Tags {
+                            // Tags tab: Columns(0), PageSize(columns.len() + 2)
+                            cycle_preference_next(
+                                &mut self.column_selector_index,
+                                self.cw_log_tag_column_ids.len(),
+                            );
+                        } else {
+                            // Streams view: Columns(0), PageSize(columns.len() + 2)
+                            cycle_preference_next(
+                                &mut self.column_selector_index,
+                                self.cw_log_stream_column_ids.len(),
+                            );
+                        }
+                    } else {
+                        // Log groups view: Columns(0), PageSize(columns.len() + 2)
+                        cycle_preference_next(
+                            &mut self.column_selector_index,
+                            self.cw_log_group_column_ids.len(),
+                        );
+                    }
                 }
             }
             Action::PrevPreferences => {
@@ -2671,6 +2747,30 @@ impl App {
                     } else {
                         self.column_selector_index = page_size_idx;
                     }
+                } else if self.current_service == Service::CloudWatchLogGroups {
+                    if self.view_mode == ViewMode::Events {
+                        // Events view: only columns, no sections to cycle
+                    } else if self.view_mode == ViewMode::Detail {
+                        if self.log_groups_state.detail_tab == DetailTab::Tags {
+                            // Tags tab: Columns(0), PageSize(columns.len() + 2)
+                            cycle_preference_prev(
+                                &mut self.column_selector_index,
+                                self.cw_log_tag_column_ids.len(),
+                            );
+                        } else {
+                            // Streams view: Columns(0), PageSize(columns.len() + 2)
+                            cycle_preference_prev(
+                                &mut self.column_selector_index,
+                                self.cw_log_stream_column_ids.len(),
+                            );
+                        }
+                    } else {
+                        // Log groups view: Columns(0), PageSize(columns.len() + 2)
+                        cycle_preference_prev(
+                            &mut self.column_selector_index,
+                            self.cw_log_group_column_ids.len(),
+                        );
+                    }
                 }
             }
             Action::CloseColumnSelector => {
@@ -2731,6 +2831,9 @@ impl App {
                     self.iam_state.group_tab = self.iam_state.group_tab.next();
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.next();
+                    if self.log_groups_state.detail_tab == DetailTab::Tags {
+                        self.log_groups_state.tags.loading = true;
+                    }
                 } else if self.current_service == Service::S3Buckets {
                     if self.s3_state.current_bucket.is_some() {
                         self.s3_state.object_tab = self.s3_state.object_tab.next();
@@ -2935,7 +3038,8 @@ impl App {
                     self.sqs_state.input_focus = InputFocus::Filter;
                 } else if self.view_mode == ViewMode::List
                     || (self.view_mode == ViewMode::Detail
-                        && self.log_groups_state.detail_tab == DetailTab::LogStreams)
+                        && (self.log_groups_state.detail_tab == DetailTab::LogStreams
+                            || self.log_groups_state.detail_tab == DetailTab::Tags))
                 {
                     self.mode = Mode::FilterInput;
                     self.log_groups_state.filter_mode = true;
@@ -8010,8 +8114,11 @@ impl App {
                     }
                     self.view_mode = ViewMode::Detail;
                     self.log_groups_state.log_streams.clear();
+                    self.log_groups_state.tags.items.clear();
+                    self.log_groups_state.tags.reset();
                     self.log_groups_state.selected_stream = 0;
                     self.log_groups_state.loading = true;
+                    self.column_selector_index = 0;
                     self.update_current_tab_breadcrumb();
                 } else if self.view_mode == ViewMode::Detail {
                     // Map filtered stream selection to actual stream index
@@ -8644,6 +8751,39 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_log_group_tags(&mut self) -> anyhow::Result<()> {
+        if let Some(group) = self
+            .log_groups_state
+            .log_groups
+            .items
+            .get(self.log_groups_state.log_groups.selected)
+        {
+            // Use log_group_arn if available, otherwise construct from name
+            let arn = if let Some(arn) = &group.log_group_arn {
+                arn.clone()
+            } else if let Some(arn) = &group.arn {
+                arn.clone()
+            } else {
+                // Construct ARN from log group name
+                let account_id = if self.config.account_id.is_empty() {
+                    "*"
+                } else {
+                    &self.config.account_id
+                };
+                format!(
+                    "arn:aws:logs:{}:{}:log-group:{}",
+                    self.config.region, account_id, group.name
+                )
+            };
+
+            let tags = self.cloudwatch_client.list_tags_for_log_group(&arn).await?;
+            self.log_groups_state.tags.items = tags;
+            self.log_groups_state.tags.selected = 0;
+            self.log_groups_state.tags.scroll_offset = 0;
+        }
+        Ok(())
+    }
+
     pub async fn load_log_events(&mut self) -> anyhow::Result<()> {
         if let Some(group) = self
             .log_groups_state
@@ -9060,6 +9200,8 @@ mod tests {
                 retention_days: None,
                 log_class: None,
                 arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
             });
         app.log_groups_state.log_groups.reset();
         app.view_mode = ViewMode::Detail;
@@ -10682,6 +10824,50 @@ mod tests {
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
 
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, 0);
+    }
+
+    #[test]
+    fn test_next_preferences_cloudwatch_log_groups() {
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::List;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        // Tab from Columns to PageSize
+        let page_size_idx = app.cw_log_group_column_ids.len() + 2;
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+
+        // Tab from PageSize back to Columns
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, 0);
+
+        // Shift+Tab from Columns to PageSize
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+
+        // Shift+Tab from PageSize back to Columns
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 0);
+    }
+
+    #[test]
+    fn test_next_preferences_cloudwatch_log_streams() {
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        // Tab from Columns to PageSize
+        let page_size_idx = app.cw_log_stream_column_ids.len() + 2;
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+
+        // Tab from PageSize back to Columns
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }

@@ -28,16 +28,21 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> ColumnId {
+    const ID_UUID: &'static str = "column.sqs.trigger.uuid";
+    const ID_ARN: &'static str = "column.sqs.trigger.arn";
+    const ID_STATUS: &'static str = "column.sqs.trigger.status";
+    const ID_LAST_MODIFIED: &'static str = "column.sqs.trigger.last_modified";
+
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Column::Uuid => "column.sqs.trigger.uuid",
-            Column::Arn => "column.sqs.trigger.arn",
-            Column::Status => "column.sqs.trigger.status",
-            Column::LastModified => "column.sqs.trigger.last_modified",
+            Column::Uuid => Self::ID_UUID,
+            Column::Arn => Self::ID_ARN,
+            Column::Status => Self::ID_STATUS,
+            Column::LastModified => Self::ID_LAST_MODIFIED,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Uuid => "UUID",
             Column::Arn => "ARN",
@@ -52,15 +57,15 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.sqs.trigger.uuid" => Some(Column::Uuid),
-            "column.sqs.trigger.arn" => Some(Column::Arn),
-            "column.sqs.trigger.status" => Some(Column::Status),
-            "column.sqs.trigger.last_modified" => Some(Column::LastModified),
+            Self::ID_UUID => Some(Column::Uuid),
+            Self::ID_ARN => Some(Column::Arn),
+            Self::ID_STATUS => Some(Column::Status),
+            Self::ID_LAST_MODIFIED => Some(Column::LastModified),
             _ => None,
         }
     }
 
-    pub fn all() -> [Column; 4] {
+    pub const fn all() -> [Column; 4] {
         [
             Column::Uuid,
             Column::Arn,

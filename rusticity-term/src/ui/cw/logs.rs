@@ -20,6 +20,7 @@ pub struct CloudWatchLogGroupsState {
     pub log_groups: crate::table::TableState<LogGroup>,
     pub log_streams: Vec<LogStream>,
     pub log_events: Vec<LogEvent>,
+    pub tags: crate::table::TableState<(String, String)>,
     pub selected_stream: usize,
     pub selected_event: usize,
     pub loading: bool,
@@ -62,6 +63,7 @@ impl Default for CloudWatchLogGroupsState {
             log_groups: crate::table::TableState::new(),
             log_streams: Vec::new(),
             log_events: Vec::new(),
+            tags: crate::table::TableState::new(),
             selected_stream: 0,
             selected_event: 0,
             loading: false,
@@ -143,7 +145,7 @@ pub enum DetailTab {
 }
 
 impl CyclicEnum for DetailTab {
-    const ALL: &'static [Self] = &[Self::LogStreams];
+    const ALL: &'static [Self] = &[Self::LogStreams, Self::Tags];
 }
 
 impl DetailTab {
@@ -162,7 +164,7 @@ impl DetailTab {
     }
 
     pub fn all() -> Vec<DetailTab> {
-        vec![DetailTab::LogStreams]
+        vec![DetailTab::LogStreams, DetailTab::Tags]
     }
 }
 
@@ -210,6 +212,23 @@ pub fn filtered_log_streams(app: &App) -> Vec<&LogStream> {
             })
             .collect()
     };
+
+    // Filter out expired streams unless show_expired is enabled
+    if !app.log_groups_state.show_expired {
+        if let Some(group) = selected_log_group(app) {
+            if let Some(retention_days) = group.retention_days {
+                let now = chrono::Utc::now();
+                let retention_cutoff = now - chrono::Duration::days(retention_days as i64);
+
+                streams.retain(|stream| {
+                    stream
+                        .last_event_time
+                        .map(|t| t > retention_cutoff)
+                        .unwrap_or(false)
+                });
+            }
+        }
+    }
 
     streams.sort_by(|a, b| {
         let cmp = match app.log_groups_state.stream_sort {
@@ -343,11 +362,17 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
             .map(|t| format_timestamp(&t))
             .unwrap_or_else(|| "-".to_string());
         let stored_bytes = format_bytes(group.stored_bytes.unwrap_or(0));
+        let deletion_protection = if group.deletion_protection_enabled.unwrap_or(false) {
+            "On"
+        } else {
+            "Off"
+        };
 
         let lines = vec![
             labeled_field("Log class", "Standard"),
             labeled_field("Retention", "Never expire"),
             labeled_field("Stored bytes", stored_bytes),
+            labeled_field("Deletion protection", deletion_protection),
             labeled_field("Creation time", creation_time),
             labeled_field("ARN", arn),
             Line::from(vec![
@@ -406,11 +431,17 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
             .map(|t| format_timestamp(&t))
             .unwrap_or_else(|| "-".to_string());
         let stored_bytes = format_bytes(group.stored_bytes.unwrap_or(0));
+        let deletion_protection = if group.deletion_protection_enabled.unwrap_or(false) {
+            "On"
+        } else {
+            "Off"
+        };
 
         let lines = vec![
             labeled_field("Log class", "Standard"),
             labeled_field("Retention", "Never expire"),
             labeled_field("Stored bytes", stored_bytes),
+            labeled_field("Deletion protection", deletion_protection),
             labeled_field("Creation time", creation_time),
             labeled_field("ARN", arn),
             Line::from(vec![
@@ -443,6 +474,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     match app.log_groups_state.detail_tab {
         DetailTab::LogStreams => render_log_streams_table(frame, app, chunks[2], border_style),
+        DetailTab::Tags => render_tags_table(frame, app, chunks[2], border_style),
         _ => render_tab_placeholder(frame, app, chunks[2], border_style),
     }
 }
@@ -451,6 +483,10 @@ fn render_tab_menu(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
     let all_tabs = DetailTab::all();
     let tabs: Vec<(&str, DetailTab)> = all_tabs.iter().map(|tab| (tab.name(), *tab)).collect();
+
+    // Debug: verify we have both tabs
+    debug_assert_eq!(tabs.len(), 2, "Should have 2 tabs: LogStreams and Tags");
+
     render_tabs(frame, area, &tabs, &app.log_groups_state.detail_tab);
 }
 
@@ -560,8 +596,18 @@ fn render_log_streams_table(frame: &mut Frame, app: &App, area: Rect, border_sty
 
     let config = TableConfig {
         items: paginated_streams,
-        selected_index: app.log_groups_state.selected_stream,
-        expanded_index: app.log_groups_state.expanded_stream,
+        selected_index: if count > 0 {
+            app.log_groups_state
+                .selected_stream
+                .saturating_sub(start_idx)
+                .min(page_size.saturating_sub(1))
+        } else {
+            0
+        },
+        expanded_index: app
+            .log_groups_state
+            .expanded_stream
+            .map(|idx| idx.saturating_sub(start_idx)),
         columns: &columns,
         sort_column,
         sort_direction,
@@ -982,9 +1028,102 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+fn render_tags_table(frame: &mut Frame, app: &App, area: Rect, _border_style: Style) {
+    use crate::cw::TagColumn;
+    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
+    use crate::ui::table::{render_table, Column, TableConfig};
+    use crate::ui::vertical;
+
+    let chunks = vertical(
+        [
+            Constraint::Length(3), // Filter with pagination
+            Constraint::Min(0),    // Table
+        ],
+        area,
+    );
+
+    // Filter tags
+    let page_size = app.log_groups_state.tags.page_size.value().max(1);
+    let filtered_tags: Vec<_> = app
+        .log_groups_state
+        .tags
+        .items
+        .iter()
+        .filter(|t| {
+            if app.log_groups_state.tags.filter.is_empty() {
+                true
+            } else {
+                t.0.to_lowercase()
+                    .contains(&app.log_groups_state.tags.filter.to_lowercase())
+                    || t.1
+                        .to_lowercase()
+                        .contains(&app.log_groups_state.tags.filter.to_lowercase())
+            }
+        })
+        .collect();
+
+    let filtered_count = filtered_tags.len();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page = app.log_groups_state.tags.selected / page_size;
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    render_simple_filter(
+        frame,
+        chunks[0],
+        SimpleFilterConfig {
+            filter_text: &app.log_groups_state.tags.filter,
+            placeholder: "Search",
+            pagination: &pagination,
+            mode: app.mode,
+            is_input_focused: app.log_groups_state.input_focus == InputFocus::Filter,
+            is_pagination_focused: app.log_groups_state.input_focus == InputFocus::Pagination,
+        },
+    );
+
+    // Paginate
+    let scroll_offset = app.log_groups_state.tags.scroll_offset;
+    let page_tags: Vec<&(String, String)> = filtered_tags
+        .into_iter()
+        .skip(scroll_offset)
+        .take(page_size)
+        .collect();
+
+    let columns: Vec<Box<dyn Column<(String, String)>>> = app
+        .cw_log_tag_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            TagColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<(String, String)>>)
+        })
+        .collect();
+
+    let config = TableConfig {
+        items: page_tags,
+        selected_index: app
+            .log_groups_state
+            .tags
+            .selected
+            .saturating_sub(scroll_offset),
+        expanded_index: None,
+        columns: &columns,
+        sort_column: "Key",
+        sort_direction: crate::common::SortDirection::Asc,
+        title: format_title(&format!("Tags ({})", filtered_count)),
+        area: chunks[1],
+        get_expanded_content: None,
+        is_active: app.mode == Mode::Normal,
+    };
+
+    render_table(frame, config);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
 
     #[test]
     fn test_input_focus_enum_cycling() {
@@ -1022,5 +1161,372 @@ mod tests {
             InputFocus::Checkbox("ExactMatch").prev(&FILTER_CONTROLS),
             InputFocus::Filter
         );
+    }
+
+    #[test]
+    fn test_exact_match_toggle_with_space() {
+        use crate::app::{Service, ViewMode};
+        use crate::keymap::{Action, Mode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+        app.mode = Mode::FilterInput;
+        app.log_groups_state.detail_tab = DetailTab::LogStreams;
+        app.log_groups_state.input_focus = InputFocus::Checkbox("ExactMatch");
+
+        // Initially false
+        assert!(!app.log_groups_state.exact_match);
+
+        // Toggle with space
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert!(app.log_groups_state.exact_match);
+
+        // Toggle again
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert!(!app.log_groups_state.exact_match);
+    }
+
+    #[test]
+    fn test_exact_match_filters_log_groups() {
+        use crate::app::Service;
+        use rusticity_core::LogGroup;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+
+        // Add test log groups
+        app.log_groups_state.log_groups.items = vec![
+            LogGroup {
+                name: "/aws/lambda/test".to_string(),
+                creation_time: None,
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+            },
+            LogGroup {
+                name: "/aws/lambda/test-prod".to_string(),
+                creation_time: None,
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+            },
+            LogGroup {
+                name: "/aws/lambda/production".to_string(),
+                creation_time: None,
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+            },
+        ];
+
+        // Test partial match (default)
+        app.log_groups_state.log_groups.filter = "test".to_string();
+        app.log_groups_state.exact_match = false;
+        let filtered = filtered_log_groups(&app);
+        assert_eq!(filtered.len(), 2); // Matches "test" and "test-prod"
+
+        // Test exact match
+        app.log_groups_state.exact_match = true;
+        let filtered = filtered_log_groups(&app);
+        assert_eq!(filtered.len(), 0); // No exact match for "test"
+
+        // Test exact match with full name
+        app.log_groups_state.log_groups.filter = "/aws/lambda/test".to_string();
+        let filtered = filtered_log_groups(&app);
+        assert_eq!(filtered.len(), 1); // Exact match
+        assert_eq!(filtered[0].name, "/aws/lambda/test");
+    }
+
+    #[test]
+    fn test_exact_match_filters_log_streams() {
+        use crate::app::{Service, ViewMode};
+        use rusticity_core::LogStream;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+
+        // Add test log streams
+        app.log_groups_state.log_streams = vec![
+            LogStream {
+                name: "2024/01/01/stream1".to_string(),
+                creation_time: None,
+                last_event_time: None,
+            },
+            LogStream {
+                name: "2024/01/01/stream1-backup".to_string(),
+                creation_time: None,
+                last_event_time: None,
+            },
+            LogStream {
+                name: "2024/01/02/stream2".to_string(),
+                creation_time: None,
+                last_event_time: None,
+            },
+        ];
+
+        // Test partial match (default)
+        app.log_groups_state.stream_filter = "stream1".to_string();
+        app.log_groups_state.exact_match = false;
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 2); // Matches "stream1" and "stream1-backup"
+
+        // Test exact match
+        app.log_groups_state.exact_match = true;
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 0); // No exact match for "stream1"
+
+        // Test exact match with full name
+        app.log_groups_state.stream_filter = "2024/01/01/stream1".to_string();
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 1); // Exact match
+        assert_eq!(filtered[0].name, "2024/01/01/stream1");
+    }
+
+    #[test]
+    fn test_exact_match_checkbox_focus_cycle() {
+        use crate::app::{Service, ViewMode};
+        use crate::keymap::{Action, Mode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+        app.mode = Mode::FilterInput;
+        app.log_groups_state.detail_tab = DetailTab::LogStreams;
+        app.log_groups_state.input_focus = InputFocus::Filter;
+
+        // Cycle to exact match checkbox
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(
+            app.log_groups_state.input_focus,
+            InputFocus::Checkbox("ExactMatch")
+        );
+
+        // Space should toggle exact match
+        assert!(!app.log_groups_state.exact_match);
+        app.handle_action(Action::ToggleFilterCheckbox);
+        assert!(app.log_groups_state.exact_match);
+
+        // Cycle to next control
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(
+            app.log_groups_state.input_focus,
+            InputFocus::Checkbox("ShowExpired")
+        );
+
+        // Cycle back
+        app.handle_action(Action::PrevFilterFocus);
+        assert_eq!(
+            app.log_groups_state.input_focus,
+            InputFocus::Checkbox("ExactMatch")
+        );
+    }
+
+    #[test]
+    fn test_tags_tab_in_detail_view() {
+        use crate::app::{Service, ViewMode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+
+        // Initially on LogStreams tab
+        assert_eq!(app.log_groups_state.detail_tab, DetailTab::LogStreams);
+
+        // Cycle to Tags tab
+        app.log_groups_state.detail_tab = app.log_groups_state.detail_tab.next();
+        assert_eq!(app.log_groups_state.detail_tab, DetailTab::Tags);
+
+        // Cycle back to LogStreams
+        app.log_groups_state.detail_tab = app.log_groups_state.detail_tab.next();
+        assert_eq!(app.log_groups_state.detail_tab, DetailTab::LogStreams);
+    }
+
+    #[test]
+    fn test_tags_tab_preferences_cycling() {
+        use crate::app::{Service, ViewMode};
+        use crate::keymap::{Action, Mode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.view_mode = ViewMode::Detail;
+        app.log_groups_state.detail_tab = DetailTab::Tags;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 0;
+
+        // Tab from Columns to PageSize
+        let page_size_idx = app.cw_log_tag_column_ids.len() + 2;
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+
+        // Tab from PageSize back to Columns
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, 0);
+
+        // Shift+Tab from Columns to PageSize
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, page_size_idx);
+    }
+
+    #[test]
+    fn test_tags_tab_filter_mode() {
+        use crate::app::{Service, ViewMode};
+        use crate::keymap::{Action, Mode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+        app.log_groups_state.detail_tab = DetailTab::Tags;
+        app.mode = Mode::Normal;
+
+        // Press 'i' to enter filter mode
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::FilterInput);
+        assert_eq!(app.log_groups_state.input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_log_streams_tab_filter_mode() {
+        use crate::app::{Service, ViewMode};
+        use crate::keymap::{Action, Mode};
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+        app.log_groups_state.detail_tab = DetailTab::LogStreams;
+        app.mode = Mode::Normal;
+
+        // Press 'i' to enter filter mode
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::FilterInput);
+        assert_eq!(app.log_groups_state.input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_detail_tab_all_matches_cyclic_enum() {
+        // Ensure DetailTab::all() returns the same tabs as CyclicEnum::ALL
+        let all_tabs = DetailTab::all();
+        let cyclic_tabs: Vec<DetailTab> = DetailTab::ALL.to_vec();
+
+        assert_eq!(
+            all_tabs.len(),
+            cyclic_tabs.len(),
+            "DetailTab::all() must return same number of tabs as CyclicEnum::ALL"
+        );
+
+        for (i, tab) in all_tabs.iter().enumerate() {
+            assert_eq!(
+                tab, &cyclic_tabs[i],
+                "DetailTab::all() must return tabs in same order as CyclicEnum::ALL"
+            );
+        }
+    }
+
+    #[test]
+    fn test_show_expired_filters_streams_by_retention() {
+        use crate::app::{Service, ViewMode};
+        use chrono::Utc;
+        use rusticity_core::LogGroup;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+
+        let now = Utc::now();
+        let retention_days = 7;
+
+        // Add log group with 7-day retention
+        app.log_groups_state.log_groups.items = vec![LogGroup {
+            name: "/aws/lambda/test".to_string(),
+            creation_time: None,
+            stored_bytes: None,
+            retention_days: Some(retention_days),
+            log_class: None,
+            arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: None,
+        }];
+
+        // Add streams: one recent, one expired
+        app.log_groups_state.log_streams = vec![
+            LogStream {
+                name: "recent-stream".to_string(),
+                creation_time: None,
+                last_event_time: Some(now - chrono::Duration::days(3)),
+            },
+            LogStream {
+                name: "expired-stream".to_string(),
+                creation_time: None,
+                last_event_time: Some(now - chrono::Duration::days(10)),
+            },
+        ];
+
+        // With show_expired = false, should only show recent stream
+        app.log_groups_state.show_expired = false;
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "recent-stream");
+
+        // With show_expired = true, should show both
+        app.log_groups_state.show_expired = true;
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_show_expired_no_retention_shows_all() {
+        use crate::app::{Service, ViewMode};
+        use chrono::Utc;
+        use rusticity_core::LogGroup;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+
+        let now = Utc::now();
+
+        // Add log group with no retention (None)
+        app.log_groups_state.log_groups.items = vec![LogGroup {
+            name: "/aws/lambda/test".to_string(),
+            creation_time: None,
+            stored_bytes: None,
+            retention_days: None,
+            log_class: None,
+            arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: None,
+        }];
+
+        app.log_groups_state.log_streams = vec![
+            LogStream {
+                name: "stream1".to_string(),
+                creation_time: None,
+                last_event_time: Some(now - chrono::Duration::days(100)),
+            },
+            LogStream {
+                name: "stream2".to_string(),
+                creation_time: None,
+                last_event_time: Some(now - chrono::Duration::days(1)),
+            },
+        ];
+
+        // With no retention, all streams shown regardless of show_expired
+        app.log_groups_state.show_expired = false;
+        let filtered = filtered_log_streams(&app);
+        assert_eq!(filtered.len(), 2);
     }
 }

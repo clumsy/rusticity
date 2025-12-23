@@ -43,7 +43,9 @@ impl CloudWatchClient {
                 stored_bytes: g.stored_bytes(),
                 retention_days: g.retention_in_days(),
                 log_class: g.log_group_class().map(|c| c.as_str().to_string()),
-                arn: g.log_group_arn().map(|a| a.to_string()),
+                arn: g.arn().map(|a| a.to_string()),
+                log_group_arn: g.log_group_arn().map(|a| a.to_string()),
+                deletion_protection_enabled: g.deletion_protection_enabled(),
             })
             .collect();
 
@@ -198,5 +200,28 @@ impl CloudWatchClient {
             .collect();
 
         Ok((status, results))
+    }
+
+    pub async fn list_tags_for_log_group(
+        &self,
+        log_group_arn: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let resp = self
+            .client
+            .list_tags_for_resource()
+            .resource_arn(log_group_arn)
+            .send()
+            .await?;
+
+        let tags = if let Some(tag_map) = resp.tags() {
+            tag_map
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(tags)
     }
 }

@@ -23,14 +23,17 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> ColumnId {
+    const ID_SUBSCRIPTION_ARN: &'static str = "column.sqs.subscription.subscription_arn";
+    const ID_TOPIC_ARN: &'static str = "column.sqs.subscription.topic_arn";
+
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Column::SubscriptionArn => "column.sqs.subscription.subscription_arn",
-            Column::TopicArn => "column.sqs.subscription.topic_arn",
+            Column::SubscriptionArn => Self::ID_SUBSCRIPTION_ARN,
+            Column::TopicArn => Self::ID_TOPIC_ARN,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::SubscriptionArn => "Subscription ARN",
             Column::TopicArn => "Topic ARN",
@@ -43,13 +46,13 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.sqs.subscription.subscription_arn" => Some(Column::SubscriptionArn),
-            "column.sqs.subscription.topic_arn" => Some(Column::TopicArn),
+            Self::ID_SUBSCRIPTION_ARN => Some(Column::SubscriptionArn),
+            Self::ID_TOPIC_ARN => Some(Column::TopicArn),
             _ => None,
         }
     }
 
-    pub fn all() -> [Column; 2] {
+    pub const fn all() -> [Column; 2] {
         [Column::SubscriptionArn, Column::TopicArn]
     }
 

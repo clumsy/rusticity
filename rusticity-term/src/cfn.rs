@@ -105,22 +105,33 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> &'static str {
+    const ID_NAME: &'static str = "column.cfn.stack.name";
+    const ID_STACK_ID: &'static str = "column.cfn.stack.stack_id";
+    const ID_STATUS: &'static str = "column.cfn.stack.status";
+    const ID_CREATED_TIME: &'static str = "column.cfn.stack.created_time";
+    const ID_UPDATED_TIME: &'static str = "column.cfn.stack.updated_time";
+    const ID_DELETED_TIME: &'static str = "column.cfn.stack.deleted_time";
+    const ID_DRIFT_STATUS: &'static str = "column.cfn.stack.drift_status";
+    const ID_LAST_DRIFT_CHECK_TIME: &'static str = "column.cfn.stack.last_drift_check_time";
+    const ID_STATUS_REASON: &'static str = "column.cfn.stack.status_reason";
+    const ID_DESCRIPTION: &'static str = "column.cfn.stack.description";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            Column::Name => "column.cfn.stack.name",
-            Column::StackId => "column.cfn.stack.stack_id",
-            Column::Status => "column.cfn.stack.status",
-            Column::CreatedTime => "column.cfn.stack.created_time",
-            Column::UpdatedTime => "column.cfn.stack.updated_time",
-            Column::DeletedTime => "column.cfn.stack.deleted_time",
-            Column::DriftStatus => "column.cfn.stack.drift_status",
-            Column::LastDriftCheckTime => "column.cfn.stack.last_drift_check_time",
-            Column::StatusReason => "column.cfn.stack.status_reason",
-            Column::Description => "column.cfn.stack.description",
+            Column::Name => Self::ID_NAME,
+            Column::StackId => Self::ID_STACK_ID,
+            Column::Status => Self::ID_STATUS,
+            Column::CreatedTime => Self::ID_CREATED_TIME,
+            Column::UpdatedTime => Self::ID_UPDATED_TIME,
+            Column::DeletedTime => Self::ID_DELETED_TIME,
+            Column::DriftStatus => Self::ID_DRIFT_STATUS,
+            Column::LastDriftCheckTime => Self::ID_LAST_DRIFT_CHECK_TIME,
+            Column::StatusReason => Self::ID_STATUS_REASON,
+            Column::Description => Self::ID_DESCRIPTION,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Stack Name",
             Column::StackId => "Stack ID",
@@ -141,16 +152,16 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.cfn.stack.name" => Some(Column::Name),
-            "column.cfn.stack.stack_id" => Some(Column::StackId),
-            "column.cfn.stack.status" => Some(Column::Status),
-            "column.cfn.stack.created_time" => Some(Column::CreatedTime),
-            "column.cfn.stack.updated_time" => Some(Column::UpdatedTime),
-            "column.cfn.stack.deleted_time" => Some(Column::DeletedTime),
-            "column.cfn.stack.drift_status" => Some(Column::DriftStatus),
-            "column.cfn.stack.last_drift_check_time" => Some(Column::LastDriftCheckTime),
-            "column.cfn.stack.status_reason" => Some(Column::StatusReason),
-            "column.cfn.stack.description" => Some(Column::Description),
+            Self::ID_NAME => Some(Column::Name),
+            Self::ID_STACK_ID => Some(Column::StackId),
+            Self::ID_STATUS => Some(Column::Status),
+            Self::ID_CREATED_TIME => Some(Column::CreatedTime),
+            Self::ID_UPDATED_TIME => Some(Column::UpdatedTime),
+            Self::ID_DELETED_TIME => Some(Column::DeletedTime),
+            Self::ID_DRIFT_STATUS => Some(Column::DriftStatus),
+            Self::ID_LAST_DRIFT_CHECK_TIME => Some(Column::LastDriftCheckTime),
+            Self::ID_STATUS_REASON => Some(Column::StatusReason),
+            Self::ID_DESCRIPTION => Some(Column::Description),
             _ => None,
         }
     }

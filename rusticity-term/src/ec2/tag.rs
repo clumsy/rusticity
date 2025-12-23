@@ -23,14 +23,17 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> ColumnId {
+    const ID_KEY: &'static str = "column.ec2.tag.key";
+    const ID_VALUE: &'static str = "column.ec2.tag.value";
+
+    pub const fn id(&self) -> ColumnId {
         match self {
-            Column::Key => "column.ec2.tag.key",
-            Column::Value => "column.ec2.tag.value",
+            Column::Key => Self::ID_KEY,
+            Column::Value => Self::ID_VALUE,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Key => "Key",
             Column::Value => "Value",
@@ -43,13 +46,13 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.ec2.tag.key" => Some(Column::Key),
-            "column.ec2.tag.value" => Some(Column::Value),
+            Self::ID_KEY => Some(Column::Key),
+            Self::ID_VALUE => Some(Column::Value),
             _ => None,
         }
     }
 
-    pub fn all() -> [Column; 2] {
+    pub const fn all() -> [Column; 2] {
         [Column::Key, Column::Value]
     }
 

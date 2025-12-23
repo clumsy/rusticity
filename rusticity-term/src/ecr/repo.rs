@@ -5,13 +5,7 @@ use ratatui::prelude::*;
 use std::collections::HashMap;
 
 pub fn init(i18n: &mut HashMap<String, String>) {
-    for col in [
-        Column::Name,
-        Column::Uri,
-        Column::CreatedAt,
-        Column::TagImmutability,
-        Column::EncryptionType,
-    ] {
+    for col in Column::all() {
         i18n.entry(col.id().to_string())
             .or_insert_with(|| col.default_name().to_string());
     }
@@ -36,17 +30,23 @@ pub enum Column {
 }
 
 impl Column {
-    pub fn id(&self) -> &'static str {
+    const ID_NAME: &'static str = "column.ecr.repo.name";
+    const ID_URI: &'static str = "column.ecr.repo.uri";
+    const ID_CREATED_AT: &'static str = "column.ecr.repo.created_at";
+    const ID_TAG_IMMUTABILITY: &'static str = "column.ecr.repo.tag_immutability";
+    const ID_ENCRYPTION_TYPE: &'static str = "column.ecr.repo.encryption_type";
+
+    pub const fn id(&self) -> &'static str {
         match self {
-            Column::Name => "column.ecr.repo.name",
-            Column::Uri => "column.ecr.repo.uri",
-            Column::CreatedAt => "column.ecr.repo.created_at",
-            Column::TagImmutability => "column.ecr.repo.tag_immutability",
-            Column::EncryptionType => "column.ecr.repo.encryption_type",
+            Column::Name => Self::ID_NAME,
+            Column::Uri => Self::ID_URI,
+            Column::CreatedAt => Self::ID_CREATED_AT,
+            Column::TagImmutability => Self::ID_TAG_IMMUTABILITY,
+            Column::EncryptionType => Self::ID_ENCRYPTION_TYPE,
         }
     }
 
-    pub fn default_name(&self) -> &'static str {
+    pub const fn default_name(&self) -> &'static str {
         match self {
             Column::Name => "Repository name",
             Column::Uri => "URI",
@@ -56,7 +56,7 @@ impl Column {
         }
     }
 
-    pub fn all() -> [Column; 5] {
+    pub const fn all() -> [Column; 5] {
         [
             Column::Name,
             Column::Uri,
@@ -72,11 +72,11 @@ impl Column {
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
-            "column.ecr.repo.name" => Some(Column::Name),
-            "column.ecr.repo.uri" => Some(Column::Uri),
-            "column.ecr.repo.created_at" => Some(Column::CreatedAt),
-            "column.ecr.repo.tag_immutability" => Some(Column::TagImmutability),
-            "column.ecr.repo.encryption_type" => Some(Column::EncryptionType),
+            Self::ID_NAME => Some(Column::Name),
+            Self::ID_URI => Some(Column::Uri),
+            Self::ID_CREATED_AT => Some(Column::CreatedAt),
+            Self::ID_TAG_IMMUTABILITY => Some(Column::TagImmutability),
+            Self::ID_ENCRYPTION_TYPE => Some(Column::EncryptionType),
             _ => None,
         }
     }

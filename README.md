@@ -1,5 +1,17 @@
 # Rusticity - Terminal UI for AWS 
 
+[![Crate Badge]][Crate] [![License Badge]][License] [![CI Badge]][CI] [![Built With Ratatui]][Ratatui]
+
+[Crate]: https://crates.io/crates/rusticity
+[License]: ./LICENSE
+[CI]: https://github.com/clumsy/rusticity/actions
+[Ratatui]: https://ratatui.rs/
+
+[Crate Badge]: https://img.shields.io/crates/v/rusticity?logo=rust&style=flat-square&color=E05D44
+[License Badge]: https://img.shields.io/crates/l/rusticity?style=flat-square&color=1370D3
+[CI Badge]: https://img.shields.io/github/actions/workflow/status/clumsy/rusticity/ci.yml?style=flat-square&logo=github
+[Built With Ratatui]: https://img.shields.io/badge/Built_With_Ratatui-000?logo=ratatui&logoColor=fff&style=flat-square
+
 A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor.
 
 > ⚠️ **Early Development**: Rusticity is in active development. Expect breaking changes, bugs, and evolving features. Use at your own risk and please report any issues you encounter!

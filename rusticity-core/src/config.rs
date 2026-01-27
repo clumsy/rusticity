@@ -276,6 +276,22 @@ impl AwsConfig {
             .await;
         aws_sdk_ec2::Client::new(&config)
     }
+
+    pub async fn apigateway_client(&self) -> aws_sdk_apigateway::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_apigateway::Client::new(&config)
+    }
+
+    pub async fn apigatewayv2_client(&self) -> aws_sdk_apigatewayv2::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_apigatewayv2::Client::new(&config)
+    }
 }
 
 #[cfg(test)]

@@ -12,6 +12,8 @@ tokio = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-cloudwatchlogs = { workspace = true }
 aws-sdk-cloudwatch = { workspace = true }
+aws-sdk-apigateway = "1"
+aws-sdk-apigatewayv2 = "1"
 aws-sdk-cloudformation = "1"
 aws-sdk-ec2 = "1"
 aws-sdk-ecr = "1.52"

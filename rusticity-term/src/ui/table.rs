@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 
-use super::{rounded_block, styles};
+use super::{format_title, rounded_block, styles};
 use crate::common::{render_scrollbar, t, SortDirection};
 
 pub const CURSOR_COLLAPSED: &str = "►";
@@ -26,6 +26,45 @@ pub fn format_expandable_with_selection(
     } else {
         format!("  {}", label)
     }
+}
+
+pub fn render_tree_table(
+    frame: &mut Frame,
+    area: Rect,
+    title: String,
+    headers: Vec<&str>,
+    rows: Vec<Row>,
+    widths: Vec<Constraint>,
+    is_active: bool,
+) {
+    let border_style = if is_active {
+        styles::active_border()
+    } else {
+        Style::default()
+    };
+
+    let header_cells: Vec<Cell> = headers
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            Cell::from(format_header_cell(name, i))
+                .style(Style::default().add_modifier(Modifier::BOLD))
+        })
+        .collect();
+    let header = Row::new(header_cells)
+        .style(Style::default().bg(Color::White).fg(Color::Black))
+        .height(1);
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .column_spacing(1)
+        .block(
+            rounded_block()
+                .title(format_title(&title))
+                .border_style(border_style),
+        );
+
+    frame.render_widget(table, area);
 }
 
 type ExpandedContentFn<'a, T> = Box<dyn Fn(&T) -> Vec<(String, Style)> + 'a>;
@@ -221,7 +260,10 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         .header(header)
         .block(
             rounded_block()
-                .title(Span::styled(config.title, title_style))
+                .title(Span::styled(
+                    crate::ui::format_title(&config.title),
+                    title_style,
+                ))
                 .border_style(border_style),
         )
         .column_spacing(1)

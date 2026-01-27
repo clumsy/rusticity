@@ -139,6 +139,7 @@ impl<T> TableState<T> {
     pub fn reset(&mut self) {
         self.selected = 0;
         self.scroll_offset = 0;
+        self.expanded_item = None;
     }
 
     pub fn get_selected<'a>(&self, filtered: &'a [&'a T]) -> Option<&'a T> {

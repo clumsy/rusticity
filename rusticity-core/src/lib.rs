@@ -1,4 +1,5 @@
 pub mod alarms;
+pub mod apig;
 pub mod cfn;
 pub mod config;
 pub mod cw;
@@ -11,6 +12,7 @@ pub mod sqs;
 pub mod types;
 
 pub use alarms::AlarmsClient;
+pub use apig::ApiGatewayClient;
 pub use cfn::CloudFormationClient;
 pub use config::AwsConfig;
 pub use cw::CloudWatchClient;

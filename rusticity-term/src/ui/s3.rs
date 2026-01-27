@@ -965,20 +965,6 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
     let count = filtered_objects.len();
     let title = format_title(&format!("Objects ({})", count));
 
-    let columns = ["Name", "Type", "Last modified", "Size", "Storage class"];
-    let header_cells: Vec<Cell> = columns
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            Cell::from(format_header_cell(name, i))
-                .style(Style::default().add_modifier(Modifier::BOLD))
-        })
-        .collect();
-    let header = Row::new(header_cells)
-        .style(Style::default().bg(Color::White).fg(Color::Black))
-        .height(1)
-        .bottom_margin(0);
-
     // Calculate max name width
     let max_name_width = filtered_objects
         .iter()
@@ -1197,7 +1183,11 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
         .take(app.s3_state.object_visible_rows.get())
         .collect();
 
-    let table = Table::new(
+    crate::ui::table::render_tree_table(
+        frame,
+        area,
+        title,
+        vec!["Name", "Type", "Last modified", "Size", "Storage class"],
         rows,
         vec![
             Constraint::Length(max_name_width),
@@ -1206,12 +1196,8 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(12),
             Constraint::Length(15),
         ],
-    )
-    .header(header)
-    .column_spacing(1)
-    .block(rounded_block().title(title).border_style(active_border()));
-
-    frame.render_widget(table, area);
+        true,
+    );
 
     // Render scrollbar if content exceeds visible area
     let total_rows = app.s3_state.calculate_total_object_rows();

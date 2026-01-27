@@ -160,12 +160,15 @@ pub fn render_profile_picker(
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    let cursor = "█";
-    let filter_text = vec![
-        Span::raw(&app.profile_filter),
-        Span::styled(cursor, Style::default().fg(Color::Green)),
-    ];
-    let filter = filter_area(filter_text, true);
+    let filter_text = if app.profile_filter_active {
+        vec![
+            Span::raw(&app.profile_filter),
+            Span::styled("█", Style::default().fg(Color::Green)),
+        ]
+    } else {
+        vec![Span::raw(&app.profile_filter)]
+    };
+    let filter = filter_area(filter_text, app.profile_filter_active);
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);

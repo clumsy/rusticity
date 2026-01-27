@@ -72,18 +72,20 @@ fn common_list_hotkeys() -> Vec<Span<'static>> {
 }
 
 pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_indicator = match app.mode {
-        Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => " INSERT ",
-        Mode::ServicePicker => " INSERT ",
-        _ => " NORMAL ",
+    let is_insert = match app.mode {
+        Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => true,
+        Mode::ServicePicker | Mode::SpaceMenu => app.service_picker.filter_active,
+        Mode::RegionPicker => app.region_filter_active,
+        Mode::SessionPicker => app.session_filter_active,
+        Mode::ProfilePicker => app.profile_filter_active,
+        _ => false,
     };
 
-    let mode_style = match app.mode {
-        Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => {
-            Style::default().bg(Color::Yellow).fg(Color::Black)
-        }
-        Mode::ServicePicker => Style::default().bg(Color::Yellow).fg(Color::Black),
-        _ => Style::default().bg(Color::Blue).fg(Color::White),
+    let mode_indicator = if is_insert { " INSERT " } else { " NORMAL " };
+    let mode_style = if is_insert {
+        Style::default().bg(Color::Yellow).fg(Color::Black)
+    } else {
+        Style::default().bg(Color::Blue).fg(Color::White)
     };
 
     let help = if app.mode == Mode::ColumnSelector {

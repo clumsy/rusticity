@@ -161,6 +161,50 @@ async fn main() -> Result<()> {
                             app.sqs_state.triggers.loading = false;
                         }
 
+                        // Load API Gateway routes when viewing API detail
+                        if app.current_service == Service::ApiGatewayApis
+                            && app.apig_state.current_api.is_some()
+                            && app.apig_state.routes.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(api) = &app.apig_state.current_api.clone() {
+                                // Only load routes for HTTP/WebSocket APIs (v2), not REST APIs (v1)
+                                let protocol = api.protocol_type.to_uppercase();
+                                if protocol == "HTTP" || protocol == "WEBSOCKET" {
+                                    if let Err(e) = rusticity_term::ui::apig::load_routes(&mut app, &api.id).await {
+                                        app.error_message = Some(format!("Failed to load routes: {:#}", e));
+                                        app.error_scroll = 0;
+                                        app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    }
+                                } else {
+                                    // REST APIs don't have routes - show message
+                                    app.apig_state.routes.items.clear();
+                                }
+                            }
+                            app.apig_state.routes.loading = false;
+                        }
+
+                        // Load API Gateway resources for REST APIs
+                        if app.current_service == Service::ApiGatewayApis
+                            && app.apig_state.current_api.is_some()
+                            && app.apig_state.resources.loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(api) = &app.apig_state.current_api.clone() {
+                                let protocol = api.protocol_type.to_uppercase();
+                                if protocol == "REST" {
+                                    if let Err(e) = rusticity_term::ui::apig::load_resources(&mut app, &api.id).await {
+                                        app.error_message = Some(format!("Failed to load resources: {:#}", e));
+                                        app.error_scroll = 0;
+                                        app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    }
+                                } else {
+                                    app.apig_state.resources.items.clear();
+                                }
+                            }
+                            app.apig_state.resources.loading = false;
+                        }
+
                         // Load metrics when viewing queue detail on monitoring tab
                         if app.current_service == Service::SqsQueues
                             && app.sqs_state.current_queue.is_some()
@@ -317,6 +361,21 @@ async fn main() -> Result<()> {
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.ecr_state.repositories.loading = false;
+                        }
+
+                        // Load API Gateway APIs when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::ApiGatewayApis
+                            && ((!prev_service_selected || prev_service != Service::ApiGatewayApis)
+                                || app.apig_state.apis.loading)
+                        {
+                            app.apig_state.apis.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_apis().await {
+                                app.error_message = Some(format!("Failed to load APIs: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.apig_state.apis.loading = false;
                         }
 
                         // Load Lambda functions

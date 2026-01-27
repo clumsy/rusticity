@@ -1,3 +1,4 @@
+pub mod apig;
 pub mod cfn;
 pub mod cw;
 pub mod ec2;
@@ -15,6 +16,7 @@ pub mod sqs;
 mod status;
 pub mod styles;
 pub mod table;
+pub mod tree;
 
 pub use cw::insights::{DateRangeType, TimeUnit};
 pub use cw::{
@@ -134,7 +136,7 @@ pub fn render_tab_spans<'a>(tabs: &[(&'a str, bool)]) -> Vec<Span<'a>> {
 use ratatui::{prelude::*, widgets::*};
 
 // Common UI constants
-pub const SEARCH_ICON: &str = "─ 🔍 ";
+pub const SEARCH_ICON: &str = "─ 🔍 ─";
 pub const PREFERENCES_TITLE: &str = "Preferences";
 
 // Filter
@@ -781,11 +783,11 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: Rect) {
         && app.s3_state.current_bucket.is_some()
         && !app.s3_state.prefix_stack.is_empty()
     {
-        let parts: Vec<&str> = breadcrumbs_str.split(" > ").collect();
+        let parts: Vec<&str> = breadcrumbs_str.split(" › ").collect();
         let mut spans = Vec::new();
         for (i, part) in parts.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::raw(" > "));
+                spans.push(Span::raw(" › "));
             }
             if i == parts.len() - 1 {
                 // Last part (prefix) - highlight in cyan
@@ -851,6 +853,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::IamUsers => iam::render_users(frame, app, area),
         Service::IamRoles => iam::render_roles(frame, app, area),
         Service::IamUserGroups => iam::render_user_groups(frame, app, area),
+        Service::ApiGatewayApis => apig::render_apis(frame, app, area),
     }
 }
 
@@ -1029,6 +1032,110 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             render_page_size_section(app.log_groups_state.log_groups.page_size, PAGE_SIZE_OPTIONS);
         all_items.extend(page_items);
         max_len = max_len.max(page_len);
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::ApiGatewayApis {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        if app.apig_state.current_api.is_none() {
+            // API list view
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.apig_api_column_ids {
+                use crate::apig::api::Column as ApigColumn;
+                if let Some(col) = ApigColumn::from_id(col_id) {
+                    let is_visible = app.apig_api_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.apig_state.apis.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if let Some(api) = &app.apig_state.current_api {
+            // Routes/Resources detail view
+            use crate::apig::route::Column as RouteColumn;
+            use crate::ui::apig::ApiDetailTab;
+
+            if app.apig_state.detail_tab == ApiDetailTab::Routes {
+                // Check if REST API (shows resources) or HTTP/WebSocket (shows routes)
+                if api.protocol_type.to_uppercase() == "REST" {
+                    // REST API - show resource columns
+                    use crate::apig::resource::Column as ResourceColumn;
+
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for (i, col_id) in app.apig_resource_column_ids.iter().enumerate() {
+                        if let Some(col) = ResourceColumn::from_id(col_id) {
+                            if i == 0 {
+                                // First column (Resource) is always visible - show grayed out toggle
+                                let col_name = col.name().to_string();
+                                let spans = vec![
+                                    Span::styled("◼", Style::default().fg(Color::DarkGray)),
+                                    Span::styled("⬜", Style::default().fg(Color::DarkGray)),
+                                    Span::raw(" "),
+                                    Span::styled(
+                                        col_name.clone(),
+                                        Style::default().fg(Color::DarkGray),
+                                    ),
+                                ];
+                                let item = ListItem::new(Line::from(spans));
+                                all_items.push(item);
+                                max_len = max_len.max(4 + col_name.len());
+                            } else {
+                                let is_visible =
+                                    app.apig_resource_visible_column_ids.contains(col_id);
+                                let (item, len) =
+                                    render_column_toggle_string(col.name(), is_visible);
+                                all_items.push(item);
+                                max_len = max_len.max(len);
+                            }
+                        }
+                    }
+                } else {
+                    // HTTP/WebSocket API - show route columns
+                    let (header, header_len) = render_section_header("Columns");
+                    all_items.push(header);
+                    max_len = max_len.max(header_len);
+
+                    for (i, col_id) in app.apig_route_column_ids.iter().enumerate() {
+                        if let Some(col) = RouteColumn::from_id(col_id) {
+                            if i == 0 {
+                                // First column (Route) is always visible - show grayed out toggle
+                                let col_name = col.name().to_string();
+                                let spans = vec![
+                                    Span::styled("◼", Style::default().fg(Color::DarkGray)),
+                                    Span::styled("⬜", Style::default().fg(Color::DarkGray)),
+                                    Span::raw(" "),
+                                    Span::styled(
+                                        col_name.clone(),
+                                        Style::default().fg(Color::DarkGray),
+                                    ),
+                                ];
+                                let item = ListItem::new(Line::from(spans));
+                                all_items.push(item);
+                                max_len = max_len.max(4 + col_name.len());
+                            } else {
+                                let is_visible = app.apig_route_visible_column_ids.contains(col_id);
+                                let (item, len) =
+                                    render_column_toggle_string(col.name(), is_visible);
+                                all_items.push(item);
+                                max_len = max_len.max(len);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::EcrRepositories {
@@ -1986,26 +2093,30 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
         .split(popup_area);
 
     let is_active = app.mode == Mode::ServicePicker;
-    let cursor = get_cursor(is_active);
+    let filter_text = if app.service_picker.filter_active {
+        vec![
+            Span::raw(&app.service_picker.filter),
+            Span::styled("█", Style::default().fg(Color::Green)),
+        ]
+    } else {
+        vec![Span::raw(&app.service_picker.filter)]
+    };
     let active_color = Color::Green;
-    let inactive_color = Color::Cyan;
-    let filter = Paragraph::new(Line::from(vec![
-        Span::raw(&app.service_picker.filter),
-        Span::styled(cursor, Style::default().fg(active_color)),
-    ]))
-    .block(
-        Block::default()
-            .title(SEARCH_ICON)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if is_active {
-                active_color
-            } else {
-                inactive_color
-            })),
-    )
-    .style(Style::default());
+    let inactive_color = Color::White;
+    let filter = Paragraph::new(Line::from(filter_text))
+        .block(
+            Block::default()
+                .title(SEARCH_ICON)
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(if app.service_picker.filter_active {
+                    active_color
+                } else {
+                    inactive_color
+                })),
+        )
+        .style(Style::default());
 
     let filtered = app.filtered_services();
     let items: Vec<ListItem> = filtered.iter().map(|s| ListItem::new(*s)).collect();
@@ -2018,10 +2129,10 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(if is_active {
+                .border_style(if is_active && !app.service_picker.filter_active {
                     active_border()
                 } else {
-                    Style::default().fg(Color::Cyan)
+                    Style::default().fg(Color::White)
                 }),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
@@ -2159,6 +2270,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::IamUsers => iam::render_users(frame, app, area),
         Service::IamRoles => iam::render_roles(frame, app, area),
         Service::IamUserGroups => iam::render_user_groups(frame, app, area),
+        Service::ApiGatewayApis => apig::render_apis(frame, app, area),
     }
 }
 
@@ -2302,9 +2414,15 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
         .split(popup_area);
 
     // Filter input at top
-    let cursor = "█";
-    let filter_text = vec![Span::from(format!("{}{}", app.region_filter, cursor))];
-    let filter = filter_area(filter_text, true);
+    let filter_text = if app.region_filter_active {
+        vec![
+            Span::from(&app.region_filter),
+            Span::styled("█", Style::default().fg(Color::Green)),
+        ]
+    } else {
+        vec![Span::from(&app.region_filter)]
+    };
+    let filter = filter_area(filter_text, app.region_filter_active);
 
     // Filtered list below
     let filtered = app.get_filtered_regions();
@@ -2312,12 +2430,12 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|r| {
             let latency_str = match r.latency_ms {
-                Some(ms) => format!("({}ms)", ms),
-                None => "(>1s)".to_string(),
+                Some(ms) => format!(" ({}ms)", ms),
+                None => String::new(),
             };
             let opt_in = if r.opt_in { "[opt-in] " } else { "" };
             let display = format!(
-                "{} > {} > {} {}{}",
+                "{} › {} › {} {}{}",
                 r.group, r.name, r.code, opt_in, latency_str
             );
             ListItem::new(display)
@@ -2583,13 +2701,13 @@ mod tests {
         let tabs = [
             Tab {
                 service: Service::CloudWatchLogGroups,
-                title: "CloudWatch > Log Groups".to_string(),
-                breadcrumb: "CloudWatch > Log Groups".to_string(),
+                title: "CloudWatch › Log Groups".to_string(),
+                breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
                 service: Service::CloudWatchInsights,
-                title: "CloudWatch > Logs Insights".to_string(),
-                breadcrumb: "CloudWatch > Logs Insights".to_string(),
+                title: "CloudWatch › Logs Insights".to_string(),
+                breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
         ];
 
@@ -2611,13 +2729,13 @@ mod tests {
         let tabs = [
             crate::app::Tab {
                 service: Service::CloudWatchLogGroups,
-                title: "CloudWatch > Log Groups".to_string(),
-                breadcrumb: "CloudWatch > Log Groups".to_string(),
+                title: "CloudWatch › Log Groups".to_string(),
+                breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             crate::app::Tab {
                 service: Service::CloudWatchInsights,
-                title: "CloudWatch > Logs Insights".to_string(),
-                breadcrumb: "CloudWatch > Logs Insights".to_string(),
+                title: "CloudWatch › Logs Insights".to_string(),
+                breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
         ];
         let current_tab = 1;
@@ -2753,8 +2871,8 @@ mod tests {
         let tabs = [
             crate::app::Tab {
                 service: crate::app::Service::CloudWatchLogGroups,
-                title: "CloudWatch > Log Groups".to_string(),
-                breadcrumb: "CloudWatch > Log Groups".to_string(),
+                title: "CloudWatch › Log Groups".to_string(),
+                breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             crate::app::Tab {
                 service: crate::app::Service::CloudWatchAlarms,
@@ -3589,7 +3707,7 @@ mod tests {
 
     #[test]
     fn test_no_duplicate_breadcrumbs_at_root() {
-        // When at root level (e.g., CloudWatch > Alarms), don't show duplicate breadcrumb
+        // When at root level (e.g., CloudWatch › Alarms), don't show duplicate breadcrumb
         let mut app = test_app();
         app.current_service = Service::CloudWatchAlarms;
         app.service_selected = true;
@@ -5928,7 +6046,7 @@ mod tests {
     #[test]
     fn test_iam_users_in_service_picker() {
         let app = test_app();
-        assert!(app.service_picker.services.contains(&"IAM > Users"));
+        assert!(app.service_picker.services.contains(&"IAM › Users"));
     }
 
     #[test]
@@ -5936,7 +6054,7 @@ mod tests {
         let mut app = test_app();
         app.mode = Mode::ServicePicker;
         let filtered = app.filtered_services();
-        let selected_idx = filtered.iter().position(|&s| s == "IAM > Users").unwrap();
+        let selected_idx = filtered.iter().position(|&s| s == "IAM › Users").unwrap();
         app.service_picker.selected = selected_idx;
 
         app.handle_action(Action::Select);
@@ -5945,7 +6063,33 @@ mod tests {
         assert!(app.service_selected);
         assert_eq!(app.tabs.len(), 1);
         assert_eq!(app.tabs[0].service, Service::IamUsers);
-        assert_eq!(app.tabs[0].title, "IAM > Users");
+        assert_eq!(app.tabs[0].title, "IAM › Users");
+    }
+
+    #[test]
+    fn test_api_gateway_in_service_picker() {
+        let app = test_app();
+        assert!(app.service_picker.services.contains(&"API Gateway › APIs"));
+    }
+
+    #[test]
+    fn test_api_gateway_service_selection() {
+        let mut app = test_app();
+        app.mode = Mode::ServicePicker;
+        let filtered = app.filtered_services();
+        let selected_idx = filtered
+            .iter()
+            .position(|&s| s == "API Gateway › APIs")
+            .unwrap();
+        app.service_picker.selected = selected_idx;
+
+        app.handle_action(Action::Select);
+
+        assert_eq!(app.current_service, Service::ApiGatewayApis);
+        assert!(app.service_selected);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs[0].service, Service::ApiGatewayApis);
+        assert_eq!(app.tabs[0].title, "API Gateway › APIs");
     }
 
     #[test]
@@ -6241,8 +6385,8 @@ mod tests {
         app.view_mode = ViewMode::Detail;
         app.tabs.push(crate::app::Tab {
             service: Service::CloudWatchLogGroups,
-            title: "CloudWatch > Log Groups".to_string(),
-            breadcrumb: "CloudWatch > Log Groups".to_string(),
+            title: "CloudWatch › Log Groups".to_string(),
+            breadcrumb: "CloudWatch › Log Groups".to_string(),
         });
 
         // Add a log group
@@ -6278,8 +6422,8 @@ mod tests {
         app.view_mode = ViewMode::Events;
         app.tabs.push(crate::app::Tab {
             service: Service::CloudWatchLogGroups,
-            title: "CloudWatch > Log Groups".to_string(),
-            breadcrumb: "CloudWatch > Log Groups".to_string(),
+            title: "CloudWatch › Log Groups".to_string(),
+            breadcrumb: "CloudWatch › Log Groups".to_string(),
         });
 
         // Breadcrumb should not be shown in UI

@@ -90,7 +90,8 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             _ => None,
         },
         Mode::ServicePicker => match key.code {
-            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Esc => Some(Action::ExitFilterMode),
+            KeyCode::Char('i') if key.modifiers.is_empty() => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
@@ -99,7 +100,7 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordLeft),
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordRight),
-            KeyCode::Char(c) => Some(Action::FilterInput(c)),
+            KeyCode::Char(c) if c != 'i' => Some(Action::FilterInput(c)),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             _ => None,
         },
@@ -192,10 +193,12 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             _ => None,
         },
         Mode::RegionPicker => match key.code {
-            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Esc => Some(Action::ExitFilterMode),
+            KeyCode::Char('i') => Some(Action::EnterFilterMode),
             KeyCode::Char('j') | KeyCode::Down => Some(Action::NextItem),
             KeyCode::Char('k') | KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
+            KeyCode::Char('s') => Some(Action::Refresh),
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Refresh),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             KeyCode::Char(c) => Some(Action::FilterInput(c)),
@@ -222,7 +225,8 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             _ => None,
         },
         Mode::SessionPicker => match key.code {
-            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Esc => Some(Action::ExitFilterMode),
+            KeyCode::Char('i') => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::LoadSession),
@@ -232,7 +236,8 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             _ => None,
         },
         Mode::ProfilePicker => match key.code {
-            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Esc => Some(Action::ExitFilterMode),
+            KeyCode::Char('i') => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
@@ -313,6 +318,9 @@ pub enum Action {
     LoadSession,
     SaveSession,
     CopyToClipboard,
+    EnterFilterMode,
+    ExitFilterMode,
+    Noop,
 }
 
 #[cfg(test)]

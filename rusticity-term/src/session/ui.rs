@@ -1,7 +1,6 @@
 use super::Session;
 use crate::common::SortDirection;
 use crate::ui::filter_area;
-use crate::ui::format_title;
 use crate::ui::table::{self};
 use ratatui::prelude::{Color, Constraint, Direction, Layout, Span, Style};
 use ratatui::widgets::Clear;
@@ -60,12 +59,15 @@ pub fn render_session_picker(
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    let cursor = "█";
-    let filter_text = vec![
-        Span::raw(&app.session_filter),
-        Span::styled(cursor, Style::default().fg(Color::Green)),
-    ];
-    let filter = filter_area(filter_text, true);
+    let filter_text = if app.session_filter_active {
+        vec![
+            Span::raw(&app.session_filter),
+            Span::styled("█", Style::default().fg(Color::Green)),
+        ]
+    } else {
+        vec![Span::raw(&app.session_filter)]
+    };
+    let filter = filter_area(filter_text, app.session_filter_active);
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(filter, chunks[0]);
@@ -86,7 +88,7 @@ pub fn render_session_picker(
         columns: &columns,
         sort_column: "Timestamp",
         sort_direction: SortDirection::Desc,
-        title: format_title("Sessions"),
+        title: "Sessions".to_string(),
         area: chunks[1],
         get_expanded_content: None,
         is_active: true,

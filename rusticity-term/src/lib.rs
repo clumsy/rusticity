@@ -1,3 +1,4 @@
+pub mod apig;
 pub mod app;
 pub mod aws;
 pub mod cfn;
@@ -41,6 +42,7 @@ pub fn init() {
     }
 
     // Initialize each service to populate their column defaults
+    apig::init(&mut i18n);
     lambda::init(&mut i18n);
     ec2::init(&mut i18n);
     ecr::init(&mut i18n);

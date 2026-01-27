@@ -451,8 +451,8 @@ impl<'a> Column<&'a IamUser> for UserColumn {
     }
 
     fn default_name(&self) -> &'static str {
-        UserColumn::default_name(self)
-    }
+        match self {
+            Self::UserName => "User name",
             Self::Path => "Path",
             Self::Groups => "Groups",
             Self::LastActivity => "Last activity",

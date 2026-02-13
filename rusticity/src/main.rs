@@ -286,6 +286,35 @@ async fn main() -> Result<()> {
                             app.alarms_state.table.loading = false;
                         }
 
+                        // Load CloudTrail events when service is switched to and empty
+                        if app.service_selected && app.current_service == Service::CloudTrailEvents
+                            && (!prev_service_selected || prev_service != Service::CloudTrailEvents)
+                            && app.cloudtrail_state.table.items.is_empty() {
+                            app.cloudtrail_state.table.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_cloudtrail_events().await {
+                                app.error_message = Some(format!("Failed to load CloudTrail events: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.cloudtrail_state.table.loading = false;
+                        }
+
+                        // Load more events if navigated beyond loaded data
+                        if app.service_selected && app.current_service == Service::CloudTrailEvents
+                            && !app.cloudtrail_state.table.loading
+                            && app.cloudtrail_state.table.selected >= app.cloudtrail_state.table.items.len()
+                            && app.cloudtrail_state.table.next_token.is_some() {
+                            app.cloudtrail_state.table.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_more_cloudtrail_events().await {
+                                app.error_message = Some(format!("Failed to load more CloudTrail events: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.cloudtrail_state.table.loading = false;
+                        }
+
                         // Load EC2 instances when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::Ec2Instances
                             && ((!prev_service_selected || prev_service != Service::Ec2Instances)

@@ -205,6 +205,14 @@ impl AwsConfig {
         aws_sdk_cloudformation::Client::new(&config)
     }
 
+    pub async fn cloudtrail_client(&self) -> aws_sdk_cloudtrail::Client {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.region.clone()))
+            .load()
+            .await;
+        aws_sdk_cloudtrail::Client::new(&config)
+    }
+
     pub async fn lambda_client(&self) -> aws_sdk_lambda::Client {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(self.region.clone()))

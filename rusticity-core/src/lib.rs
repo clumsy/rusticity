@@ -1,6 +1,7 @@
 pub mod alarms;
 pub mod apig;
 pub mod cfn;
+pub mod cloudtrail;
 pub mod config;
 pub mod cw;
 pub mod ec2;
@@ -14,6 +15,7 @@ pub mod types;
 pub use alarms::AlarmsClient;
 pub use apig::ApiGatewayClient;
 pub use cfn::CloudFormationClient;
+pub use cloudtrail::CloudTrailClient;
 pub use config::AwsConfig;
 pub use cw::CloudWatchClient;
 pub use ec2::Ec2Client;

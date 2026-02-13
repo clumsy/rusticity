@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 
-use super::{format_title, rounded_block, styles};
+use super::{rounded_block, styles};
 use crate::common::{render_scrollbar, t, SortDirection};
 
 pub const CURSOR_COLLAPSED: &str = "►";
@@ -58,11 +58,7 @@ pub fn render_tree_table(
     let table = Table::new(rows, widths)
         .header(header)
         .column_spacing(1)
-        .block(
-            rounded_block()
-                .title(format_title(&title))
-                .border_style(border_style),
-        );
+        .block(rounded_block().title(title).border_style(border_style));
 
     frame.render_widget(table, area);
 }
@@ -260,10 +256,7 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         .header(header)
         .block(
             rounded_block()
-                .title(Span::styled(
-                    crate::ui::format_title(&config.title),
-                    title_style,
-                ))
+                .title(Span::styled(config.title, title_style))
                 .border_style(border_style),
         )
         .column_spacing(1)

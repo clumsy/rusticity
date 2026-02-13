@@ -2,6 +2,7 @@ pub mod apig;
 pub mod app;
 pub mod aws;
 pub mod cfn;
+pub mod cloudtrail;
 pub mod common;
 pub mod cw;
 pub mod ec2;
@@ -50,6 +51,7 @@ pub fn init() {
     cw::init(&mut i18n);
     sqs::init(&mut i18n);
     cfn::init(&mut i18n);
+    cloudtrail::init(&mut i18n);
     iam::init(&mut i18n);
 
     // Set shared i18n map after all defaults are added

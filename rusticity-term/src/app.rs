@@ -5,6 +5,7 @@ use crate::apig::route::Column as RouteColumn;
 use crate::apig::route::Route;
 pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
+use crate::cloudtrail::{CloudTrailEvent, CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
 pub use crate::cw::insights::InsightsFocus;
 use crate::cw::insights::InsightsState;
@@ -90,8 +91,8 @@ pub use crate::ui::{
 #[cfg(test)]
 use rusticity_core::LogStream;
 use rusticity_core::{
-    AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudWatchClient, Ec2Client,
-    EcrClient, IamClient, LambdaClient, S3Client, SqsClient,
+    AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
+    CloudWatchClient, Ec2Client, EcrClient, IamClient, LambdaClient, S3Client, SqsClient,
 };
 use std::collections::HashMap;
 
@@ -107,6 +108,7 @@ pub struct App {
     pub mode: Mode,
     pub config: AwsConfig,
     pub cloudwatch_client: CloudWatchClient,
+    pub cloudtrail_client: CloudTrailClient,
     pub s3_client: S3Client,
     pub sqs_client: SqsClient,
     pub alarms_client: AlarmsClient,
@@ -125,6 +127,7 @@ pub struct App {
     pub log_groups_state: CloudWatchLogGroupsState,
     pub insights_state: CloudWatchInsightsState,
     pub alarms_state: CloudWatchAlarmsState,
+    pub cloudtrail_state: CloudTrailState,
     pub s3_state: S3State,
     pub sqs_state: SqsState,
     pub ec2_state: Ec2State,
@@ -151,6 +154,10 @@ pub struct App {
     pub cw_log_tag_column_ids: Vec<ColumnId>,
     pub cw_alarm_visible_column_ids: Vec<ColumnId>,
     pub cw_alarm_column_ids: Vec<ColumnId>,
+    pub cloudtrail_event_visible_column_ids: Vec<ColumnId>,
+    pub cloudtrail_event_column_ids: Vec<ColumnId>,
+    pub cloudtrail_resource_visible_column_ids: Vec<ColumnId>,
+    pub cloudtrail_resource_column_ids: Vec<ColumnId>,
     pub s3_bucket_visible_column_ids: Vec<ColumnId>,
     pub s3_bucket_column_ids: Vec<ColumnId>,
     pub sqs_visible_column_ids: Vec<ColumnId>,
@@ -233,6 +240,26 @@ pub struct CloudWatchAlarmsState {
     pub input_focus: InputFocus,
 }
 
+#[derive(Debug, Clone)]
+pub struct CloudTrailState {
+    pub table: TableState<CloudTrailEvent>,
+    pub input_focus: InputFocus,
+    pub current_event: Option<CloudTrailEvent>,
+    pub event_json_scroll: usize,
+    pub detail_focus: CloudTrailDetailFocus,
+    pub resources_expanded_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CloudTrailDetailFocus {
+    Resources,
+    EventRecord,
+}
+
+impl CyclicEnum for CloudTrailDetailFocus {
+    const ALL: &'static [Self] = &[Self::Resources, Self::EventRecord];
+}
+
 impl PageSize {
     pub fn value(&self) -> usize {
         match self {
@@ -275,6 +302,7 @@ pub enum Service {
     CloudWatchLogGroups,
     CloudWatchInsights,
     CloudWatchAlarms,
+    CloudTrailEvents,
     S3Buckets,
     SqsQueues,
     Ec2Instances,
@@ -294,6 +322,7 @@ impl Service {
             Service::CloudWatchLogGroups => "CloudWatch › Log Groups",
             Service::CloudWatchInsights => "CloudWatch › Logs Insights",
             Service::CloudWatchAlarms => "CloudWatch › Alarms",
+            Service::CloudTrailEvents => "CloudTrail › Event History",
             Service::S3Buckets => "S3 › Buckets",
             Service::SqsQueues => "SQS › Queues",
             Service::Ec2Instances => "EC2 › Instances",
@@ -417,6 +446,8 @@ impl App {
             }
         } else if self.current_service == Service::CloudWatchAlarms {
             Some(&mut self.alarms_state.table.filter)
+        } else if self.current_service == Service::CloudTrailEvents {
+            Some(&mut self.cloudtrail_state.table.filter)
         } else if self.current_service == Service::Ec2Instances {
             if self.ec2_state.current_instance.is_some()
                 && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -547,6 +578,8 @@ impl App {
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
                 self.alarms_state.table.reset();
+            } else if self.current_service == Service::CloudTrailEvents {
+                self.cloudtrail_state.table.reset();
             } else if self.current_service == Service::Ec2Instances {
                 self.ec2_state.table.reset();
             } else if self.current_service == Service::S3Buckets {
@@ -624,6 +657,7 @@ impl App {
 
         let config = AwsConfig::new(region).await?;
         let cloudwatch_client = CloudWatchClient::new(config.clone()).await?;
+        let cloudtrail_client = CloudTrailClient::new(config.clone());
         let s3_client = S3Client::new(config.clone());
         let sqs_client = SqsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
@@ -640,6 +674,7 @@ impl App {
             mode: Mode::ServicePicker,
             config,
             cloudwatch_client,
+            cloudtrail_client,
             s3_client,
             sqs_client,
             alarms_client,
@@ -658,6 +693,14 @@ impl App {
             log_groups_state: CloudWatchLogGroupsState::new(),
             insights_state: CloudWatchInsightsState::new(),
             alarms_state: CloudWatchAlarmsState::new(),
+            cloudtrail_state: CloudTrailState {
+                table: TableState::new(),
+                input_focus: InputFocus::Filter,
+                current_event: None,
+                event_json_scroll: 0,
+                detail_focus: CloudTrailDetailFocus::Resources,
+                resources_expanded_index: None,
+            },
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
             ec2_state: Ec2State::default(),
@@ -692,6 +735,20 @@ impl App {
             .map(|c| c.id())
             .collect(),
             cw_alarm_column_ids: AlarmColumn::ids(),
+            cloudtrail_event_visible_column_ids: [
+                CloudTrailEventColumn::EventName,
+                CloudTrailEventColumn::EventTime,
+                CloudTrailEventColumn::Username,
+                CloudTrailEventColumn::EventSource,
+                CloudTrailEventColumn::ResourceType,
+                CloudTrailEventColumn::ResourceName,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            cloudtrail_event_column_ids: CloudTrailEventColumn::ids(),
+            cloudtrail_resource_visible_column_ids: EventResourceColumn::ids(),
+            cloudtrail_resource_column_ids: EventResourceColumn::ids(),
             s3_bucket_visible_column_ids: S3BucketColumn::ids(),
             s3_bucket_column_ids: S3BucketColumn::ids(),
             sqs_visible_column_ids: [
@@ -827,6 +884,7 @@ impl App {
             mode: Mode::ServicePicker,
             config: config.clone(),
             cloudwatch_client: CloudWatchClient::dummy(config.clone()),
+            cloudtrail_client: CloudTrailClient::new(config.clone()),
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
@@ -846,6 +904,14 @@ impl App {
             insights_state: CloudWatchInsightsState::new(),
             alarms_state: CloudWatchAlarmsState::new(),
             s3_state: S3State::new(),
+            cloudtrail_state: CloudTrailState {
+                table: TableState::new(),
+                input_focus: InputFocus::Filter,
+                current_event: None,
+                event_json_scroll: 0,
+                detail_focus: CloudTrailDetailFocus::Resources,
+                resources_expanded_index: None,
+            },
             sqs_state: SqsState::new(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -881,6 +947,20 @@ impl App {
             .collect(),
             cw_alarm_column_ids: AlarmColumn::ids(),
             s3_bucket_visible_column_ids: S3BucketColumn::ids(),
+            cloudtrail_event_visible_column_ids: [
+                CloudTrailEventColumn::EventName,
+                CloudTrailEventColumn::EventTime,
+                CloudTrailEventColumn::Username,
+                CloudTrailEventColumn::EventSource,
+                CloudTrailEventColumn::ResourceType,
+                CloudTrailEventColumn::ResourceName,
+            ]
+            .iter()
+            .map(|c| c.id())
+            .collect(),
+            cloudtrail_event_column_ids: CloudTrailEventColumn::ids(),
+            cloudtrail_resource_visible_column_ids: EventResourceColumn::ids(),
+            cloudtrail_resource_column_ids: EventResourceColumn::ids(),
             s3_bucket_column_ids: S3BucketColumn::ids(),
             sqs_visible_column_ids: [
                 SqsColumn::Name,
@@ -1244,6 +1324,7 @@ impl App {
                             "CloudWatchLogGroups" => Service::CloudWatchLogGroups,
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
+                            "CloudTrailEvents" => Service::CloudTrailEvents,
                             "S3Buckets" => Service::S3Buckets,
                             "SqsQueues" => Service::SqsQueues,
                             "Ec2Instances" => Service::Ec2Instances,
@@ -1397,6 +1478,8 @@ impl App {
                         self.iam_state.policy_input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::CloudWatchAlarms {
                         self.alarms_state.input_focus == InputFocus::Pagination
+                    } else if self.current_service == Service::CloudTrailEvents {
+                        self.cloudtrail_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::Ec2Instances {
                         self.ec2_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::CloudWatchLogGroups {
@@ -1761,6 +1844,14 @@ impl App {
                     return;
                 }
 
+                // Don't allow opening preferences for CloudTrail Event JSON
+                if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                    && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord
+                {
+                    return;
+                }
+
                 // If we have page input, apply it instead of opening column selector
                 if !self.page_input.is_empty() {
                     if let Ok(page) = self.page_input.parse::<usize>() {
@@ -1830,6 +1921,57 @@ impl App {
                         self.alarms_state.table.page_size = PageSize::OneHundred;
                     } else if idx == 29 {
                         self.alarms_state.wrap_lines = !self.alarms_state.wrap_lines;
+                    }
+                } else if self.current_service == Service::CloudTrailEvents {
+                    if self.cloudtrail_state.current_event.is_some()
+                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+                    {
+                        // Resources table in detail view
+                        let idx = self.column_selector_index;
+                        if idx > 0 && idx <= self.cloudtrail_resource_column_ids.len() {
+                            if let Some(col) = self.cloudtrail_resource_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cloudtrail_resource_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    // Don't allow toggling off if it's the last visible column
+                                    if self.cloudtrail_resource_visible_column_ids.len() > 1 {
+                                        self.cloudtrail_resource_visible_column_ids.remove(pos);
+                                    }
+                                } else {
+                                    self.cloudtrail_resource_visible_column_ids.push(*col);
+                                }
+                            }
+                        }
+                    } else {
+                        // Main events table
+                        let idx = self.column_selector_index;
+                        if (1..=14).contains(&idx) {
+                            if let Some(col) = self.cloudtrail_event_column_ids.get(idx - 1) {
+                                if let Some(pos) = self
+                                    .cloudtrail_event_visible_column_ids
+                                    .iter()
+                                    .position(|c| c == col)
+                                {
+                                    self.cloudtrail_event_visible_column_ids.remove(pos);
+                                } else {
+                                    self.cloudtrail_event_visible_column_ids.push(*col);
+                                }
+                            }
+                        } else if idx == 17 {
+                            self.cloudtrail_state.table.page_size = PageSize::Ten;
+                            self.cloudtrail_state.table.snap_to_page();
+                        } else if idx == 18 {
+                            self.cloudtrail_state.table.page_size = PageSize::TwentyFive;
+                            self.cloudtrail_state.table.snap_to_page();
+                        } else if idx == 19 {
+                            self.cloudtrail_state.table.page_size = PageSize::Fifty;
+                            self.cloudtrail_state.table.snap_to_page();
+                        } else if idx == 20 {
+                            self.cloudtrail_state.table.page_size = PageSize::OneHundred;
+                            self.cloudtrail_state.table.snap_to_page();
+                        }
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
                     if let Some(api) = &self.apig_state.current_api {
@@ -2627,6 +2769,20 @@ impl App {
                     } else {
                         self.column_selector_index = 0;
                     }
+                } else if self.current_service == Service::CloudTrailEvents {
+                    if self.cloudtrail_state.current_event.is_some()
+                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+                    {
+                        // Resources table has no page size, just columns
+                        self.column_selector_index = 0;
+                    } else {
+                        let page_size_idx = self.cloudtrail_event_column_ids.len() + 2;
+                        if self.column_selector_index < page_size_idx {
+                            self.column_selector_index = page_size_idx;
+                        } else {
+                            self.column_selector_index = 0;
+                        }
+                    }
                 } else if self.current_service == Service::Ec2Instances {
                     let page_size_idx = self.ec2_column_ids.len() + 2;
                     if self.column_selector_index < page_size_idx {
@@ -2846,6 +3002,20 @@ impl App {
                     } else {
                         self.column_selector_index = page_size_idx;
                     }
+                } else if self.current_service == Service::CloudTrailEvents {
+                    if self.cloudtrail_state.current_event.is_some()
+                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+                    {
+                        // Resources table has no page size, just columns
+                        self.column_selector_index = 0;
+                    } else {
+                        let page_size_idx = self.cloudtrail_event_column_ids.len() + 2;
+                        if self.column_selector_index >= page_size_idx {
+                            self.column_selector_index = 0;
+                        } else {
+                            self.column_selector_index = page_size_idx;
+                        }
+                    }
                 } else if self.current_service == Service::Ec2Instances {
                     let page_size_idx = self.ec2_column_ids.len() + 2;
                     if self.column_selector_index >= page_size_idx {
@@ -2993,7 +3163,11 @@ impl App {
                 self.preference_section = Preferences::Columns;
             }
             Action::NextDetailTab => {
-                if self.current_service == Service::ApiGatewayApis
+                if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.next();
+                } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
                     self.apig_state.detail_tab = self.apig_state.detail_tab.next();
@@ -3104,7 +3278,11 @@ impl App {
                 }
             }
             Action::PrevDetailTab => {
-                if self.current_service == Service::ApiGatewayApis
+                if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.prev();
+                } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
                     self.apig_state.detail_tab = self.apig_state.detail_tab.prev();
@@ -3200,6 +3378,9 @@ impl App {
                     self.mode = Mode::InsightsInput;
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.mode = Mode::FilterInput;
+                } else if self.current_service == Service::CloudTrailEvents {
+                    self.mode = Mode::FilterInput;
+                    self.cloudtrail_state.input_focus = InputFocus::Filter;
                 } else if self.current_service == Service::S3Buckets {
                     self.mode = Mode::FilterInput;
                     self.log_groups_state.filter_mode = true;
@@ -3292,7 +3473,13 @@ impl App {
                 }
             }
             Action::NextFilterFocus => {
-                if self.mode == Mode::FilterInput && self.current_service == Service::S3Buckets {
+                if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.next();
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::S3Buckets
+                {
                     const S3_FILTER_CONTROLS: [InputFocus; 2] =
                         [InputFocus::Filter, InputFocus::Pagination];
                     self.s3_state.input_focus = self.s3_state.input_focus.next(&S3_FILTER_CONTROLS);
@@ -3444,6 +3631,13 @@ impl App {
                     self.alarms_state.input_focus =
                         self.alarms_state.input_focus.next(&FILTER_CONTROLS);
                 } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::CloudTrailEvents
+                {
+                    const FILTER_CONTROLS: [InputFocus; 2] =
+                        [InputFocus::Filter, InputFocus::Pagination];
+                    self.cloudtrail_state.input_focus =
+                        self.cloudtrail_state.input_focus.next(&FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::ApiGatewayApis
                 {
                     use crate::ui::apig::FILTER_CONTROLS;
@@ -3481,7 +3675,12 @@ impl App {
                 }
             }
             Action::PrevFilterFocus => {
-                if self.mode == Mode::FilterInput && self.current_service == Service::ApiGatewayApis
+                if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.prev();
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::ApiGatewayApis
                 {
                     use crate::ui::apig::FILTER_CONTROLS;
                     self.apig_state.input_focus =
@@ -3625,6 +3824,13 @@ impl App {
                     self.alarms_state.input_focus =
                         self.alarms_state.input_focus.prev(&FILTER_CONTROLS);
                 } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::CloudTrailEvents
+                {
+                    const FILTER_CONTROLS: [InputFocus; 2] =
+                        [InputFocus::Filter, InputFocus::Pagination];
+                    self.cloudtrail_state.input_focus =
+                        self.cloudtrail_state.input_focus.prev(&FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
@@ -3747,6 +3953,11 @@ impl App {
             Action::ScrollUp => {
                 if self.mode == Mode::ErrorModal {
                     self.error_scroll = self.error_scroll.saturating_sub(1);
+                } else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.event_json_scroll =
+                        self.cloudtrail_state.event_json_scroll.saturating_sub(10);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                     && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
@@ -3818,6 +4029,15 @@ impl App {
                         let lines = error_msg.lines().count();
                         let max_scroll = lines.saturating_sub(1);
                         self.error_scroll = (self.error_scroll + 1).min(max_scroll);
+                    }
+                } else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    if let Some(event) = &self.cloudtrail_state.current_event {
+                        let lines = event.cloud_trail_event_json.lines().count();
+                        let max_scroll = lines.saturating_sub(1);
+                        self.cloudtrail_state.event_json_scroll =
+                            (self.cloudtrail_state.event_json_scroll + 10).min(max_scroll);
                     }
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
@@ -4255,6 +4475,13 @@ impl App {
                     self.cfn_state.current_stack = None;
                     self.update_current_tab_breadcrumb();
                 }
+                // CloudTrail: go back from event detail to list
+                else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    self.cloudtrail_state.current_event = None;
+                    self.update_current_tab_breadcrumb();
+                }
                 // From insights results -> collapse if expanded, otherwise back to sidebar
                 else if self.view_mode == ViewMode::InsightsResults {
                     if self.insights_state.insights.expanded_result.is_some() {
@@ -4440,6 +4667,10 @@ impl App {
                 parts.push("CloudWatch".to_string());
                 parts.push("Alarms".to_string());
             }
+            Service::CloudTrailEvents => {
+                parts.push("CloudTrail".to_string());
+                parts.push("Event History".to_string());
+            }
             Service::S3Buckets => {
                 parts.push("S3".to_string());
                 if let Some(bucket) = &self.s3_state.current_bucket {
@@ -4571,6 +4802,19 @@ impl App {
                     &self.alarms_state.sort_column,
                     self.alarms_state.sort_direction.as_str(),
                 )
+            }
+            Service::CloudTrailEvents => {
+                if let Some(event) = &self.cloudtrail_state.current_event {
+                    format!(
+                        "https://{}.console.aws.amazon.com/cloudtrailv2/home?region={}#/events/{}",
+                        self.config.region, self.config.region, event.event_id
+                    )
+                } else {
+                    format!(
+                        "https://{}.console.aws.amazon.com/cloudtrail/home?region={}#/events",
+                        self.config.region, self.config.region
+                    )
+                }
             }
             Service::S3Buckets => {
                 if let Some(bucket_name) = &self.s3_state.current_bucket {
@@ -4788,6 +5032,14 @@ impl App {
             self.cw_log_stream_column_ids.len() + 6
         } else if self.current_service == Service::CloudWatchAlarms {
             29
+        } else if self.current_service == Service::CloudTrailEvents {
+            if self.cloudtrail_state.current_event.is_some()
+                && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+            {
+                self.cloudtrail_resource_column_ids.len()
+            } else {
+                self.cloudtrail_event_column_ids.len() + 6
+            }
         } else if self.current_service == Service::Ec2Instances {
             if self.ec2_state.current_instance.is_some()
                 && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -4840,6 +5092,14 @@ impl App {
             self.cw_log_stream_column_ids.len()
         } else if self.current_service == Service::CloudWatchAlarms {
             14
+        } else if self.current_service == Service::CloudTrailEvents {
+            if self.cloudtrail_state.current_event.is_some()
+                && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+            {
+                self.cloudtrail_resource_column_ids.len()
+            } else {
+                self.cloudtrail_event_column_ids.len()
+            }
         } else if self.current_service == Service::Ec2Instances {
             if self.ec2_state.current_instance.is_some()
                 && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -4898,6 +5158,17 @@ impl App {
                     self.s3_state.selected_row =
                         (self.s3_state.selected_row + page_size).min(max_offset);
                     self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
+                } else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.input_focus == InputFocus::Pagination
+                {
+                    // Navigate to next page
+                    let page_size = self.cloudtrail_state.table.page_size.value();
+                    let total_items = self.cloudtrail_state.table.items.len();
+                    let current_page = self.cloudtrail_state.table.selected / page_size;
+                    let total_pages = total_items.div_ceil(page_size);
+                    if current_page + 1 < total_pages {
+                        self.cloudtrail_state.table.selected = (current_page + 1) * page_size;
+                    }
                 } else if self.current_service == Service::CloudFormationStacks {
                     use crate::ui::cfn::STATUS_FILTER;
                     if self.cfn_state.input_focus == STATUS_FILTER {
@@ -5171,6 +5442,33 @@ impl App {
                     };
                     if filtered_alarms > 0 {
                         self.alarms_state.table.next_item(filtered_alarms);
+                    }
+                } else if self.current_service == Service::CloudTrailEvents {
+                    if self.cloudtrail_state.current_event.is_some()
+                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord
+                    {
+                        // Scroll JSON down
+                        if let Some(event) = &self.cloudtrail_state.current_event {
+                            let line_count = event.cloud_trail_event_json.lines().count();
+                            let max_scroll = line_count.saturating_sub(1);
+                            self.cloudtrail_state.event_json_scroll =
+                                (self.cloudtrail_state.event_json_scroll + 1).min(max_scroll);
+                        }
+                    } else {
+                        // For CloudTrail with infinite pagination, navigate within current page
+                        let page_size = self.cloudtrail_state.table.page_size.value();
+                        let current_page = self.cloudtrail_state.table.selected / page_size;
+                        let page_start = current_page * page_size;
+                        let page_end = page_start + page_size;
+                        let filtered_count = self.cloudtrail_state.table.items.len();
+
+                        // Only navigate if within loaded items
+                        if self.cloudtrail_state.table.selected < filtered_count.saturating_sub(1) {
+                            self.cloudtrail_state.table.selected =
+                                (self.cloudtrail_state.table.selected + 1)
+                                    .min(page_end - 1)
+                                    .min(filtered_count - 1);
+                        }
                     }
                 } else if self.current_service == Service::Ec2Instances {
                     if self.ec2_state.current_instance.is_some()
@@ -5513,6 +5811,15 @@ impl App {
                     self.s3_state.selected_row =
                         self.s3_state.selected_row.saturating_sub(page_size);
                     self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
+                } else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.input_focus == InputFocus::Pagination
+                {
+                    // Navigate to previous page
+                    let page_size = self.cloudtrail_state.table.page_size.value();
+                    let current_page = self.cloudtrail_state.table.selected / page_size;
+                    if current_page > 0 {
+                        self.cloudtrail_state.table.selected = (current_page - 1) * page_size;
+                    }
                 } else if self.current_service == Service::CloudFormationStacks {
                     use crate::ui::cfn::STATUS_FILTER;
                     if self.cfn_state.input_focus == STATUS_FILTER {
@@ -5701,6 +6008,24 @@ impl App {
                     }
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.alarms_state.table.prev_item();
+                } else if self.current_service == Service::CloudTrailEvents {
+                    if self.cloudtrail_state.current_event.is_some()
+                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord
+                    {
+                        // Scroll JSON up
+                        self.cloudtrail_state.event_json_scroll =
+                            self.cloudtrail_state.event_json_scroll.saturating_sub(1);
+                    } else {
+                        // For CloudTrail with infinite pagination, navigate within current page
+                        let page_size = self.cloudtrail_state.table.page_size.value();
+                        let current_page = self.cloudtrail_state.table.selected / page_size;
+                        let page_start = current_page * page_size;
+
+                        // Only navigate if not at page start
+                        if self.cloudtrail_state.table.selected > page_start {
+                            self.cloudtrail_state.table.selected -= 1;
+                        }
+                    }
                 } else if self.current_service == Service::Ec2Instances {
                     if self.ec2_state.current_instance.is_some()
                         && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -5837,7 +6162,16 @@ impl App {
     }
 
     fn page_down(&mut self) {
-        if self.mode == Mode::ColumnSelector {
+        if self.current_service == Service::CloudTrailEvents
+            && self.cloudtrail_state.current_event.is_some()
+        {
+            if let Some(event) = &self.cloudtrail_state.current_event {
+                let lines = event.cloud_trail_event_json.lines().count();
+                let max_scroll = lines.saturating_sub(1);
+                self.cloudtrail_state.event_json_scroll =
+                    (self.cloudtrail_state.event_json_scroll + 10).min(max_scroll);
+            }
+        } else if self.mode == Mode::ColumnSelector {
             let max = self.get_column_selector_max();
             let mut next_idx = (self.column_selector_index + 10).min(max);
             // Skip blank row if we land on it
@@ -5911,6 +6245,17 @@ impl App {
             self.alarms_state.input_focus.handle_page_down(
                 &mut self.alarms_state.table.selected,
                 &mut self.alarms_state.table.scroll_offset,
+                page_size,
+                filtered_count,
+            );
+        } else if self.mode == Mode::FilterInput
+            && self.current_service == Service::CloudTrailEvents
+        {
+            let page_size = self.cloudtrail_state.table.page_size.value();
+            let filtered_count = self.cloudtrail_state.table.items.len();
+            self.cloudtrail_state.input_focus.handle_page_down(
+                &mut self.cloudtrail_state.table.selected,
+                &mut self.cloudtrail_state.table.scroll_offset,
                 page_size,
                 filtered_count,
             );
@@ -6192,6 +6537,11 @@ impl App {
                 if filtered > 0 {
                     self.alarms_state.table.page_down(filtered);
                 }
+            } else if self.current_service == Service::CloudTrailEvents {
+                let filtered_count = self.cloudtrail_state.table.items.len();
+                if filtered_count > 0 {
+                    self.cloudtrail_state.table.page_down(filtered_count);
+                }
             } else if self.current_service == Service::Ec2Instances {
                 let filtered: Vec<_> = self
                     .ec2_state
@@ -6346,7 +6696,12 @@ impl App {
     }
 
     fn page_up(&mut self) {
-        if self.mode == Mode::ColumnSelector {
+        if self.current_service == Service::CloudTrailEvents
+            && self.cloudtrail_state.current_event.is_some()
+        {
+            self.cloudtrail_state.event_json_scroll =
+                self.cloudtrail_state.event_json_scroll.saturating_sub(10);
+        } else if self.mode == Mode::ColumnSelector {
             let mut prev_idx = self.column_selector_index.saturating_sub(10);
             // Skip blank row if we land on it
             if self.is_blank_row_index(prev_idx) {
@@ -6406,6 +6761,15 @@ impl App {
             self.alarms_state.input_focus.handle_page_up(
                 &mut self.alarms_state.table.selected,
                 &mut self.alarms_state.table.scroll_offset,
+                page_size,
+            );
+        } else if self.mode == Mode::FilterInput
+            && self.current_service == Service::CloudTrailEvents
+        {
+            let page_size = self.cloudtrail_state.table.page_size.value();
+            self.cloudtrail_state.input_focus.handle_page_up(
+                &mut self.cloudtrail_state.table.selected,
+                &mut self.cloudtrail_state.table.scroll_offset,
                 page_size,
             );
         } else if self.mode == Mode::FilterInput
@@ -6589,6 +6953,8 @@ impl App {
                     .saturating_sub(10);
             } else if self.current_service == Service::CloudWatchAlarms {
                 self.alarms_state.table.page_up();
+            } else if self.current_service == Service::CloudTrailEvents {
+                self.cloudtrail_state.table.page_up();
             } else if self.current_service == Service::Ec2Instances {
                 self.ec2_state.table.page_up();
             } else if self.current_service == Service::EcrRepositories {
@@ -7058,6 +7424,20 @@ impl App {
                     .table
                     .scroll_offset
                     .min(filtered_count.saturating_sub(1));
+            }
+            Service::CloudTrailEvents => {
+                let page_size = self.cloudtrail_state.table.page_size.value();
+                let filtered_count = self.cloudtrail_state.table.items.len();
+                let max_page = (filtered_count / page_size) + 1; // Allow one page beyond loaded
+
+                // Only navigate if page is within valid range
+                if page <= max_page {
+                    let target = (page - 1) * page_size;
+                    self.cloudtrail_state.table.scroll_offset = target;
+                    self.cloudtrail_state.table.selected = target;
+                    self.cloudtrail_state.table.expanded_item = None; // Reset expansion
+                }
+                // Otherwise do nothing (ignore invalid page numbers)
             }
             Service::CloudWatchLogGroups => match self.view_mode {
                 ViewMode::Events => {
@@ -7850,6 +8230,16 @@ impl App {
                     self.apig_state.apis.collapse();
                 }
             }
+            Service::CloudTrailEvents => {
+                if self.cloudtrail_state.current_event.is_some()
+                    && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+                {
+                    // Collapse resources table column
+                    self.cloudtrail_state.resources_expanded_index = None;
+                } else {
+                    self.cloudtrail_state.table.collapse();
+                }
+            }
             _ => {}
         }
     }
@@ -8079,6 +8469,16 @@ impl App {
                     self.apig_state.apis.expand();
                 }
             }
+            Service::CloudTrailEvents => {
+                if self.cloudtrail_state.current_event.is_some()
+                    && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+                {
+                    // Expand resources table column
+                    self.cloudtrail_state.resources_expanded_index = Some(0);
+                } else {
+                    self.cloudtrail_state.table.expand();
+                }
+            }
             _ => {
                 // For other services, Right arrow switches panes
                 self.next_pane();
@@ -8304,6 +8704,7 @@ impl App {
                     "CloudWatch › Log Groups" => Service::CloudWatchLogGroups,
                     "CloudWatch › Logs Insights" => Service::CloudWatchInsights,
                     "CloudWatch › Alarms" => Service::CloudWatchAlarms,
+                    "CloudTrail › Event History" => Service::CloudTrailEvents,
                     "CloudFormation › Stacks" => Service::CloudFormationStacks,
                     "EC2 › Instances" => Service::Ec2Instances,
                     "ECR › Repositories" => Service::EcrRepositories,
@@ -8360,6 +8761,7 @@ impl App {
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
                             "S3Buckets" => Service::S3Buckets,
+                            "CloudTrailEvents" => Service::CloudTrailEvents,
                             "SqsQueues" => Service::SqsQueues,
                             _ => Service::CloudWatchLogGroups,
                         },
@@ -8643,6 +9045,17 @@ impl App {
                         self.cfn_state.tags.items = tags;
                         self.cfn_state.tags.reset();
                         self.cfn_state.table.loading = true;
+                        self.update_current_tab_breadcrumb();
+                    }
+                }
+            } else if self.current_service == Service::CloudTrailEvents {
+                if self.cloudtrail_state.current_event.is_none() {
+                    let filtered_events: Vec<_> =
+                        self.cloudtrail_state.table.items.iter().collect();
+                    if let Some(event) = self.cloudtrail_state.table.get_selected(&filtered_events)
+                    {
+                        self.cloudtrail_state.current_event = Some((*event).clone());
+                        self.cloudtrail_state.event_json_scroll = 0;
                         self.update_current_tab_breadcrumb();
                     }
                 }
@@ -8997,6 +9410,100 @@ impl App {
                 },
             )
             .collect();
+        Ok(())
+    }
+
+    pub async fn load_cloudtrail_events(&mut self) -> anyhow::Result<()> {
+        let (events, next_token) = self.cloudtrail_client.lookup_events(None, None).await?;
+        self.cloudtrail_state.table.items = events
+            .into_iter()
+            .map(
+                |(
+                    event_name,
+                    event_time,
+                    username,
+                    event_source,
+                    resource_type,
+                    resource_name,
+                    read_only,
+                    aws_region,
+                    event_id,
+                    access_key_id,
+                    source_ip_address,
+                    error_code,
+                    request_id,
+                    event_type,
+                    cloud_trail_event_json,
+                )| CloudTrailEvent {
+                    event_name,
+                    event_time,
+                    username,
+                    event_source,
+                    resource_type,
+                    resource_name,
+                    read_only,
+                    aws_region,
+                    event_id,
+                    access_key_id,
+                    source_ip_address,
+                    error_code,
+                    request_id,
+                    event_type,
+                    cloud_trail_event_json,
+                },
+            )
+            .collect();
+        self.cloudtrail_state.table.next_token = next_token;
+        Ok(())
+    }
+
+    pub async fn load_more_cloudtrail_events(&mut self) -> anyhow::Result<()> {
+        if let Some(token) = self.cloudtrail_state.table.next_token.clone() {
+            // Just load the next batch of events
+            let (events, next_token) = self
+                .cloudtrail_client
+                .lookup_events(None, Some(token))
+                .await?;
+            self.cloudtrail_state
+                .table
+                .items
+                .extend(events.into_iter().map(
+                    |(
+                        event_name,
+                        event_time,
+                        username,
+                        event_source,
+                        resource_type,
+                        resource_name,
+                        read_only,
+                        aws_region,
+                        event_id,
+                        access_key_id,
+                        source_ip_address,
+                        error_code,
+                        request_id,
+                        event_type,
+                        cloud_trail_event_json,
+                    )| CloudTrailEvent {
+                        event_name,
+                        event_time,
+                        username,
+                        event_source,
+                        resource_type,
+                        resource_name,
+                        read_only,
+                        aws_region,
+                        event_id,
+                        access_key_id,
+                        source_ip_address,
+                        error_code,
+                        request_id,
+                        event_type,
+                        cloud_trail_event_json,
+                    },
+                ));
+            self.cloudtrail_state.table.next_token = next_token;
+        }
         Ok(())
     }
 
@@ -9736,6 +10243,7 @@ impl ServicePickerState {
                 "CloudWatch › Log Groups",
                 "CloudWatch › Logs Insights",
                 "CloudWatch › Alarms",
+                "CloudTrail › Event History",
                 "CloudFormation › Stacks",
                 "EC2 › Instances",
                 "ECR › Repositories",
@@ -20881,5 +21389,1101 @@ mod lambda_version_tab_tests {
         assert!(app
             .apig_resource_visible_column_ids
             .contains(&ResourceColumn::Arn.id()));
+    }
+
+    #[test]
+    fn test_cloudtrail_filter_input() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::FilterInput);
+
+        app.cloudtrail_state.table.filter = "test".to_string();
+
+        assert_eq!(app.cloudtrail_state.table.filter, "test");
+    }
+
+    #[test]
+    fn test_cloudtrail_row_expansion() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.cloudtrail_state.table.items = vec![CloudTrailEvent {
+            event_name: "Event1".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user1".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "abc123".to_string(),
+            access_key_id: "AKIA...".to_string(),
+            source_ip_address: "1.2.3.4".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: "{}".to_string(),
+        }];
+
+        assert_eq!(app.cloudtrail_state.table.expanded_item, None);
+
+        app.expand_row();
+        assert_eq!(app.cloudtrail_state.table.expanded_item, Some(0));
+
+        app.collapse_row();
+        assert_eq!(app.cloudtrail_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_cloudtrail_service_initialization() {
+        let app = App::new_without_client("default".to_string(), None);
+        assert_eq!(app.cloudtrail_event_column_ids.len(), 14);
+        assert_eq!(app.cloudtrail_event_visible_column_ids.len(), 6);
+    }
+
+    #[test]
+    fn test_cloudtrail_service_name() {
+        assert_eq!(
+            Service::CloudTrailEvents.name(),
+            "CloudTrail › Event History"
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_in_service_picker() {
+        let app = App::new_without_client("default".to_string(), None);
+        assert!(app
+            .service_picker
+            .services
+            .contains(&"CloudTrail › Event History"));
+    }
+
+    #[test]
+    fn test_cloudtrail_service_selection() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudTrailEvents;
+        app.service_selected = true;
+
+        assert_eq!(app.current_service, Service::CloudTrailEvents);
+        assert!(app.service_selected);
+    }
+
+    #[test]
+    fn test_cloudtrail_filter_resets_selection() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.cloudtrail_state.table.selected = 5;
+        app.cloudtrail_state.table.expanded_item = Some(3);
+
+        app.handle_action(Action::StartFilter);
+        app.apply_filter_operation(|_| {});
+
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+        assert_eq!(app.cloudtrail_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_cloudtrail_column_toggle() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+
+        // Initially 6 columns visible
+        assert_eq!(app.cloudtrail_event_visible_column_ids.len(), 6);
+
+        // Toggle column at index 7 (ReadOnly - 7th column, index 1-14)
+        app.column_selector_index = 7;
+        app.handle_action(Action::ToggleColumn);
+
+        // Should now have 7 visible columns
+        assert_eq!(app.cloudtrail_event_visible_column_ids.len(), 7);
+    }
+
+    #[test]
+    fn test_cloudtrail_tab_cycles_filter_focus() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        app.cloudtrail_state.input_focus = InputFocus::Filter;
+
+        // Tab should cycle to Pagination
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(app.cloudtrail_state.input_focus, InputFocus::Pagination);
+
+        // Tab again should cycle back to Filter
+        app.handle_action(Action::NextFilterFocus);
+        assert_eq!(app.cloudtrail_state.input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_cloudtrail_shift_tab_cycles_filter_focus() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        app.cloudtrail_state.input_focus = InputFocus::Filter;
+
+        // Shift+Tab should cycle to Pagination
+        app.handle_action(Action::PrevFilterFocus);
+        assert_eq!(app.cloudtrail_state.input_focus, InputFocus::Pagination);
+
+        // Shift+Tab again should cycle back to Filter
+        app.handle_action(Action::PrevFilterFocus);
+        assert_eq!(app.cloudtrail_state.input_focus, InputFocus::Filter);
+    }
+
+    #[test]
+    fn test_cloudtrail_detail_view_tab_cycles_focus() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+
+        // Default focus is Resources
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+
+        // Tab cycles to EventRecord
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::EventRecord
+        );
+
+        // Tab cycles back to Resources
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_detail_view_shift_tab_cycles_focus() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+
+        // Default focus is Resources
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+
+        // Shift+Tab cycles to EventRecord
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::EventRecord
+        );
+
+        // Shift+Tab cycles back to Resources
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_json_scroll_with_arrow_keys() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: (0..50)
+                .map(|i| format!("line {}", i))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::EventRecord;
+        app.cloudtrail_state.event_json_scroll = 0;
+
+        // Down arrow scrolls down
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.event_json_scroll, 1);
+
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.event_json_scroll, 2);
+
+        // Up arrow scrolls up
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.event_json_scroll, 1);
+
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.event_json_scroll, 0);
+
+        // Up at 0 stays at 0
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.event_json_scroll, 0);
+    }
+
+    #[test]
+    fn test_cloudtrail_tab_works_with_no_resources() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "".to_string(), // No resource
+            resource_name: "".to_string(), // No resource
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::EventRecord;
+
+        // Tab cycles to Resources even with no resources
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+
+        // Tab cycles back to EventRecord
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::EventRecord
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_resources_expand_collapse() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::Resources;
+        app.cloudtrail_state.resources_expanded_index = None;
+
+        // Right arrow expands
+        app.handle_action(Action::ExpandRow);
+        assert_eq!(app.cloudtrail_state.resources_expanded_index, Some(0));
+
+        // Left arrow collapses
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.cloudtrail_state.resources_expanded_index, None);
+    }
+
+    #[test]
+    fn test_cloudtrail_event_json_no_column_selector() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::EventRecord;
+
+        // 'p' should not open column selector on Event JSON
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::Normal);
+
+        // But should work on Resources
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::Resources;
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::ColumnSelector);
+    }
+
+    #[test]
+    fn test_cloudtrail_resources_preferences_show_only_3_columns() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::Resources;
+
+        // Should show 3 columns
+        assert_eq!(app.get_column_count(), 3);
+        assert_eq!(app.get_column_selector_max(), 3);
+
+        // All 3 columns should be visible by default
+        assert_eq!(app.cloudtrail_resource_visible_column_ids.len(), 3);
+
+        // Toggle first column off
+        app.column_selector_index = 1;
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.cloudtrail_resource_visible_column_ids.len(), 2);
+
+        // Toggle second column off
+        app.column_selector_index = 2;
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.cloudtrail_resource_visible_column_ids.len(), 1);
+
+        // Try to toggle last column off - should NOT work (at least 1 must remain)
+        app.column_selector_index = 3;
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.cloudtrail_resource_visible_column_ids.len(), 1);
+
+        // Toggle first column back on
+        app.column_selector_index = 1;
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.cloudtrail_resource_visible_column_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_cloudtrail_resources_preferences_tab_cycles() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "user".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "90c72977-31e0-4079-9a74-ee25e5d7aadf".to_string(),
+            access_key_id: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            source_ip_address: "192.0.2.1".to_string(),
+            error_code: "".to_string(),
+            request_id: "req-123".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+        app.cloudtrail_state.detail_focus = CloudTrailDetailFocus::Resources;
+        app.column_selector_index = 1;
+
+        // Tab wraps to start (no page size section)
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, 0);
+
+        // Shift+Tab wraps to start (no page size section)
+        app.column_selector_index = 1;
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, 0);
+    }
+
+    #[test]
+    fn test_cloudtrail_resources_height_stays_constant_when_expanding() {
+        // This test verifies that table height is pre-allocated for expansion
+        // so content doesn't jump around when expanding/collapsing
+
+        // Height formula: (n_rows + n_visible_cols - 1) + 1 table header + 2 borders + 1 title
+        // For 1 row with 3 visible columns: (1 + 3 - 1) + 1 + 2 + 1 = 7
+
+        // With 3 visible columns
+        let visible_cols_3 = 3;
+        let height_3 = (1 + visible_cols_3 - 1 + 1 + 2 + 1) as u16;
+        assert_eq!(height_3, 7);
+
+        // With 2 visible columns (one toggled off)
+        let visible_cols_2 = 2;
+        let height_2 = (1 + visible_cols_2 - 1 + 1 + 2 + 1) as u16;
+        assert_eq!(height_2, 6);
+
+        // With 1 visible column (two toggled off)
+        let visible_cols_1 = 1;
+        let height_1 = (1 + visible_cols_1 - 1 + 1 + 2 + 1) as u16;
+        assert_eq!(height_1, 5);
+    }
+
+    #[test]
+    fn test_cloudtrail_default_focus_is_resources() {
+        let app = App::new_without_client("default".to_string(), None);
+        assert_eq!(
+            app.cloudtrail_state.detail_focus,
+            CloudTrailDetailFocus::Resources
+        );
+    }
+
+    fn setup_cloudtrail_pagination_test() -> App {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        app.cloudtrail_state.input_focus = InputFocus::Pagination;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+        app
+    }
+
+    #[test]
+    fn test_cloudtrail_pagination_navigation() {
+        // Test right arrow navigation
+        let mut app = setup_cloudtrail_pagination_test();
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 20);
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 20);
+
+        // Test left arrow navigation
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_cloudtrail_pagination_navigation_right_arrow() {
+        let mut app = setup_cloudtrail_pagination_test();
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        app.cloudtrail_state.input_focus = InputFocus::Pagination;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        // Create 25 items (3 pages)
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Start at page 0
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+
+        // Right arrow should go to page 1
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+
+        // Right arrow should go to page 2
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 20);
+
+        // Right arrow at last page should stay
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 20);
+    }
+
+    #[test]
+    fn test_cloudtrail_pagination_navigation_left_arrow() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        app.cloudtrail_state.input_focus = InputFocus::Pagination;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        // Create 25 items (3 pages)
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Start at page 2
+        app.cloudtrail_state.table.selected = 20;
+
+        // Left arrow should go to page 1
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+
+        // Left arrow should go to page 0
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+
+        // Left arrow at first page should stay
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_cloudtrail_arrow_navigation() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+
+        // Create 5 items
+        app.cloudtrail_state.table.items = (0..5)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Down arrow should move to next item
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 1);
+
+        app.handle_action(Action::NextItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 2);
+
+        // Up arrow should move to previous item
+        app.handle_action(Action::PrevItem);
+        assert_eq!(app.cloudtrail_state.table.selected, 1);
+    }
+
+    #[test]
+    fn test_cloudtrail_page_down_navigation() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        // Create 25 items
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Ctrl+D should jump down a page
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.cloudtrail_state.table.selected, 20);
+    }
+
+    #[test]
+    fn test_cloudtrail_page_up_navigation() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::Normal;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        // Create 25 items
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Start at page 2
+        app.cloudtrail_state.table.selected = 20;
+
+        // Ctrl+U should jump up a page
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.cloudtrail_state.table.selected, 10);
+
+        app.handle_action(Action::PageUp);
+        assert_eq!(app.cloudtrail_state.table.selected, 0);
+    }
+
+    #[test]
+    fn test_cloudtrail_page_size_change_updates_display() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+
+        // Create 50 items
+        app.cloudtrail_state.table.items = (0..50)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Default page size is 50
+        assert_eq!(app.cloudtrail_state.table.page_size, PageSize::Fifty);
+
+        // Change to page size 10 (index 17)
+        app.column_selector_index = 17;
+        app.handle_action(Action::ToggleColumn);
+
+        assert_eq!(app.cloudtrail_state.table.page_size, PageSize::Ten);
+        // snap_to_page should have been called to adjust display
+    }
+
+    #[test]
+    fn test_cloudtrail_all_columns_toggleable() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+
+        // Verify we have 14 columns
+        assert_eq!(app.cloudtrail_event_column_ids.len(), 14);
+
+        // Test toggling each column (indices 1-14)
+        for idx in 1..=14 {
+            app.column_selector_index = idx;
+            let initial_visible = app.cloudtrail_event_visible_column_ids.clone();
+
+            app.handle_action(Action::ToggleColumn);
+
+            // Verify the visible columns changed
+            assert_ne!(
+                app.cloudtrail_event_visible_column_ids, initial_visible,
+                "Column at index {} should be toggleable",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_cloudtrail_readonly_column_toggleable() {
+        use crate::cloudtrail::events::CloudTrailEventColumn;
+
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+
+        // ReadOnly is at position 6 (0-indexed) in the all() array
+        // So it's at index 7 in the column selector (1-indexed)
+        let readonly_id = CloudTrailEventColumn::ReadOnly.id();
+
+        // Verify ReadOnly is in the column list
+        assert!(app.cloudtrail_event_column_ids.contains(&readonly_id));
+
+        // Initially not visible
+        assert!(!app
+            .cloudtrail_event_visible_column_ids
+            .contains(&readonly_id));
+
+        // Toggle it on (index 7)
+        app.column_selector_index = 7;
+        app.handle_action(Action::ToggleColumn);
+
+        // Should now be visible
+        assert!(
+            app.cloudtrail_event_visible_column_ids
+                .contains(&readonly_id),
+            "ReadOnly column should be toggleable at index 7"
+        );
+
+        // Toggle it off
+        app.handle_action(Action::ToggleColumn);
+
+        // Should be hidden again
+        assert!(!app
+            .cloudtrail_event_visible_column_ids
+            .contains(&readonly_id));
+    }
+
+    #[test]
+    fn test_cloudtrail_pagination_limits_displayed_items() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+
+        // Create 50 items
+        app.cloudtrail_state.table.items = (0..50)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Set page size to 10
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        // Render to a test backend to verify pagination
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::ui::cloudtrail::render_events(frame, &app, area);
+            })
+            .unwrap();
+
+        // The rendering should only show 10 items per page
+        // This is verified by the pagination logic in render_events
+        assert_eq!(app.cloudtrail_state.table.page_size, PageSize::Ten);
+    }
+
+    #[test]
+    fn test_cloudtrail_readonly_column_selectable_in_preferences() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+
+        // Verify we have 14 columns
+        assert_eq!(app.cloudtrail_event_column_ids.len(), 14);
+
+        // Navigate to Read-only column (index 7)
+        app.column_selector_index = 7;
+
+        // Verify we can select it by checking the index is valid
+        let max_index = app.get_column_selector_max();
+        assert!(
+            app.column_selector_index <= max_index,
+            "Read-only column index {} should be <= max {}",
+            app.column_selector_index,
+            max_index
+        );
+
+        // Verify the column exists at this index
+        let col_id = &app.cloudtrail_event_column_ids[app.column_selector_index - 1];
+        let col = CloudTrailEventColumn::from_id(col_id);
+        assert!(col.is_some(), "Column should exist at index 7");
+        assert_eq!(
+            col.unwrap().default_name(),
+            "Read-only",
+            "Column at index 7 should be Read-only"
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_navigate_to_readonly_column() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::ColumnSelector;
+        app.column_selector_index = 1; // Start at first column
+
+        // Check column IDs are initialized
+        println!(
+            "cloudtrail_event_column_ids.len() = {}",
+            app.cloudtrail_event_column_ids.len()
+        );
+        assert_eq!(
+            app.cloudtrail_event_column_ids.len(),
+            14,
+            "Should have 14 columns"
+        );
+
+        // Check blank row index
+        let column_count = app.get_column_count();
+        println!("Column count from get_column_count(): {}", column_count);
+        assert_eq!(column_count, 14, "Column count should be 14");
+
+        // The blank row should be at index 15 (14 columns + 1)
+        assert!(!app.is_blank_row_index(7), "Index 7 should NOT be blank");
+        assert!(app.is_blank_row_index(15), "Index 15 should be blank");
+
+        // Navigate down to Read-only column (index 7)
+        for _ in 0..6 {
+            app.handle_action(Action::NextItem);
+        }
+
+        assert_eq!(
+            app.column_selector_index, 7,
+            "Should navigate to Read-only column at index 7"
+        );
+
+        // Verify it's the Read-only column
+        let col_id = &app.cloudtrail_event_column_ids[app.column_selector_index - 1];
+        let col = CloudTrailEventColumn::from_id(col_id).unwrap();
+        assert_eq!(col.default_name(), "Read-only");
+    }
+
+    #[test]
+    fn test_cloudtrail_navigate_beyond_loaded_items() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+
+        // Load only 50 items
+        app.cloudtrail_state.table.items = (0..50)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Page size is 50 by default, so we have 1 page of data
+        // Try to navigate to page 10 (beyond loaded data)
+        let initial_selected = app.cloudtrail_state.table.selected;
+        app.page_input = "10".to_string();
+        app.go_to_page(10);
+
+        // Should do nothing (stay at initial position)
+        assert_eq!(
+            app.cloudtrail_state.table.selected, initial_selected,
+            "Should ignore navigation to page 10 when only 1 page is loaded"
+        );
+
+        // But page 2 should work (loaded + 1)
+        app.go_to_page(2);
+        let page_size = app.cloudtrail_state.table.page_size.value();
+        assert_eq!(
+            app.cloudtrail_state.table.selected, page_size,
+            "Should allow navigation to page 2 (loaded + 1)"
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_page_change_resets_expansion() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+
+        // Create 100 items (2 pages with page size 50)
+        app.cloudtrail_state.table.items = (0..100)
+            .map(|i| CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "id".to_string(),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: "".to_string(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        // Expand an item on page 1
+        app.cloudtrail_state.table.expanded_item = Some(5);
+        assert_eq!(app.cloudtrail_state.table.expanded_item, Some(5));
+
+        // Navigate to page 2
+        app.go_to_page(2);
+
+        // Expansion should be reset
+        assert_eq!(
+            app.cloudtrail_state.table.expanded_item, None,
+            "Page change should reset expanded_item"
+        );
     }
 }

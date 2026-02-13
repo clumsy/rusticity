@@ -10,6 +10,7 @@ pub struct TableState<T> {
     pub page_size: PageSize,
     pub expanded_item: Option<usize>,
     pub scroll_offset: usize,
+    pub next_token: Option<String>,
 }
 
 impl<T> Default for TableState<T> {
@@ -28,6 +29,7 @@ impl<T> TableState<T> {
             page_size: PageSize::Fifty,
             expanded_item: None,
             scroll_offset: 0,
+            next_token: None,
         }
     }
 

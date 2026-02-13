@@ -1,5 +1,6 @@
 pub mod apig;
 pub mod cfn;
+pub mod cloudtrail;
 pub mod cw;
 pub mod ec2;
 pub mod ecr;
@@ -46,8 +47,11 @@ pub const PAGE_SIZE_OPTIONS_SMALL: &[(PageSize, &str)] = &[
 pub const MAX_DETAIL_COLUMNS: usize = 3;
 
 use self::styles::highlight;
-use crate::app::{AlarmViewMode, App, CalendarField, LambdaDetailTab, Service, ViewMode};
+use crate::app::{
+    AlarmViewMode, App, CalendarField, CloudTrailDetailFocus, LambdaDetailTab, Service, ViewMode,
+};
 use crate::cfn::Column as CfnColumn;
+use crate::cloudtrail::{CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{render_pagination_text, render_scrollbar, translate_column, PageSize};
 use crate::cw::alarms::AlarmColumn;
 use crate::ec2::Column as Ec2Column;
@@ -172,7 +176,7 @@ pub fn rounded_block() -> Block<'static> {
 }
 
 pub fn format_title(title: &str) -> String {
-    format!("─ {} ", title.trim())
+    format!("─ {} ─", title.trim())
 }
 
 pub fn titled_block(title: impl Into<String>) -> Block<'static> {
@@ -828,6 +832,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::CloudTrailEvents => cloudtrail::render_events(frame, app, area),
         Service::Ec2Instances => {
             if app.ec2_state.current_instance.is_some() {
                 ec2::render_instance_detail(frame, area, app);
@@ -942,6 +947,54 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         max_len = max_len.max(len);
 
         (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::CloudTrailEvents {
+        if app.cloudtrail_state.current_event.is_some()
+            && app.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
+        {
+            // Resources table in detail view - show resource columns
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cloudtrail_resource_column_ids {
+                let is_visible = app.cloudtrail_resource_visible_column_ids.contains(col_id);
+                if let Some(col) = EventResourceColumn::from_id(col_id) {
+                    let (item, len) = render_column_toggle_string(col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            (all_items, " Preferences ", max_len)
+        } else {
+            // Main events table
+            let mut all_items: Vec<ListItem> = Vec::new();
+            let mut max_len = 0;
+
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cloudtrail_event_column_ids {
+                let is_visible = app.cloudtrail_event_visible_column_ids.contains(col_id);
+                if let Some(col) = CloudTrailEventColumn::from_id(col_id) {
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.cloudtrail_state.table.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+
+            (all_items, " Preferences ", max_len)
+        }
     } else if app.view_mode == ViewMode::Events
         && app.current_service == Service::CloudWatchLogGroups
     {
@@ -2245,6 +2298,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         }
         Service::CloudWatchInsights => cw::render_insights(frame, app, area),
         Service::CloudWatchAlarms => cw::render_alarms(frame, app, area),
+        Service::CloudTrailEvents => cloudtrail::render_events(frame, app, area),
         Service::Ec2Instances => {
             if app.ec2_state.current_instance.is_some() {
                 ec2::render_instance_detail(frame, area, app);
@@ -6435,5 +6489,84 @@ mod tests {
             };
 
         assert!(!show_breadcrumbs);
+    }
+
+    #[test]
+    fn test_title_format_with_leading_dash() {
+        // format_title returns "─ Title ─"
+        // Ratatui block renders: ╭<title>╮
+        // Result: ╭─ Title ─╮
+
+        let title = format_title("APIs (2)");
+        assert_eq!(title, "─ APIs (2) ─");
+
+        let title = format_title("Preferences");
+        assert_eq!(title, "─ Preferences ─");
+
+        let title = format_title("CloudTrail Events");
+        assert_eq!(title, "─ CloudTrail Events ─");
+
+        let title = format_title("AWS Services");
+        assert_eq!(title, "─ AWS Services ─");
+    }
+
+    #[test]
+    fn test_titled_block_renders_correctly() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(40, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let block = titled_block("AWS Services");
+                let area = frame.area();
+                frame.render_widget(block, area);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let first_line = buffer.content()[0..40]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        // Should render as: ╭─ AWS Services ─...
+        assert!(
+            first_line.starts_with("╭─ AWS Services ─"),
+            "Expected '╭─ AWS Services ─' but got '{}'",
+            first_line
+        );
+    }
+
+    #[test]
+    fn test_titled_block_cloudtrail_renders_correctly() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(50, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let block = titled_block("CloudTrail Events");
+                let area = frame.area();
+                frame.render_widget(block, area);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let first_line = buffer.content()[0..50]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        // Should render as: ╭─ CloudTrail Events ─...
+        assert!(
+            first_line.starts_with("╭─ CloudTrail Events ─"),
+            "Expected '╭─ CloudTrail Events ─' but got '{}'",
+            first_line
+        );
     }
 }

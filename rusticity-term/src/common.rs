@@ -198,6 +198,37 @@ pub fn render_pagination(current: usize, total: usize) -> String {
         .join(" ")
 }
 
+/// Renders pagination with unknown total (infinite pagination)
+/// Shows: 1 ... 6 7 8 9 [10] 11 ...
+pub fn render_infinite_pagination(current: usize) -> String {
+    let mut parts = Vec::new();
+
+    // Show 4 pages before current (or from page 1)
+    let start = current.saturating_sub(4);
+
+    // If start > 1, show page 1 and ...
+    if start > 1 {
+        parts.push("1".to_string());
+        parts.push("...".to_string());
+    }
+
+    // Show pages from start to current
+    for i in start..current {
+        parts.push(format!("{}", i + 1));
+    }
+
+    // Current page
+    parts.push(format!("[{}]", current + 1));
+
+    // Show 1 page after current
+    parts.push(format!("{}", current + 2));
+
+    // Always show ... at the end to indicate more pages
+    parts.push("...".to_string());
+
+    parts.join(" ")
+}
+
 pub fn render_pagination_text(current: usize, total: usize) -> String {
     render_pagination(current, total)
 }
@@ -484,6 +515,48 @@ mod tests {
     #[test]
     fn test_format_duration_seconds_zero() {
         assert_eq!(format_duration_seconds(0), "0s");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_1() {
+        // Page 1: [1] 2 ...
+        let result = render_infinite_pagination(0);
+        assert_eq!(result, "[1] 2 ...");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_5() {
+        // Page 5: 1 2 3 4 [5] 6 ...
+        let result = render_infinite_pagination(4);
+        assert_eq!(result, "1 2 3 4 [5] 6 ...");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_6() {
+        // Page 6: 2 3 4 5 [6] 7 ... (start=2, no need for "1 ...")
+        let result = render_infinite_pagination(5);
+        assert_eq!(result, "2 3 4 5 [6] 7 ...");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_7() {
+        // Page 7: 1 ... 3 4 5 6 [7] 8 ...
+        let result = render_infinite_pagination(6);
+        assert_eq!(result, "1 ... 3 4 5 6 [7] 8 ...");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_10() {
+        // Page 10: 1 ... 6 7 8 9 [10] 11 ...
+        let result = render_infinite_pagination(9);
+        assert_eq!(result, "1 ... 6 7 8 9 [10] 11 ...");
+    }
+
+    #[test]
+    fn test_render_infinite_pagination_page_100() {
+        // Page 100: 1 ... 96 97 98 99 [100] 101 ...
+        let result = render_infinite_pagination(99);
+        assert_eq!(result, "1 ... 96 97 98 99 [100] 101 ...");
     }
 
     #[test]

@@ -15,6 +15,7 @@ aws-sdk-cloudwatch = { workspace = true }
 aws-sdk-apigateway = "1"
 aws-sdk-apigatewayv2 = "1"
 aws-sdk-cloudformation = "1"
+aws-sdk-cloudtrail = "1"
 aws-sdk-ec2 = "1"
 aws-sdk-ecr = "1.52"
 aws-sdk-ecrpublic = "1.49"

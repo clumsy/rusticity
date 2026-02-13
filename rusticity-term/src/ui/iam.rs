@@ -734,7 +734,7 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
                 chunks[2],
                 &app.iam_state.trust_policy_document,
                 app.iam_state.trust_policy_scroll,
-                " Trust Policy ",
+                "Trust Policy",
                 true,
             );
         }

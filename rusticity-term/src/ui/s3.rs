@@ -2054,14 +2054,12 @@ mod tests {
 
     #[test]
     fn test_title_formatting_no_double_dash() {
-        // Test that title doesn't have double dashes
+        // Test that title formatting is correct
         let title = format!("{} ({})", "Directory buckets", 0);
         let formatted = format_title(&title);
 
-        // Should be "─ Directory buckets (0) "
-        assert!(formatted.starts_with("─ "));
-        assert!(formatted.ends_with(" "));
-        assert!(!formatted.contains("─ ─")); // No double dash
+        // Should be "─ Directory buckets (0) ─"
+        assert_eq!(formatted, "─ Directory buckets (0) ─");
     }
 
     #[test]

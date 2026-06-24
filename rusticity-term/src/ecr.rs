@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod image;
 pub mod repo;
 use std::collections::HashMap;

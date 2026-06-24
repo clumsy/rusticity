@@ -340,7 +340,7 @@ impl Service {
     }
 }
 
-fn copy_to_clipboard(text: &str) {
+pub(crate) fn copy_to_clipboard(text: &str) {
     use std::io::Write;
     use std::process::{Command, Stdio};
     if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
@@ -600,11 +600,7 @@ impl App {
                     self.s3_state.bucket_scroll_offset = 0;
                 }
             } else if self.current_service == Service::EcrRepositories {
-                if self.ecr_state.current_repository.is_some() {
-                    self.ecr_state.images.reset();
-                } else {
-                    self.ecr_state.repositories.reset();
-                }
+                crate::ecr::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
                 self.sqs_state.queues.reset();
             } else if self.current_service == Service::LambdaFunctions {
@@ -1251,7 +1247,7 @@ impl App {
                         self.ec2_state.table.reset();
                     }
                     Service::EcrRepositories => {
-                        self.ecr_state.repositories.reset();
+                        crate::ecr::actions::apply_filter_reset(self);
                     }
                     Service::ApiGatewayApis => {
                         self.apig_state.apis.reset();
@@ -1498,7 +1494,7 @@ impl App {
                     } else if self.current_service == Service::EcrRepositories
                         && self.ecr_state.current_repository.is_none()
                     {
-                        self.ecr_state.input_focus == InputFocus::Pagination
+                        crate::ecr::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::LambdaFunctions {
                         if self.lambda_state.current_function.is_some()
                             && self.lambda_state.detail_tab == LambdaDetailTab::Versions
@@ -2029,45 +2025,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        // Images view - columns + page size
-                        let idx = self.column_selector_index;
-                        if let Some(col) = self.ecr_image_column_ids.get(idx) {
-                            if let Some(pos) = self
-                                .ecr_image_visible_column_ids
-                                .iter()
-                                .position(|c| c == col)
-                            {
-                                self.ecr_image_visible_column_ids.remove(pos);
-                            } else {
-                                self.ecr_image_visible_column_ids.push(*col);
-                            }
-                        }
-                    } else {
-                        // Repositories view - columns + page size
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.ecr_repo_column_ids.len() {
-                            if let Some(col) = self.ecr_repo_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .ecr_repo_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.ecr_repo_visible_column_ids.remove(pos);
-                                } else {
-                                    self.ecr_repo_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.ecr_repo_column_ids.len() + 3 {
-                            self.ecr_state.repositories.page_size = PageSize::Ten;
-                        } else if idx == self.ecr_repo_column_ids.len() + 4 {
-                            self.ecr_state.repositories.page_size = PageSize::TwentyFive;
-                        } else if idx == self.ecr_repo_column_ids.len() + 5 {
-                            self.ecr_state.repositories.page_size = PageSize::Fifty;
-                        } else if idx == self.ecr_repo_column_ids.len() + 6 {
-                            self.ecr_state.repositories.page_size = PageSize::OneHundred;
-                        }
-                    }
+                    crate::ecr::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
                     if self.ec2_state.current_instance.is_some()
                         && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -2728,13 +2686,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_some()
                 {
-                    // Images view: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.ecr_image_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
+                    crate::ecr::actions::next_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     // Lambda: Columns(0), PageSize(columns.len() + 2)
                     let page_size_idx = self.lambda_state.function_column_ids.len() + 2;
@@ -2965,12 +2917,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_some()
                 {
-                    let page_size_idx = self.ecr_image_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::ecr::actions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     let page_size_idx = self.lambda_state.function_column_ids.len() + 2;
                     if self.column_selector_index >= page_size_idx {
@@ -3236,9 +3183,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
-                    self.ecr_state.tab = self.ecr_state.tab.next();
-                    self.ecr_state.repositories.reset();
-                    self.ecr_state.repositories.loading = true;
+                    crate::ecr::actions::next_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -3327,9 +3272,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
-                    self.ecr_state.tab = self.ecr_state.tab.prev();
-                    self.ecr_state.repositories.reset();
-                    self.ecr_state.repositories.loading = true;
+                    crate::ecr::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -3637,8 +3580,7 @@ impl App {
                     && self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
-                    use crate::ui::ecr::FILTER_CONTROLS;
-                    self.ecr_state.input_focus = self.ecr_state.input_focus.next(&FILTER_CONTROLS);
+                    crate::ecr::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
@@ -3824,8 +3766,7 @@ impl App {
                     && self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
-                    use crate::ui::ecr::FILTER_CONTROLS;
-                    self.ecr_state.input_focus = self.ecr_state.input_focus.prev(&FILTER_CONTROLS);
+                    crate::ecr::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
@@ -4006,11 +3947,7 @@ impl App {
                         self.log_groups_state.log_groups.selected.saturating_sub(1);
                     self.log_groups_state.log_groups.snap_to_page();
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        self.ecr_state.images.page_up();
-                    } else {
-                        self.ecr_state.repositories.page_up();
-                    }
+                    crate::ecr::actions::scroll_up(self);
                 }
             }
             Action::ScrollDown => {
@@ -4078,13 +4015,7 @@ impl App {
                         .log_groups
                         .next_item(filtered_groups.len());
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = filtered_ecr_images(self);
-                        self.ecr_state.images.page_down(filtered_images.len());
-                    } else {
-                        let filtered_repos = filtered_ecr_repositories(self);
-                        self.ecr_state.repositories.page_down(filtered_repos.len());
-                    }
+                    crate::ecr::actions::scroll_down(self);
                 }
             }
 
@@ -4132,19 +4063,7 @@ impl App {
                         copy_to_clipboard(&event.message);
                     }
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = filtered_ecr_images(self);
-                        if let Some(image) = self.ecr_state.images.get_selected(&filtered_images) {
-                            copy_to_clipboard(&image.uri);
-                        }
-                    } else {
-                        let filtered_repos = filtered_ecr_repositories(self);
-                        if let Some(repo) =
-                            self.ecr_state.repositories.get_selected(&filtered_repos)
-                        {
-                            copy_to_clipboard(&repo.uri);
-                        }
-                    }
+                    crate::ecr::actions::yank(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     let filtered_functions = filtered_lambda_functions(self);
                     if let Some(func) = self.lambda_state.table.get_selected(&filtered_functions) {
@@ -4380,14 +4299,7 @@ impl App {
                 else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_some()
                 {
-                    if self.ecr_state.images.has_expanded_item() {
-                        self.ecr_state.images.collapse();
-                    } else {
-                        self.ecr_state.current_repository = None;
-                        self.ecr_state.current_repository_uri = None;
-                        self.ecr_state.images.items.clear();
-                        self.ecr_state.images.reset();
-                    }
+                    crate::ecr::actions::go_back(self);
                 }
                 // EC2: go back from instance detail to list
                 else if self.current_service == Service::Ec2Instances
@@ -4691,12 +4603,7 @@ impl App {
                 parts.push("Queues".to_string());
             }
             Service::EcrRepositories => {
-                parts.push("ECR".to_string());
-                if let Some(repo) = &self.ecr_state.current_repository {
-                    parts.push(repo.clone());
-                } else {
-                    parts.push("Repositories".to_string());
-                }
+                parts.extend(crate::ecr::actions::breadcrumb(self));
             }
             Service::LambdaFunctions => {
                 parts.push("Lambda".to_string());
@@ -4763,7 +4670,7 @@ impl App {
     }
 
     pub fn get_console_url(&self) -> String {
-        use crate::{cfn, cw, ecr, iam, lambda, s3};
+        use crate::{cfn, cw, iam, lambda, s3};
 
         match self.current_service {
             Service::CloudWatchLogGroups => {
@@ -4835,17 +4742,7 @@ impl App {
                     console_url_queues(&self.config.region)
                 }
             }
-            Service::EcrRepositories => {
-                if let Some(repo_name) = &self.ecr_state.current_repository {
-                    ecr::console_url_private_repository(
-                        &self.config.region,
-                        &self.config.account_id,
-                        repo_name,
-                    )
-                } else {
-                    ecr::console_url_repositories(&self.config.region)
-                }
-            }
+            Service::EcrRepositories => crate::ecr::actions::console_url(self),
             Service::LambdaFunctions => {
                 if let Some(func_name) = &self.lambda_state.current_function {
                     if let Some(version) = &self.lambda_state.current_version {
@@ -5053,11 +4950,7 @@ impl App {
                 self.ec2_column_ids.len() + 6
             }
         } else if self.current_service == Service::EcrRepositories {
-            if self.ecr_state.current_repository.is_some() {
-                self.ecr_image_column_ids.len() + 6
-            } else {
-                self.ecr_repo_column_ids.len() + 6
-            }
+            crate::ecr::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
             self.sqs_column_ids.len() - 1
         } else if self.current_service == Service::LambdaFunctions {
@@ -5113,11 +5006,7 @@ impl App {
                 self.ec2_column_ids.len()
             }
         } else if self.current_service == Service::EcrRepositories {
-            if self.ecr_state.current_repository.is_some() {
-                self.ecr_image_column_ids.len()
-            } else {
-                self.ecr_repo_column_ids.len()
-            }
+            crate::ecr::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
             self.sqs_column_ids.len()
         } else if self.current_service == Service::LambdaFunctions {
@@ -5507,20 +5396,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        let filtered_images = filtered_ecr_images(self);
-                        if !filtered_images.is_empty() {
-                            self.ecr_state.images.next_item(filtered_images.len());
-                        }
-                    } else {
-                        let filtered_repos = filtered_ecr_repositories(self);
-                        if !filtered_repos.is_empty() {
-                            self.ecr_state.repositories.selected =
-                                (self.ecr_state.repositories.selected + 1)
-                                    .min(filtered_repos.len() - 1);
-                            self.ecr_state.repositories.snap_to_page();
-                        }
-                    }
+                    crate::ecr::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -6039,11 +5915,7 @@ impl App {
                         self.ec2_state.table.prev_item();
                     }
                 } else if self.current_service == Service::EcrRepositories {
-                    if self.ecr_state.current_repository.is_some() {
-                        self.ecr_state.images.prev_item();
-                    } else {
-                        self.ecr_state.repositories.prev_item();
-                    }
+                    crate::ecr::actions::prev_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -6401,23 +6273,8 @@ impl App {
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
-            && self.ecr_state.input_focus == InputFocus::Filter
         {
-            // When input is focused, allow table scrolling
-            let filtered = filtered_ecr_repositories(self);
-            self.ecr_state.repositories.page_down(filtered.len());
-        } else if self.mode == Mode::FilterInput
-            && self.current_service == Service::EcrRepositories
-            && self.ecr_state.current_repository.is_none()
-        {
-            let page_size = self.ecr_state.repositories.page_size.value();
-            let filtered_count = filtered_ecr_repositories(self).len();
-            self.ecr_state.input_focus.handle_page_down(
-                &mut self.ecr_state.repositories.selected,
-                &mut self.ecr_state.repositories.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            crate::ecr::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
             let page_size = self.iam_state.policies.page_size.value();
             let filtered_count = filtered_iam_policies(self).len();
@@ -6570,13 +6427,7 @@ impl App {
                     self.ec2_state.table.page_down(filtered.len());
                 }
             } else if self.current_service == Service::EcrRepositories {
-                if self.ecr_state.current_repository.is_some() {
-                    let filtered = filtered_ecr_images(self);
-                    self.ecr_state.images.page_down(filtered.len());
-                } else {
-                    let filtered = filtered_ecr_repositories(self);
-                    self.ecr_state.repositories.page_down(filtered.len());
-                }
+                crate::ecr::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
                 let filtered =
                     filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter);
@@ -6865,20 +6716,8 @@ impl App {
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
-            && self.ecr_state.input_focus == InputFocus::Filter
         {
-            // When input is focused, allow table scrolling
-            self.ecr_state.repositories.page_up();
-        } else if self.mode == Mode::FilterInput
-            && self.current_service == Service::EcrRepositories
-            && self.ecr_state.current_repository.is_none()
-        {
-            let page_size = self.ecr_state.repositories.page_size.value();
-            self.ecr_state.input_focus.handle_page_up(
-                &mut self.ecr_state.repositories.selected,
-                &mut self.ecr_state.repositories.scroll_offset,
-                page_size,
-            );
+            crate::ecr::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
             let page_size = self.iam_state.policies.page_size.value();
             self.iam_state.policy_input_focus.handle_page_up(
@@ -6962,11 +6801,7 @@ impl App {
             } else if self.current_service == Service::Ec2Instances {
                 self.ec2_state.table.page_up();
             } else if self.current_service == Service::EcrRepositories {
-                if self.ecr_state.current_repository.is_some() {
-                    self.ecr_state.images.page_up();
-                } else {
-                    self.ecr_state.repositories.page_up();
-                }
+                crate::ecr::actions::page_up_normal(self);
             } else if self.current_service == Service::SqsQueues {
                 self.sqs_state.queues.page_up();
             } else if self.current_service == Service::LambdaFunctions {
@@ -7257,13 +7092,7 @@ impl App {
                 self.ec2_state.table.toggle_expand();
             }
         } else if self.current_service == Service::EcrRepositories {
-            if self.ecr_state.current_repository.is_some() {
-                // In images view - expand selected image
-                self.ecr_state.images.toggle_expand();
-            } else {
-                // In repositories view - expand selected repository
-                self.ecr_state.repositories.toggle_expand();
-            }
+            crate::ecr::actions::next_pane(self);
         } else if self.current_service == Service::SqsQueues {
             if self.sqs_state.current_queue.is_some()
                 && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -7468,36 +7297,7 @@ impl App {
                 _ => {}
             },
             Service::EcrRepositories => {
-                if self.ecr_state.current_repository.is_some() {
-                    let filtered_count = self
-                        .ecr_state
-                        .images
-                        .filtered(|img| {
-                            self.ecr_state.images.filter.is_empty()
-                                || img
-                                    .tag
-                                    .to_lowercase()
-                                    .contains(&self.ecr_state.images.filter.to_lowercase())
-                                || img
-                                    .digest
-                                    .to_lowercase()
-                                    .contains(&self.ecr_state.images.filter.to_lowercase())
-                        })
-                        .len();
-                    self.ecr_state.images.goto_page(page, filtered_count);
-                } else {
-                    let filtered_count = self
-                        .ecr_state
-                        .repositories
-                        .filtered(|r| {
-                            self.ecr_state.repositories.filter.is_empty()
-                                || r.name
-                                    .to_lowercase()
-                                    .contains(&self.ecr_state.repositories.filter.to_lowercase())
-                        })
-                        .len();
-                    self.ecr_state.repositories.goto_page(page, filtered_count);
-                }
+                crate::ecr::actions::go_to_page(self, page);
             }
             Service::SqsQueues => {
                 let filtered_count =
@@ -7805,13 +7605,7 @@ impl App {
         } else if self.current_service == Service::ApiGatewayApis {
             self.apig_state.apis.collapse();
         } else if self.current_service == Service::EcrRepositories {
-            if self.ecr_state.current_repository.is_some() {
-                // In images view - collapse expanded image
-                self.ecr_state.images.collapse();
-            } else {
-                // In repositories view - collapse expanded repository
-                self.ecr_state.repositories.collapse();
-            }
+            crate::ecr::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
             if self.sqs_state.current_queue.is_some()
                 && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -8116,11 +7910,7 @@ impl App {
                 }
             }
             Service::EcrRepositories => {
-                if self.ecr_state.current_repository.is_some() {
-                    self.ecr_state.images.collapse();
-                } else {
-                    self.ecr_state.repositories.collapse();
-                }
+                crate::ecr::actions::collapse_row(self);
             }
             Service::LambdaFunctions => self.lambda_state.table.collapse(),
             Service::SqsQueues => self.sqs_state.queues.collapse(),
@@ -9080,18 +8870,7 @@ impl App {
                     }
                 }
             } else if self.current_service == Service::EcrRepositories {
-                if self.ecr_state.current_repository.is_none() {
-                    // In repositories view - drill into selected repository
-                    let filtered_repos = filtered_ecr_repositories(self);
-                    if let Some(repo) = self.ecr_state.repositories.get_selected(&filtered_repos) {
-                        let repo_name = repo.name.clone();
-                        let repo_uri = repo.uri.clone();
-                        self.ecr_state.current_repository = Some(repo_name);
-                        self.ecr_state.current_repository_uri = Some(repo_uri);
-                        self.ecr_state.images.reset();
-                        self.ecr_state.repositories.loading = true;
-                    }
-                }
+                crate::ecr::actions::select_item(self);
             } else if self.current_service == Service::Ec2Instances {
                 if self.ec2_state.current_instance.is_none() {
                     let filtered_instances = filtered_ec2_instances(self);
@@ -9368,8 +9147,10 @@ impl App {
                             Some(self.log_groups_state.event_scroll_offset);
                     }
                 }
-            } else if self.current_service == Service::CloudWatchAlarms {
-                // Toggle expand for selected alarm
+            } else if self.current_service == Service::CloudWatchAlarms
+                && self.view_mode != ViewMode::Detail
+            {
+                // Toggle expand for selected alarm in list view
                 self.alarms_state.table.toggle_expand();
             } else if self.current_service == Service::CloudWatchInsights {
                 // In Normal mode, Enter always executes query

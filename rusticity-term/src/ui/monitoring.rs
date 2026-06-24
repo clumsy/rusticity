@@ -137,6 +137,24 @@ pub fn render_monitoring_tab(
     render_vertical_scrollbar(frame, area, total_height, scroll_offset);
 }
 
+fn x_axis_labels(min_x: f64, max_x: f64) -> Vec<Span<'static>> {
+    let mut labels = Vec::new();
+    let time_range = (max_x - min_x).max(1.0);
+    let target_labels = 6;
+    let raw_step = time_range / target_labels as f64;
+    let step = ((raw_step / 3600.0).ceil() as i64).max(1) * 3600;
+    let mut current = (min_x as i64 / step) * step;
+    while current <= max_x as i64 {
+        let time = chrono::DateTime::from_timestamp(current, 0)
+            .unwrap_or_default()
+            .format("%H:%M")
+            .to_string();
+        labels.push(Span::raw(time));
+        current += step;
+    }
+    labels
+}
+
 fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
     let block = Block::default()
         .title(format_title(chart.title))
@@ -176,20 +194,7 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
         .style(Style::default().fg(Color::Cyan))
         .data(&data);
 
-    let x_labels: Vec<Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(Span::raw(time));
-            current += step;
-        }
-        labels
-    };
+    let x_labels = x_axis_labels(min_x, max_x);
 
     let mut x_axis = Axis::default()
         .style(Style::default().fg(Color::Gray))
@@ -296,20 +301,7 @@ fn render_multi_dataset_chart(frame: &mut Frame, chart: &MultiDatasetChart, area
 
     max_y = max_y.max(1.0);
 
-    let x_labels: Vec<Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(Span::raw(time));
-            current += step;
-        }
-        labels
-    };
+    let x_labels = x_axis_labels(min_x, max_x);
 
     let mut x_axis = Axis::default()
         .style(Style::default().fg(Color::Gray))
@@ -439,20 +431,7 @@ fn render_dual_axis_chart(frame: &mut Frame, chart: &DualAxisChart, area: Rect) 
         .style(Style::default().fg(Color::Green))
         .data(&normalized_right);
 
-    let x_labels: Vec<Span> = {
-        let mut labels = Vec::new();
-        let step = 1800;
-        let mut current = (min_x as i64 / step) * step;
-        while current <= max_x as i64 {
-            let time = chrono::DateTime::from_timestamp(current, 0)
-                .unwrap_or_default()
-                .format("%H:%M")
-                .to_string();
-            labels.push(Span::raw(time));
-            current += step;
-        }
-        labels
-    };
+    let x_labels = x_axis_labels(min_x, max_x);
 
     let mut x_axis = Axis::default()
         .style(Style::default().fg(Color::Gray))

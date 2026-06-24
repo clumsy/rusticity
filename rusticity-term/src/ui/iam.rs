@@ -857,10 +857,10 @@ pub fn render_user_detail(frame: &mut Frame, app: &App, area: Rect) {
         });
     } else if app.iam_state.user_tab == UserTab::SecurityCredentials {
         let block = titled_block("Security Credentials");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let inner = block.inner(chunks[2]);
+        frame.render_widget(block, chunks[2]);
 
-        let text = Paragraph::new("Security credentials information is not yet implemented.");
+        let text = Paragraph::new("Not yet implemented");
         frame.render_widget(text, inner);
     } else if app.iam_state.user_tab == UserTab::LastAccessed {
         render_user_last_accessed_tab(frame, app, chunks[2]);

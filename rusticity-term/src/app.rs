@@ -232,12 +232,15 @@ pub struct CloudWatchInsightsState {
 
 pub struct CloudWatchAlarmsState {
     pub table: TableState<Alarm>,
+    pub current_alarm: Option<String>,
     pub alarm_tab: AlarmTab,
     pub view_as: AlarmViewMode,
     pub wrap_lines: bool,
     pub sort_column: String,
     pub sort_direction: SortDirection,
     pub input_focus: InputFocus,
+    pub metric_data: Vec<(i64, f64)>,
+    pub metrics_loading: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -363,7 +366,10 @@ fn toggle_iam_preference(
     if idx > 0 && idx <= column_ids.len() {
         if let Some(col) = column_ids.get(idx - 1) {
             if let Some(pos) = visible_column_ids.iter().position(|c| c == col) {
-                visible_column_ids.remove(pos);
+                // Only remove if more than one column is visible
+                if visible_column_ids.len() > 1 {
+                    visible_column_ids.remove(pos);
+                }
             } else {
                 visible_column_ids.push(col.clone());
             }
@@ -386,7 +392,10 @@ fn toggle_iam_preference_static(
     if idx > 0 && idx <= column_ids.len() {
         if let Some(col) = column_ids.get(idx - 1) {
             if let Some(pos) = visible_column_ids.iter().position(|c| c == col) {
-                visible_column_ids.remove(pos);
+                // Only remove if more than one column is visible
+                if visible_column_ids.len() > 1 {
+                    visible_column_ids.remove(pos);
+                }
             } else {
                 visible_column_ids.push(*col);
             }
@@ -803,8 +812,8 @@ impl App {
             lambda_application_column_ids: LambdaApplicationColumn::ids(),
             lambda_deployment_visible_column_ids: DeploymentColumn::ids(),
             lambda_deployment_column_ids: DeploymentColumn::ids(),
-            lambda_resource_visible_column_ids: ResourceColumn::ids(),
-            lambda_resource_column_ids: ResourceColumn::ids(),
+            lambda_resource_visible_column_ids: crate::lambda::ResourceColumn::ids(),
+            lambda_resource_column_ids: crate::lambda::ResourceColumn::ids(),
             cfn_visible_column_ids: [
                 CfnColumn::Name,
                 CfnColumn::Status,
@@ -1014,8 +1023,8 @@ impl App {
             apig_resource_column_ids: ResourceColumn::all().iter().map(|c| c.id()).collect(),
             lambda_deployment_visible_column_ids: DeploymentColumn::ids(),
             lambda_deployment_column_ids: DeploymentColumn::ids(),
-            lambda_resource_visible_column_ids: ResourceColumn::ids(),
-            lambda_resource_column_ids: ResourceColumn::ids(),
+            lambda_resource_visible_column_ids: crate::lambda::ResourceColumn::ids(),
+            lambda_resource_column_ids: crate::lambda::ResourceColumn::ids(),
             cfn_visible_column_ids: [
                 CfnColumn::Name,
                 CfnColumn::Status,
@@ -1870,15 +1879,11 @@ impl App {
                     let idx = self.column_selector_index;
                     if idx > 0 && idx <= self.s3_bucket_column_ids.len() {
                         if let Some(col) = self.s3_bucket_column_ids.get(idx - 1) {
-                            if let Some(pos) = self
-                                .s3_bucket_visible_column_ids
-                                .iter()
-                                .position(|c| c == col)
-                            {
-                                self.s3_bucket_visible_column_ids.remove(pos);
-                            } else {
-                                self.s3_bucket_visible_column_ids.push(*col);
-                            }
+                            Self::toggle_column_visibility(
+                                &mut self.s3_bucket_visible_column_ids,
+                                &self.s3_bucket_column_ids,
+                                *col,
+                            );
                         }
                     } else if idx == self.s3_bucket_column_ids.len() + 3 {
                         self.s3_state.buckets.page_size = PageSize::Ten;
@@ -1897,15 +1902,11 @@ impl App {
                     if (1..=16).contains(&idx) {
                         // Column toggle
                         if let Some(col) = self.cw_alarm_column_ids.get(idx - 1) {
-                            if let Some(pos) = self
-                                .cw_alarm_visible_column_ids
-                                .iter()
-                                .position(|c| c == col)
-                            {
-                                self.cw_alarm_visible_column_ids.remove(pos);
-                            } else {
-                                self.cw_alarm_visible_column_ids.push(*col);
-                            }
+                            Self::toggle_column_visibility(
+                                &mut self.cw_alarm_visible_column_ids,
+                                &self.cw_alarm_column_ids,
+                                *col,
+                            );
                         }
                     } else if idx == 19 {
                         self.alarms_state.view_as = AlarmViewMode::Table;
@@ -1930,18 +1931,11 @@ impl App {
                         let idx = self.column_selector_index;
                         if idx > 0 && idx <= self.cloudtrail_resource_column_ids.len() {
                             if let Some(col) = self.cloudtrail_resource_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .cloudtrail_resource_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    // Don't allow toggling off if it's the last visible column
-                                    if self.cloudtrail_resource_visible_column_ids.len() > 1 {
-                                        self.cloudtrail_resource_visible_column_ids.remove(pos);
-                                    }
-                                } else {
-                                    self.cloudtrail_resource_visible_column_ids.push(*col);
-                                }
+                                Self::toggle_column_visibility(
+                                    &mut self.cloudtrail_resource_visible_column_ids,
+                                    &self.cloudtrail_resource_column_ids,
+                                    *col,
+                                );
                             }
                         }
                     } else {
@@ -1949,15 +1943,11 @@ impl App {
                         let idx = self.column_selector_index;
                         if (1..=14).contains(&idx) {
                             if let Some(col) = self.cloudtrail_event_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .cloudtrail_event_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.cloudtrail_event_visible_column_ids.remove(pos);
-                                } else {
-                                    self.cloudtrail_event_visible_column_ids.push(*col);
-                                }
+                                Self::toggle_column_visibility(
+                                    &mut self.cloudtrail_event_visible_column_ids,
+                                    &self.cloudtrail_event_column_ids,
+                                    *col,
+                                );
                             }
                         } else if idx == 17 {
                             self.cloudtrail_state.table.page_size = PageSize::Ten;
@@ -4106,6 +4096,11 @@ impl App {
                     self.measure_region_latencies();
                 } else if self.mode == Mode::SessionPicker {
                     self.sessions = Session::list_all().unwrap_or_default();
+                } else if self.current_service == Service::CloudWatchAlarms
+                    && self.alarms_state.current_alarm.is_some()
+                {
+                    // Refresh alarm metrics — keep old data visible until new data arrives
+                    self.alarms_state.metrics_loading = true;
                 } else if self.current_service == Service::CloudWatchInsights
                     && !self.insights_state.insights.selected_log_groups.is_empty()
                 {
@@ -4453,6 +4448,15 @@ impl App {
                 {
                     self.lambda_state.current_alias = None;
                     self.lambda_state.detail_tab = LambdaDetailTab::Aliases;
+                }
+                // CloudWatch Alarms: go back from alarm detail to list
+                else if self.current_service == Service::CloudWatchAlarms
+                    && self.alarms_state.current_alarm.is_some()
+                {
+                    self.alarms_state.current_alarm = None;
+                    self.alarms_state.metric_data.clear();
+                    self.view_mode = ViewMode::List;
+                    self.update_current_tab_breadcrumb();
                 }
                 // Lambda: go back from function detail to list
                 else if self.current_service == Service::LambdaFunctions
@@ -7240,7 +7244,7 @@ impl App {
                     Some(self.log_groups_state.event_scroll_offset);
             }
         } else if self.current_service == Service::CloudWatchAlarms {
-            // Expand selected alarm
+            // Right arrow expands alarm row
             if !self.alarms_state.table.is_expanded() {
                 self.alarms_state.table.toggle_expand();
             }
@@ -8697,6 +8701,12 @@ impl App {
                 // Note: Changing profile requires reconnecting to AWS
             }
         } else if self.mode == Mode::ServicePicker {
+            // If filter is active (INSERT mode), exit filter mode instead of selecting
+            if self.service_picker.filter_active {
+                self.service_picker.filter_active = false;
+                return;
+            }
+
             let filtered = self.filtered_services();
             if let Some(&service) = filtered.get(self.service_picker.selected) {
                 let new_service = match service {
@@ -9045,6 +9055,16 @@ impl App {
                         self.cfn_state.tags.items = tags;
                         self.cfn_state.tags.reset();
                         self.cfn_state.table.loading = true;
+                        self.update_current_tab_breadcrumb();
+                    }
+                }
+            } else if self.current_service == Service::CloudWatchAlarms {
+                if self.alarms_state.current_alarm.is_none() {
+                    let filtered_alarms: Vec<_> = self.alarms_state.table.items.iter().collect();
+                    if let Some(alarm) = self.alarms_state.table.get_selected(&filtered_alarms) {
+                        self.alarms_state.current_alarm = Some(alarm.name.clone());
+                        self.alarms_state.metrics_loading = true;
+                        self.view_mode = ViewMode::Detail;
                         self.update_current_tab_breadcrumb();
                     }
                 }
@@ -10207,6 +10227,22 @@ impl App {
 
         Err(anyhow::anyhow!("Query timeout"))
     }
+
+    /// Toggle column visibility, ensuring at least one column remains visible
+    fn toggle_column_visibility<T: PartialEq + Copy>(
+        visible_columns: &mut Vec<T>,
+        _all_columns: &[T],
+        column_to_toggle: T,
+    ) {
+        if let Some(pos) = visible_columns.iter().position(|c| c == &column_to_toggle) {
+            // Only remove if more than one column is visible
+            if visible_columns.len() > 1 {
+                visible_columns.remove(pos);
+            }
+        } else {
+            visible_columns.push(column_to_toggle);
+        }
+    }
 }
 
 impl CloudWatchInsightsState {
@@ -10222,12 +10258,15 @@ impl CloudWatchAlarmsState {
     fn new() -> Self {
         Self {
             table: TableState::new(),
+            current_alarm: None,
             alarm_tab: AlarmTab::AllAlarms,
             view_as: AlarmViewMode::Table,
             wrap_lines: false,
             sort_column: "Last state update".to_string(),
             sort_direction: SortDirection::Asc,
             input_focus: InputFocus::Filter,
+            metric_data: Vec::new(),
+            metrics_loading: false,
         }
     }
 }
@@ -15240,6 +15279,32 @@ mod region_latency_tests {
 
         assert_eq!(app.service_picker.filter, "s3");
         assert_eq!(app.mode, Mode::ServicePicker);
+    }
+
+    #[test]
+    fn test_service_picker_enter_exits_insert_mode() {
+        let mut app = test_app();
+        assert_eq!(app.mode, Mode::ServicePicker);
+        assert!(!app.service_selected);
+
+        // Enter filter mode (INSERT mode)
+        app.handle_action(Action::EnterFilterMode);
+        assert!(app.service_picker.filter_active);
+
+        // Type to filter
+        app.handle_action(Action::FilterInput('s'));
+        app.handle_action(Action::FilterInput('3'));
+
+        // Press Enter - should exit INSERT mode, not select service
+        app.handle_action(Action::Select);
+        assert!(!app.service_selected, "Should not select service");
+        assert!(!app.service_picker.filter_active, "Should exit INSERT mode");
+        assert_eq!(app.mode, Mode::ServicePicker);
+
+        // Now press Enter again in NORMAL mode - should select service
+        app.handle_action(Action::Select);
+        assert!(app.service_selected, "Should select service in NORMAL mode");
+        assert_eq!(app.mode, Mode::Normal);
     }
 
     #[test]
@@ -22216,18 +22281,33 @@ mod lambda_version_tab_tests {
         assert_eq!(app.cloudtrail_event_column_ids.len(), 14);
 
         // Test toggling each column (indices 1-14)
+        // Note: Cannot toggle off the last visible column
         for idx in 1..=14 {
             app.column_selector_index = idx;
             let initial_visible = app.cloudtrail_event_visible_column_ids.clone();
+            let initial_count = initial_visible.len();
+
+            // Check if this column is currently visible
+            let col = app.cloudtrail_event_column_ids.get(idx - 1).unwrap();
+            let is_visible = initial_visible.contains(col);
 
             app.handle_action(Action::ToggleColumn);
 
-            // Verify the visible columns changed
-            assert_ne!(
-                app.cloudtrail_event_visible_column_ids, initial_visible,
-                "Column at index {} should be toggleable",
-                idx
-            );
+            // If it was the last visible column, it should not be removed
+            if is_visible && initial_count == 1 {
+                assert_eq!(
+                    app.cloudtrail_event_visible_column_ids, initial_visible,
+                    "Last visible column at index {} should not be toggleable",
+                    idx
+                );
+            } else {
+                // Otherwise it should toggle
+                assert_ne!(
+                    app.cloudtrail_event_visible_column_ids, initial_visible,
+                    "Column at index {} should be toggleable when not the last one",
+                    idx
+                );
+            }
         }
     }
 
@@ -22485,5 +22565,245 @@ mod lambda_version_tab_tests {
             app.cloudtrail_state.table.expanded_item, None,
             "Page change should reset expanded_item"
         );
+    }
+
+    #[test]
+    fn test_lambda_application_resources_have_columns() {
+        let app = test_app();
+
+        // Verify lambda resource columns are initialized correctly
+        assert_eq!(app.lambda_resource_visible_column_ids.len(), 4);
+        assert_eq!(app.lambda_resource_column_ids.len(), 4);
+
+        // Verify they contain the expected Lambda ResourceColumn IDs
+        assert!(app
+            .lambda_resource_visible_column_ids
+            .contains(&"column.lambda.resource.logical_id"));
+        assert!(app
+            .lambda_resource_column_ids
+            .contains(&"column.lambda.resource.logical_id"));
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_enter_drills_down() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.view_mode = ViewMode::List;
+
+        // Add test alarm
+        app.alarms_state.table.items = vec![Alarm {
+            name: "test-alarm".to_string(),
+            state: "ALARM".to_string(),
+            state_updated_timestamp: "2024-01-01 12:00:00".to_string(),
+            description: "Test alarm".to_string(),
+            metric_name: "CPUUtilization".to_string(),
+            namespace: "AWS/EC2".to_string(),
+            statistic: "Average".to_string(),
+            period: 300,
+            comparison_operator: "GreaterThanThreshold".to_string(),
+            threshold: 80.0,
+            actions_enabled: true,
+            state_reason: "Threshold crossed".to_string(),
+            resource: "".to_string(),
+            dimensions: "".to_string(),
+            expression: "".to_string(),
+            alarm_type: "MetricAlarm".to_string(),
+            cross_account: "".to_string(),
+        }];
+
+        assert!(app.alarms_state.current_alarm.is_none());
+        assert_eq!(app.view_mode, ViewMode::List);
+        assert!(!app.alarms_state.metrics_loading);
+
+        // Press Enter - should drill into alarm and trigger metrics loading
+        app.handle_action(Action::Select);
+
+        assert_eq!(
+            app.alarms_state.current_alarm,
+            Some("test-alarm".to_string())
+        );
+        assert_eq!(app.view_mode, ViewMode::Detail);
+        assert!(
+            app.alarms_state.metrics_loading,
+            "Should trigger metrics loading"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_metric_data_renders() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+
+        // Add test alarm
+        app.alarms_state.table.items = vec![Alarm {
+            name: "test-alarm".to_string(),
+            state: "ALARM".to_string(),
+            state_updated_timestamp: "2024-01-01 12:00:00".to_string(),
+            description: "Test alarm".to_string(),
+            metric_name: "CPUUtilization".to_string(),
+            namespace: "AWS/EC2".to_string(),
+            statistic: "Average".to_string(),
+            period: 300,
+            comparison_operator: "GreaterThanThreshold".to_string(),
+            threshold: 80.0,
+            actions_enabled: true,
+            state_reason: "Threshold crossed".to_string(),
+            resource: "".to_string(),
+            dimensions: "".to_string(),
+            expression: "".to_string(),
+            alarm_type: "MetricAlarm".to_string(),
+            cross_account: "".to_string(),
+        }];
+
+        app.alarms_state.current_alarm = Some("test-alarm".to_string());
+
+        // Add metric data
+        app.alarms_state.metric_data = vec![(1000, 50.0), (2000, 60.0), (3000, 70.0)];
+        app.alarms_state.metrics_loading = false;
+
+        // Verify metric data is present and will be rendered
+        assert!(!app.alarms_state.metric_data.is_empty());
+        assert_eq!(app.alarms_state.metric_data.len(), 3);
+        assert!(!app.alarms_state.metrics_loading);
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_back_clears_metrics() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+
+        // Set up alarm detail view with metrics
+        app.alarms_state.current_alarm = Some("test-alarm".to_string());
+        app.alarms_state.metric_data = vec![(1000, 50.0), (2000, 60.0)];
+
+        assert!(!app.alarms_state.metric_data.is_empty());
+
+        // Go back
+        app.handle_action(Action::GoBack);
+
+        // Should clear current alarm and metrics
+        assert!(app.alarms_state.current_alarm.is_none());
+        assert!(app.alarms_state.metric_data.is_empty());
+        assert_eq!(app.view_mode, ViewMode::List);
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_refresh_reloads_metrics() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+
+        // Set up alarm detail view with old metrics
+        app.alarms_state.current_alarm = Some("test-alarm".to_string());
+        app.alarms_state.metric_data = vec![(1000, 50.0), (2000, 60.0)];
+        app.alarms_state.metrics_loading = false;
+
+        assert!(!app.alarms_state.metric_data.is_empty());
+        assert!(!app.alarms_state.metrics_loading);
+
+        // Refresh with Ctrl+R
+        app.handle_action(Action::Refresh);
+
+        // Should keep old metrics visible until new data arrives
+        assert!(!app.alarms_state.metric_data.is_empty());
+        assert!(app.alarms_state.metrics_loading);
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_right_arrow_expands() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.view_mode = ViewMode::List;
+
+        // Add test alarm
+        app.alarms_state.table.items = vec![Alarm {
+            name: "test-alarm".to_string(),
+            state: "ALARM".to_string(),
+            state_updated_timestamp: "2024-01-01 12:00:00".to_string(),
+            description: "Test alarm".to_string(),
+            metric_name: "CPUUtilization".to_string(),
+            namespace: "AWS/EC2".to_string(),
+            statistic: "Average".to_string(),
+            period: 300,
+            comparison_operator: "GreaterThanThreshold".to_string(),
+            threshold: 80.0,
+            actions_enabled: true,
+            state_reason: "Threshold crossed".to_string(),
+            resource: "".to_string(),
+            dimensions: "".to_string(),
+            expression: "".to_string(),
+            alarm_type: "MetricAlarm".to_string(),
+            cross_account: "".to_string(),
+        }];
+
+        assert!(!app.alarms_state.table.is_expanded());
+
+        // Right arrow should expand
+        app.handle_action(Action::NextPane);
+        assert!(app.alarms_state.table.is_expanded());
+
+        // Left arrow should collapse
+        app.handle_action(Action::PrevPane);
+        assert!(!app.alarms_state.table.is_expanded());
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_tab_switches_tabs() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+
+        // Start on All Alarms tab
+        assert_eq!(app.alarms_state.alarm_tab, AlarmTab::AllAlarms);
+
+        // Tab switches to In Alarm
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.alarms_state.alarm_tab, AlarmTab::InAlarm);
+
+        // Tab again switches back to All Alarms
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.alarms_state.alarm_tab, AlarmTab::AllAlarms);
+
+        // Shift+Tab switches to In Alarm
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.alarms_state.alarm_tab, AlarmTab::InAlarm);
+    }
+
+    #[test]
+    fn test_column_toggle_prevents_hiding_last_column() {
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+
+        // Start with only one visible column
+        app.cw_alarm_visible_column_ids = vec!["column.cw.alarm.name"];
+
+        // Open column selector
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(app.mode, Mode::ColumnSelector);
+
+        // Select the only visible column (index 1)
+        app.column_selector_index = 1;
+
+        // Try to toggle it off - should NOT remove it
+        app.handle_action(Action::ToggleColumn);
+
+        // Should still have one column visible
+        assert_eq!(app.cw_alarm_visible_column_ids.len(), 1);
+        assert_eq!(app.cw_alarm_visible_column_ids[0], "column.cw.alarm.name");
     }
 }

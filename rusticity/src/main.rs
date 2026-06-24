@@ -364,6 +364,40 @@ async fn main() -> Result<()> {
                             app.ec2_state.metrics_loading = false;
                         }
 
+                        // Load CloudWatch Alarm metrics when entering alarm detail view
+                        if app.current_service == Service::CloudWatchAlarms
+                            && app.alarms_state.current_alarm.is_some()
+                            && app.alarms_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(alarm_name) = &app.alarms_state.current_alarm.clone() {
+                                // Find the alarm to get its metric details
+                                if let Some(alarm) = app.alarms_state.table.items.iter().find(|a| &a.name == alarm_name) {
+                                    let end_time = chrono::Utc::now();
+                                    let start_time = end_time - chrono::TimeDelta::hours(24);
+
+                                    match app.alarms_client.get_metric_statistics(
+                                        &alarm.namespace,
+                                        &alarm.metric_name,
+                                        &alarm.statistic,
+                                        alarm.period as i32,
+                                        start_time,
+                                        end_time,
+                                    ).await {
+                                        Ok(data) => {
+                                            app.alarms_state.metric_data = data;
+                                        }
+                                        Err(e) => {
+                                            app.error_message = Some(format!("Failed to load alarm metrics: {:#}", e));
+                                            app.error_scroll = 0;
+                                            app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                        }
+                                    }
+                                }
+                            }
+                            app.alarms_state.metrics_loading = false;
+                        }
+
                         // Load ECR repositories when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::EcrRepositories
                             && ((!prev_service_selected || prev_service != Service::EcrRepositories)

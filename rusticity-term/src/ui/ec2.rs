@@ -275,7 +275,7 @@ pub fn render_instances(
         .filter_map(|id| Column::from_id(id).map(|c| c.to_column()))
         .collect();
 
-    let title = format!("Instances ({})", filtered_count);
+    let title = format_title(&format!("Instances ({})", filtered_count));
 
     use crate::ui::table::TableConfig;
     render_table(

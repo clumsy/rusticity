@@ -116,4 +116,51 @@ impl AlarmsClient {
 
         Ok(alarms)
     }
+
+    pub async fn get_metric_statistics(
+        &self,
+        namespace: &str,
+        metric_name: &str,
+        statistic: &str,
+        period: i32,
+        start_time: chrono::DateTime<chrono::Utc>,
+        end_time: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<(i64, f64)>> {
+        let client = self.config.cloudwatch_client().await;
+
+        let resp = client
+            .get_metric_statistics()
+            .namespace(namespace)
+            .metric_name(metric_name)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::from(statistic))
+            .period(period)
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                start_time.timestamp_millis(),
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
+                end_time.timestamp_millis(),
+            ))
+            .send()
+            .await?;
+
+        let mut data: Vec<(i64, f64)> = resp
+            .datapoints()
+            .iter()
+            .filter_map(|dp| {
+                let timestamp = dp.timestamp()?.as_secs_f64() as i64;
+                let value = match statistic {
+                    "Average" => dp.average(),
+                    "Sum" => dp.sum(),
+                    "Minimum" => dp.minimum(),
+                    "Maximum" => dp.maximum(),
+                    "SampleCount" => dp.sample_count(),
+                    _ => dp.average(),
+                }?;
+                Some((timestamp, value))
+            })
+            .collect();
+
+        data.sort_by_key(|(ts, _)| *ts);
+        Ok(data)
+    }
 }

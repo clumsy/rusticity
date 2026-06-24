@@ -28,14 +28,18 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 
 ## Supported Services
 
+- 🌐 **API Gateway**: REST APIs, HTTP APIs, and WebSocket APIs
 - 📊 **CloudWatch Logs**: Log groups, log streams, log events
 - 🔍 **CloudWatch Logs Insights**: Query and analyze logs
-- 🚨 **CloudWatch Alarms**: View and manage alarms
-- 🪣 **S3**: Browse buckets and objects
-- 📦 **ECR**: Elastic Container Registry (public and private)
-- ☁️ **CloudFormation**: View and manage stacks
-- λ **Lambda**: Function management
-- 👤 **IAM**: Identity and Access Management
+- 🚨 **CloudWatch Alarms**: View alarms with metrics graphs
+- 🛤️ **CloudTrail**: Event history with resource details
+- ☁️ **CloudFormation**: Stacks, resources, outputs, parameters, templates
+- 🖥️ **EC2**: Instances with tags and monitoring
+- 📦 **ECR**: Elastic Container Registry (public and private repositories)
+- 👤 **IAM**: Users, roles, groups, policies, and permissions
+- λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring
+- 🪣 **S3**: Buckets and objects with navigation
+- 📬 **SQS**: Queues with monitoring and Lambda triggers
 
 **Want to see support for another AWS service?** [Request it here](../../issues/new?template=feature_request.md) or upvote existing requests!
 

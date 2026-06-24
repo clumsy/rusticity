@@ -200,7 +200,36 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
                         Span::styled(content, style),
                     ]))
                 } else {
-                    Cell::from(content).style(style)
+                    // First column: split cursor from content to keep cursor white
+                    if is_expanded {
+                        let text = content
+                            .strip_prefix(&format!("{} ", CURSOR_EXPANDED))
+                            .unwrap_or(&content);
+                        Cell::from(Line::from(vec![
+                            Span::styled(
+                                format!("{} ", CURSOR_EXPANDED),
+                                Style::default().fg(Color::White),
+                            ),
+                            Span::styled(text.to_string(), style),
+                        ]))
+                    } else if is_selected {
+                        let text = content
+                            .strip_prefix(&format!("{} ", CURSOR_COLLAPSED))
+                            .unwrap_or(&content);
+                        Cell::from(Line::from(vec![
+                            Span::styled(
+                                format!("{} ", CURSOR_COLLAPSED),
+                                Style::default().fg(Color::White),
+                            ),
+                            Span::styled(text.to_string(), style),
+                        ]))
+                    } else {
+                        let text = content.strip_prefix("  ").unwrap_or(&content);
+                        Cell::from(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(text.to_string(), style),
+                        ]))
+                    }
                 }
             })
             .collect();

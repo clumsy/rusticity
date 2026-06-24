@@ -147,8 +147,100 @@ impl Column<Alarm> for AlarmTableColumn {
     }
 }
 
+fn render_alarm_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let alarm_name = app.alarms_state.current_alarm.as_ref().unwrap();
+    let alarm = app
+        .alarms_state
+        .table
+        .items
+        .iter()
+        .find(|a| &a.name == alarm_name);
+
+    if let Some(alarm) = alarm {
+        let chunks = vertical([Constraint::Length(8), Constraint::Min(0)], area);
+
+        // Details section
+        let title = format_title(&format!("Alarm: {}", alarm.name));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let inner = block.inner(chunks[0]);
+        frame.render_widget(block, chunks[0]);
+
+        let text = vec![
+            Line::from(vec![
+                Span::styled("State: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(&alarm.state),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Description: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(&alarm.description),
+            ]),
+            Line::from(vec![
+                Span::styled("Metric: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(&alarm.metric_name),
+            ]),
+            Line::from(vec![
+                Span::styled("Namespace: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(&alarm.namespace),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Conditions: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(
+                    "{} {} {}",
+                    alarm.statistic, alarm.comparison_operator, alarm.threshold
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "State Reason: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(&alarm.state_reason),
+            ]),
+        ];
+
+        let paragraph = Paragraph::new(text);
+        frame.render_widget(paragraph, inner);
+
+        // Graph section - only render when data is available
+        if !app.alarms_state.metric_data.is_empty() {
+            // Render chart using common monitoring component
+            let chart = crate::ui::monitoring::MetricChart {
+                title: &alarm.metric_name,
+                data: &app.alarms_state.metric_data,
+                y_axis_label: "",
+                x_axis_label: None,
+            };
+            crate::ui::monitoring::render_monitoring_tab(
+                frame,
+                chunks[1],
+                &[chart],
+                &[],
+                &[],
+                &[],
+                0,
+            );
+        }
+    }
+}
+
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
+
+    // If an alarm is selected, render detail view
+    if app.alarms_state.current_alarm.is_some() {
+        render_alarm_detail(frame, app, area);
+        return;
+    }
 
     let chunks = vertical(
         [

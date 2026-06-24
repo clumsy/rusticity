@@ -34,7 +34,7 @@ impl CloudTrailClient {
         )>,
         Option<String>,
     )> {
-        let client = self.config.cloudtrail_client().await;
+        let client = self.config.cloudtrail_client();
 
         let mut request = client.lookup_events();
         if let Some(max) = max_results {
@@ -154,7 +154,7 @@ impl CloudTrailClient {
 
     /// Fetch minimal data (1 event) just to get the next token
     pub async fn get_next_token(&self, current_token: String) -> Result<Option<String>> {
-        let client = self.config.cloudtrail_client().await;
+        let client = self.config.cloudtrail_client();
         let resp = client
             .lookup_events()
             .max_results(1)

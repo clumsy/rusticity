@@ -10,7 +10,7 @@ impl IamClient {
     }
 
     pub async fn list_users(&self) -> Result<Vec<aws_sdk_iam::types::User>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let mut users = Vec::new();
         let mut marker = None;
@@ -39,7 +39,7 @@ impl IamClient {
     }
 
     pub async fn list_roles(&self) -> Result<Vec<aws_sdk_iam::types::Role>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let mut roles = Vec::new();
         let mut marker = None;
@@ -68,7 +68,7 @@ impl IamClient {
     }
 
     pub async fn list_groups(&self) -> Result<Vec<aws_sdk_iam::types::Group>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let mut groups = Vec::new();
         let mut marker = None;
@@ -100,7 +100,7 @@ impl IamClient {
         &self,
         role_name: &str,
     ) -> Result<Vec<aws_sdk_iam::types::AttachedPolicy>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_attached_role_policies()
@@ -116,7 +116,7 @@ impl IamClient {
         &self,
         group_name: &str,
     ) -> Result<Vec<aws_sdk_iam::types::AttachedPolicy>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_attached_group_policies()
@@ -129,7 +129,7 @@ impl IamClient {
     }
 
     pub async fn list_role_policies(&self, role_name: &str) -> Result<Vec<String>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_role_policies()
@@ -142,7 +142,7 @@ impl IamClient {
     }
 
     pub async fn get_group(&self, group_name: &str) -> Result<usize, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .get_group()
@@ -158,7 +158,7 @@ impl IamClient {
         &self,
         group_name: &str,
     ) -> Result<Vec<aws_sdk_iam::types::User>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .get_group()
@@ -171,7 +171,7 @@ impl IamClient {
     }
 
     pub async fn list_group_policies(&self, group_name: &str) -> Result<Vec<String>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_group_policies()
@@ -188,7 +188,7 @@ impl IamClient {
         role_name: &str,
         policy_name: &str,
     ) -> Result<String, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .get_role_policy()
@@ -213,7 +213,7 @@ impl IamClient {
     }
 
     pub async fn get_policy_version(&self, policy_arn: &str) -> Result<String, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         // Get the policy to find the default version
         let policy_response = client
@@ -255,7 +255,7 @@ impl IamClient {
     }
 
     pub async fn get_role(&self, role_name: &str) -> Result<String, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .get_role()
@@ -282,7 +282,7 @@ impl IamClient {
     }
 
     pub async fn list_role_tags(&self, role_name: &str) -> Result<Vec<(String, String)>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_role_tags()
@@ -299,7 +299,7 @@ impl IamClient {
     }
 
     pub async fn list_user_tags(&self, user_name: &str) -> Result<Vec<(String, String)>, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_user_tags()
@@ -316,7 +316,7 @@ impl IamClient {
     }
 
     pub async fn get_login_profile(&self, user_name: &str) -> Result<bool, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         match client.get_login_profile().user_name(user_name).send().await {
             Ok(_) => Ok(true),
@@ -325,7 +325,7 @@ impl IamClient {
     }
 
     pub async fn list_access_keys(&self, user_name: &str) -> Result<usize, String> {
-        let client = self.config.iam_client().await;
+        let client = self.config.iam_client();
 
         let response = client
             .list_access_keys()

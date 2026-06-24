@@ -25,7 +25,7 @@ impl CloudFormationClient {
     }
 
     pub async fn list_stacks(&self, include_nested: bool) -> Result<Vec<Stack>> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
 
         let mut stacks = Vec::new();
         let mut next_token: Option<String> = None;
@@ -115,7 +115,7 @@ impl CloudFormationClient {
     }
 
     pub async fn describe_stack(&self, stack_name: &str) -> Result<StackDetails> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
 
         let response = client
             .describe_stacks()
@@ -180,14 +180,14 @@ pub struct StackDetails {
 
 impl CloudFormationClient {
     pub async fn get_template(&self, stack_name: &str) -> Result<String> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
         let response = client.get_template().stack_name(stack_name).send().await?;
 
         Ok(response.template_body().unwrap_or("").to_string())
     }
 
     pub async fn get_stack_parameters(&self, stack_name: &str) -> Result<Vec<StackParameter>> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
         let response = client
             .describe_stacks()
             .stack_name(stack_name)
@@ -212,7 +212,7 @@ impl CloudFormationClient {
     }
 
     pub async fn get_stack_outputs(&self, stack_name: &str) -> Result<Vec<StackOutput>> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
         let response = client
             .describe_stacks()
             .stack_name(stack_name)
@@ -240,7 +240,7 @@ impl CloudFormationClient {
     }
 
     pub async fn get_stack_resources(&self, stack_name: &str) -> Result<Vec<StackResource>> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
         let response = client
             .describe_stack_resources()
             .stack_name(stack_name)

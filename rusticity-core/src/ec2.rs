@@ -37,7 +37,7 @@ impl Ec2Client {
     }
 
     pub async fn list_instances(&self) -> Result<Vec<Instance>> {
-        let client = self.config.ec2_client().await;
+        let client = self.config.ec2_client();
         let mut instances = Vec::new();
         let mut next_token: Option<String> = None;
 
@@ -141,7 +141,7 @@ impl Ec2Client {
     }
 
     pub async fn list_tags(&self, instance_id: &str) -> Result<Vec<InstanceTag>> {
-        let client = self.config.ec2_client().await;
+        let client = self.config.ec2_client();
 
         let response = client
             .describe_tags()
@@ -167,7 +167,7 @@ impl Ec2Client {
     }
 
     pub async fn get_cpu_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 
@@ -206,7 +206,7 @@ impl Ec2Client {
     }
 
     pub async fn get_network_in_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 
@@ -245,7 +245,7 @@ impl Ec2Client {
     }
 
     pub async fn get_network_out_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 
@@ -287,7 +287,7 @@ impl Ec2Client {
         &self,
         instance_id: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 
@@ -329,7 +329,7 @@ impl Ec2Client {
         &self,
         instance_id: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 
@@ -371,7 +371,7 @@ impl Ec2Client {
         &self,
         instance_id: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
         let now = chrono::Utc::now();
         let start_time = now - chrono::Duration::hours(3);
 

@@ -12,7 +12,7 @@ pub struct CloudWatchClient {
 
 impl CloudWatchClient {
     pub async fn new(config: AwsConfig) -> Result<Self> {
-        let client = config.cloudwatch_logs_client().await;
+        let client = config.cloudwatch_logs_client();
         Ok(Self { client, config })
     }
 
@@ -136,7 +136,7 @@ impl CloudWatchClient {
             })
             .collect();
 
-        events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        events.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
 
         let next_backward_token = resp.next_backward_token().map(|s| s.to_string());
         let has_more = next_backward_token.is_some()

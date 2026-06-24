@@ -57,7 +57,7 @@ impl ApiGatewayClient {
         let mut all_apis = Vec::new();
 
         // List REST APIs (v1)
-        let v1_client = self.config.apigateway_client().await;
+        let v1_client = self.config.apigateway_client();
         let mut position: Option<String> = None;
 
         loop {
@@ -110,7 +110,7 @@ impl ApiGatewayClient {
         }
 
         // List HTTP/WebSocket APIs (v2)
-        let v2_client = self.config.apigatewayv2_client().await;
+        let v2_client = self.config.apigatewayv2_client();
         let mut next_token: Option<String> = None;
 
         loop {
@@ -167,7 +167,7 @@ impl ApiGatewayClient {
     }
 
     pub async fn list_routes(&self, api_id: &str) -> Result<Vec<Route>> {
-        let v2_client = self.config.apigatewayv2_client().await;
+        let v2_client = self.config.apigatewayv2_client();
         let mut routes = Vec::new();
         let mut next_token: Option<String> = None;
 
@@ -210,7 +210,7 @@ impl ApiGatewayClient {
     }
 
     pub async fn list_resources(&self, api_id: &str) -> Result<Vec<Resource>> {
-        let v1_client = self.config.apigateway_client().await;
+        let v1_client = self.config.apigateway_client();
         let region = &self.config.region;
         let mut resources = Vec::new();
         let mut position: Option<String> = None;

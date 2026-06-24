@@ -1,11 +1,16 @@
 use anyhow::Result;
 
+/// ECR Public is a global service only available in us-east-1.
+pub const ECR_PUBLIC_REGION: &str = "us-east-1";
+
 #[derive(Clone, Debug)]
 pub struct AwsConfig {
     pub region: String,
     pub account_id: String,
     pub role_arn: String,
     pub region_auto_detected: bool,
+    /// Resolved SDK config — reused by all client factories to avoid re-running credential chain.
+    sdk_config: aws_config::SdkConfig,
 }
 
 impl AwsConfig {
@@ -40,19 +45,19 @@ impl AwsConfig {
             config_loader = config_loader.region(aws_config::Region::new(r.clone()));
         }
 
-        // Load config with timeout
-        let config = tokio::time::timeout(timeout, config_loader.load())
+        // Load config once — stored and reused for all client factories.
+        let sdk_config = tokio::time::timeout(timeout, config_loader.load())
             .await
             .map_err(|_| anyhow::anyhow!("Timeout loading AWS config"))?;
 
         // Double-check region is set
-        if config.region().is_none() {
+        if sdk_config.region().is_none() {
             return Err(anyhow::anyhow!("Missing Region"));
         }
 
         // Try to get identity with timeout
         let (account_id, role_arn) =
-            match tokio::time::timeout(timeout, Self::try_get_identity(&config)).await {
+            match tokio::time::timeout(timeout, Self::try_get_identity(&sdk_config)).await {
                 Ok(Ok((acc, role))) => {
                     tracing::info!("Loaded identity: account={}, role={}", acc, role);
                     (acc, role)
@@ -64,7 +69,7 @@ impl AwsConfig {
                 Err(_) => return Err(anyhow::anyhow!("Timeout getting AWS identity")),
             };
 
-        let (region_str, auto_detected) = match config.region() {
+        let (region_str, auto_detected) = match sdk_config.region() {
             Some(r) => (r.as_ref().to_string(), false),
             None => {
                 let fastest = Self::find_fastest_region().await?;
@@ -77,6 +82,7 @@ impl AwsConfig {
             account_id,
             role_arn,
             region_auto_detected: auto_detected,
+            sdk_config,
         })
     }
 
@@ -161,11 +167,18 @@ impl AwsConfig {
     }
 
     pub fn dummy(region: Option<String>) -> Self {
+        // Build a minimal SdkConfig with just the region — no credential resolution.
+        let region_str = region.unwrap_or_default();
+        let sdk_config = aws_config::SdkConfig::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(region_str.clone()))
+            .build();
         Self {
-            region: region.unwrap_or_default(),
+            region: region_str,
             account_id: "".to_string(),
             role_arn: "".to_string(),
             region_auto_detected: false,
+            sdk_config,
         }
     }
 
@@ -181,124 +194,95 @@ impl AwsConfig {
         Ok(identity.account().unwrap_or("").to_string())
     }
 
-    pub async fn s3_client(&self) -> aws_sdk_s3::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_s3::Client::new(&config)
+    // ── Client factories ──────────────────────────────────────────────────────
+    // All factories reuse self.sdk_config — credentials are already resolved,
+    // so these are instantaneous (no network calls).
+
+    pub fn s3_client(&self) -> aws_sdk_s3::Client {
+        aws_sdk_s3::Client::new(&self.sdk_config)
     }
 
     pub async fn s3_client_with_region(&self, region: &str) -> aws_sdk_s3::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        // Needs a different region — build a new config with the same credentials.
+        let config = aws_config::SdkConfig::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(region.to_string()))
-            .load()
-            .await;
+            .credentials_provider(
+                self.sdk_config
+                    .credentials_provider()
+                    .expect("credentials must be set")
+                    .clone(),
+            )
+            .build();
         aws_sdk_s3::Client::new(&config)
     }
 
-    pub async fn cloudformation_client(&self) -> aws_sdk_cloudformation::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_cloudformation::Client::new(&config)
+    pub fn cloudformation_client(&self) -> aws_sdk_cloudformation::Client {
+        aws_sdk_cloudformation::Client::new(&self.sdk_config)
     }
 
-    pub async fn cloudtrail_client(&self) -> aws_sdk_cloudtrail::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_cloudtrail::Client::new(&config)
+    pub fn cloudtrail_client(&self) -> aws_sdk_cloudtrail::Client {
+        aws_sdk_cloudtrail::Client::new(&self.sdk_config)
     }
 
-    pub async fn lambda_client(&self) -> aws_sdk_lambda::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_lambda::Client::new(&config)
+    pub fn lambda_client(&self) -> aws_sdk_lambda::Client {
+        aws_sdk_lambda::Client::new(&self.sdk_config)
     }
 
-    pub async fn iam_client(&self) -> aws_sdk_iam::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_iam::Client::new(&config)
+    pub fn iam_client(&self) -> aws_sdk_iam::Client {
+        aws_sdk_iam::Client::new(&self.sdk_config)
     }
 
-    pub async fn ecr_client(&self) -> aws_sdk_ecr::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_ecr::Client::new(&config)
+    pub fn ecr_client(&self) -> aws_sdk_ecr::Client {
+        aws_sdk_ecr::Client::new(&self.sdk_config)
     }
 
-    pub async fn ecr_public_client(&self) -> aws_sdk_ecrpublic::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
+    pub fn ecr_public_client(&self) -> aws_sdk_ecrpublic::Client {
+        // ECR Public is a global service only available in us-east-1.
+        // Reuse stored credentials but override region.
+        let config = aws_config::SdkConfig::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(ECR_PUBLIC_REGION))
+            .credentials_provider(
+                self.sdk_config
+                    .credentials_provider()
+                    .expect("credentials must be set")
+                    .clone(),
+            )
+            .build();
         aws_sdk_ecrpublic::Client::new(&config)
     }
 
-    pub async fn cloudwatch_client(&self) -> aws_sdk_cloudwatch::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_cloudwatch::Client::new(&config)
+    pub fn cloudwatch_client(&self) -> aws_sdk_cloudwatch::Client {
+        aws_sdk_cloudwatch::Client::new(&self.sdk_config)
     }
 
-    pub async fn sqs_client(&self) -> aws_sdk_sqs::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_sqs::Client::new(&config)
+    pub fn sqs_client(&self) -> aws_sdk_sqs::Client {
+        aws_sdk_sqs::Client::new(&self.sdk_config)
     }
 
-    pub async fn cloudwatch_logs_client(&self) -> aws_sdk_cloudwatchlogs::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_cloudwatchlogs::Client::new(&config)
+    pub fn cloudwatch_logs_client(&self) -> aws_sdk_cloudwatchlogs::Client {
+        aws_sdk_cloudwatchlogs::Client::new(&self.sdk_config)
     }
 
-    pub async fn pipes_client(&self) -> aws_sdk_pipes::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_pipes::Client::new(&config)
+    pub fn pipes_client(&self) -> aws_sdk_pipes::Client {
+        aws_sdk_pipes::Client::new(&self.sdk_config)
     }
 
-    pub async fn ec2_client(&self) -> aws_sdk_ec2::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_ec2::Client::new(&config)
+    pub fn ec2_client(&self) -> aws_sdk_ec2::Client {
+        aws_sdk_ec2::Client::new(&self.sdk_config)
     }
 
-    pub async fn apigateway_client(&self) -> aws_sdk_apigateway::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_apigateway::Client::new(&config)
+    pub fn apigateway_client(&self) -> aws_sdk_apigateway::Client {
+        aws_sdk_apigateway::Client::new(&self.sdk_config)
     }
 
-    pub async fn apigatewayv2_client(&self) -> aws_sdk_apigatewayv2::Client {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(self.region.clone()))
-            .load()
-            .await;
-        aws_sdk_apigatewayv2::Client::new(&config)
+    pub fn apigatewayv2_client(&self) -> aws_sdk_apigatewayv2::Client {
+        aws_sdk_apigatewayv2::Client::new(&self.sdk_config)
+    }
+
+    pub fn alarms_client(&self) -> aws_sdk_cloudwatch::Client {
+        aws_sdk_cloudwatch::Client::new(&self.sdk_config)
     }
 }
 
@@ -370,5 +354,25 @@ mod tests {
         assert_eq!(config.account_id, "");
         assert_eq!(config.role_arn, "");
         assert!(!config.region_auto_detected);
+    }
+
+    #[test]
+    fn test_ecr_public_region_is_us_east_1() {
+        // ECR Public is a global service — must always use us-east-1 regardless of user region.
+        assert_eq!(ECR_PUBLIC_REGION, "us-east-1");
+    }
+
+    #[test]
+    fn test_client_factories_are_sync() {
+        // All client factories (except s3_client_with_region) must be sync —
+        // they should not do any async work after credentials are resolved.
+        let config = AwsConfig::dummy(Some("us-east-1".to_string()));
+        let _ = config.s3_client();
+        let _ = config.ecr_client();
+        let _ = config.cloudwatch_client();
+        let _ = config.lambda_client();
+        let _ = config.iam_client();
+        let _ = config.sqs_client();
+        let _ = config.ec2_client();
     }
 }

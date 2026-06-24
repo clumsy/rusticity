@@ -52,7 +52,7 @@ impl LambdaClient {
     }
 
     pub async fn list_functions(&self) -> Result<Vec<LambdaFunction>> {
-        let client = self.config.lambda_client().await;
+        let client = self.config.lambda_client();
 
         let mut functions = Vec::new();
         let mut next_marker: Option<String> = None;
@@ -137,7 +137,7 @@ impl LambdaClient {
     }
 
     pub async fn list_applications(&self) -> Result<Vec<LambdaApplication>> {
-        let client = self.config.cloudformation_client().await;
+        let client = self.config.cloudformation_client();
 
         let mut applications = Vec::new();
         let mut next_token: Option<String> = None;
@@ -190,7 +190,7 @@ impl LambdaClient {
     }
 
     pub async fn list_versions(&self, function_name: &str) -> Result<Vec<LambdaVersion>> {
-        let client = self.config.lambda_client().await;
+        let client = self.config.lambda_client();
 
         let mut versions = Vec::new();
         let mut next_marker: Option<String> = None;
@@ -297,7 +297,7 @@ pub struct LambdaApplication {
 
 impl LambdaClient {
     pub async fn list_aliases(&self, function_name: &str) -> Result<Vec<LambdaAlias>> {
-        let client = self.config.lambda_client().await;
+        let client = self.config.lambda_client();
         let response = client
             .list_aliases()
             .function_name(function_name)
@@ -341,7 +341,7 @@ impl LambdaClient {
         function_name: &str,
         resource: Option<&str>,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -402,7 +402,7 @@ impl LambdaClient {
         function_name: &str,
         stat: aws_sdk_cloudwatch::types::Statistic,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -453,7 +453,7 @@ impl LambdaClient {
     }
 
     pub async fn get_errors_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -498,7 +498,7 @@ impl LambdaClient {
     }
 
     pub async fn get_throttles_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -546,7 +546,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -594,7 +594,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -643,7 +643,7 @@ impl LambdaClient {
         function_name: &str,
         stat: aws_sdk_cloudwatch::types::Statistic,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -697,7 +697,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -745,7 +745,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -793,7 +793,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -841,7 +841,7 @@ impl LambdaClient {
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -886,7 +886,7 @@ impl LambdaClient {
     }
 
     pub async fn get_iterator_age_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()

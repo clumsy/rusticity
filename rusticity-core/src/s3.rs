@@ -11,7 +11,7 @@ impl S3Client {
     }
 
     pub async fn list_buckets(&self) -> Result<Vec<(String, String, String)>> {
-        let client = self.config.s3_client().await;
+        let client = self.config.s3_client();
         let resp = client.list_buckets().send().await?;
 
         let buckets: Vec<(String, String, String)> = resp
@@ -28,7 +28,7 @@ impl S3Client {
     }
 
     pub async fn get_bucket_location(&self, bucket: &str) -> Result<String> {
-        let client = self.config.s3_client().await;
+        let client = self.config.s3_client();
         let region = match client.get_bucket_location().bucket(bucket).send().await {
             Ok(resp) => match resp.location_constraint() {
                 Some(loc) => {

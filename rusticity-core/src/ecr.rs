@@ -31,7 +31,7 @@ impl EcrClient {
     }
 
     pub async fn list_private_repositories(&self) -> Result<Vec<EcrRepository>> {
-        let client = self.config.ecr_client().await;
+        let client = self.config.ecr_client();
 
         let mut repositories = Vec::new();
         let mut next_token: Option<String> = None;
@@ -84,7 +84,7 @@ impl EcrClient {
     }
 
     pub async fn list_public_repositories(&self) -> Result<Vec<EcrRepository>> {
-        let client = self.config.ecr_public_client().await;
+        let client = self.config.ecr_public_client();
 
         let mut repositories = Vec::new();
         let mut next_token: Option<String> = None;
@@ -129,7 +129,7 @@ impl EcrClient {
         repository_name: &str,
         repository_uri: &str,
     ) -> Result<Vec<EcrImage>> {
-        let client = self.config.ecr_client().await;
+        let client = self.config.ecr_client();
 
         let mut images = Vec::new();
         let mut next_token: Option<String> = None;

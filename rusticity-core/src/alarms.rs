@@ -33,7 +33,7 @@ impl AlarmsClient {
             String,
         )>,
     > {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
 
         let resp = client.describe_alarms().send().await?;
 
@@ -126,7 +126,7 @@ impl AlarmsClient {
         start_time: chrono::DateTime<chrono::Utc>,
         end_time: chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<(i64, f64)>> {
-        let client = self.config.cloudwatch_client().await;
+        let client = self.config.cloudwatch_client();
 
         let resp = client
             .get_metric_statistics()

@@ -63,7 +63,7 @@ impl SqsClient {
     }
 
     pub async fn list_lambda_triggers(&self, queue_arn: &str) -> Result<Vec<LambdaTrigger>> {
-        let lambda_client = self.config.lambda_client().await;
+        let lambda_client = self.config.lambda_client();
 
         let response = lambda_client
             .list_event_source_mappings()
@@ -93,7 +93,7 @@ impl SqsClient {
     }
 
     pub async fn list_queues(&self, prefix: &str) -> Result<Vec<SqsQueue>> {
-        let client = self.config.sqs_client().await;
+        let client = self.config.sqs_client();
 
         let mut request = client.list_queues();
         if !prefix.is_empty() {
@@ -238,7 +238,7 @@ impl SqsClient {
         &self,
         queue_url: &str,
     ) -> Result<(String, String, String, String, String)> {
-        let client = self.config.sqs_client().await;
+        let client = self.config.sqs_client();
 
         match client
             .list_message_move_tasks()
@@ -285,7 +285,7 @@ impl SqsClient {
     }
 
     pub async fn get_queue_arn(&self, queue_url: &str) -> Result<String> {
-        let client = self.config.sqs_client().await;
+        let client = self.config.sqs_client();
 
         let response = client
             .get_queue_attributes()
@@ -304,7 +304,7 @@ impl SqsClient {
     }
 
     pub async fn list_pipes(&self, queue_arn: &str) -> Result<Vec<EventBridgePipe>> {
-        let pipes_client = self.config.pipes_client().await;
+        let pipes_client = self.config.pipes_client();
 
         let response = pipes_client
             .list_pipes()
@@ -334,7 +334,7 @@ impl SqsClient {
     }
 
     pub async fn list_tags(&self, queue_arn: &str) -> Result<Vec<QueueTag>> {
-        let client = self.config.sqs_client().await;
+        let client = self.config.sqs_client();
 
         let response = client.list_queue_tags().queue_url(queue_arn).send().await?;
 
@@ -349,7 +349,7 @@ impl SqsClient {
     }
 
     pub async fn get_queue_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -396,7 +396,7 @@ impl SqsClient {
     }
 
     pub async fn get_queue_delayed_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -443,7 +443,7 @@ impl SqsClient {
     }
 
     pub async fn get_queue_not_visible_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -490,7 +490,7 @@ impl SqsClient {
     }
 
     pub async fn get_queue_visible_metrics(&self, queue_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -539,7 +539,7 @@ impl SqsClient {
         &self,
         queue_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -588,7 +588,7 @@ impl SqsClient {
         &self,
         queue_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -637,7 +637,7 @@ impl SqsClient {
         &self,
         queue_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -686,7 +686,7 @@ impl SqsClient {
         &self,
         queue_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()
@@ -735,7 +735,7 @@ impl SqsClient {
         &self,
         queue_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client().await;
+        let cw_client = self.config.cloudwatch_client();
 
         let end_time = aws_smithy_types::DateTime::from_secs(
             std::time::SystemTime::now()

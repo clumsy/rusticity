@@ -1,3 +1,6 @@
+pub mod applications;
+pub mod functions;
+
 use crate::common::{format_bytes, translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::lambda::{ApplicationDetailTab, DetailTab};
 use crate::ui::table;
@@ -1085,6 +1088,24 @@ impl DeploymentColumn {
 }
 
 impl table::Column<Deployment> for DeploymentColumn {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::Deployment => "column.lambda.deployment.deployment",
+            Self::ResourceType => "column.lambda.deployment.resource_type",
+            Self::LastUpdated => "column.lambda.deployment.last_updated",
+            Self::Status => "column.lambda.deployment.status",
+        }
+    }
+
+    fn default_name(&self) -> &'static str {
+        match self {
+            Self::Deployment => "Deployment",
+            Self::ResourceType => "Resource type",
+            Self::LastUpdated => "Last updated",
+            Self::Status => "Status",
+        }
+    }
+
     fn width(&self) -> u16 {
         let translated = translate_column(self.id(), self.default_name());
         translated.len().max(match self {
@@ -1185,6 +1206,24 @@ impl ResourceColumn {
 }
 
 impl table::Column<Resource> for ResourceColumn {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::LogicalId => "column.lambda.resource.logical_id",
+            Self::PhysicalId => "column.lambda.resource.physical_id",
+            Self::Type => "column.lambda.resource.type",
+            Self::LastModified => "column.lambda.resource.last_modified",
+        }
+    }
+
+    fn default_name(&self) -> &'static str {
+        match self {
+            Self::LogicalId => "Logical ID",
+            Self::PhysicalId => "Physical ID",
+            Self::Type => "Type",
+            Self::LastModified => "Last Modified",
+        }
+    }
+
     fn width(&self) -> u16 {
         match self {
             Self::LogicalId => 30,
@@ -1285,6 +1324,28 @@ mod column_tests {
                 "ResourceColumn ID '{}' should start with 'column.lambda.resource.'",
                 col.id()
             );
+        }
+    }
+
+    #[test]
+    fn test_resource_column_trait_id_and_name_do_not_panic() {
+        // Regression: expanded_from_columns calls col.name() which calls the Column trait's
+        // default id() → panics if id()/default_name() are not implemented on the trait impl.
+        use crate::ui::table::Column as TraitColumn;
+        for col in ResourceColumn::all() {
+            let _ = TraitColumn::id(&col);
+            let _ = TraitColumn::default_name(&col);
+            let _ = TraitColumn::name(&col);
+        }
+    }
+
+    #[test]
+    fn test_deployment_column_trait_id_and_name_do_not_panic() {
+        use crate::ui::table::Column as TraitColumn;
+        for col in DeploymentColumn::all() {
+            let _ = TraitColumn::id(&col);
+            let _ = TraitColumn::default_name(&col);
+            let _ = TraitColumn::name(&col);
         }
     }
 }

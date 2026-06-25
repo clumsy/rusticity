@@ -361,8 +361,13 @@ impl InputFocus {
         filtered_count: usize,
     ) {
         if *self == InputFocus::Pagination {
-            let max_offset = filtered_count.saturating_sub(page_size);
-            *selected = (*selected + page_size).min(max_offset);
+            // max = start of last page, e.g. 754 items / 50 per page → last page starts at 750
+            let last_page_start = if filtered_count > page_size {
+                ((filtered_count - 1) / page_size) * page_size
+            } else {
+                0
+            };
+            *selected = (*selected + page_size).min(last_page_start);
             *scroll_offset = *selected;
         }
     }

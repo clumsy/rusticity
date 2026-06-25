@@ -604,21 +604,9 @@ impl App {
             } else if self.current_service == Service::SqsQueues {
                 self.sqs_state.queues.reset();
             } else if self.current_service == Service::LambdaFunctions {
-                if self.lambda_state.current_version.is_some()
-                    || self.lambda_state.current_function.is_some()
-                {
-                    self.lambda_state.version_table.reset();
-                    self.lambda_state.alias_table.reset();
-                } else {
-                    self.lambda_state.table.reset();
-                }
+                crate::lambda::functions::apply_filter_reset(self);
             } else if self.current_service == Service::LambdaApplications {
-                if self.lambda_application_state.current_application.is_some() {
-                    self.lambda_application_state.deployments.reset();
-                    self.lambda_application_state.resources.reset();
-                } else {
-                    self.lambda_application_state.table.reset();
-                }
+                crate::lambda::applications::apply_filter_reset(self);
             } else if self.current_service == Service::CloudFormationStacks {
                 self.cfn_state.table.reset();
             } else if self.current_service == Service::IamUsers {
@@ -1226,7 +1214,7 @@ impl App {
                         }
                     }
                     Service::LambdaFunctions => {
-                        self.lambda_state.table.reset();
+                        crate::lambda::functions::apply_filter_reset(self);
                     }
                     Service::SqsQueues => {
                         self.sqs_state.queues.reset();
@@ -1253,7 +1241,7 @@ impl App {
                         self.apig_state.apis.reset();
                     }
                     Service::LambdaApplications => {
-                        self.lambda_application_state.table.reset();
+                        crate::lambda::applications::apply_filter_reset(self);
                     }
                     _ => {}
                 }
@@ -1460,19 +1448,7 @@ impl App {
                     let is_pagination_focused = if self.current_service
                         == Service::LambdaApplications
                     {
-                        if self.lambda_application_state.current_application.is_some() {
-                            if self.lambda_application_state.detail_tab
-                                == LambdaApplicationDetailTab::Deployments
-                            {
-                                self.lambda_application_state.deployment_input_focus
-                                    == InputFocus::Pagination
-                            } else {
-                                self.lambda_application_state.resource_input_focus
-                                    == InputFocus::Pagination
-                            }
-                        } else {
-                            self.lambda_application_state.input_focus == InputFocus::Pagination
-                        }
+                        crate::lambda::applications::is_pagination_focused(self)
                     } else if self.current_service == Service::CloudFormationStacks {
                         self.cfn_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::IamRoles
@@ -1496,15 +1472,7 @@ impl App {
                     {
                         crate::ecr::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::LambdaFunctions {
-                        if self.lambda_state.current_function.is_some()
-                            && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                        {
-                            self.lambda_state.version_input_focus == InputFocus::Pagination
-                        } else if self.lambda_state.current_function.is_none() {
-                            self.lambda_state.input_focus == InputFocus::Pagination
-                        } else {
-                            false
-                        }
+                        crate::lambda::functions::is_pagination_focused(self)
                     } else if self.current_service == Service::SqsQueues {
                         if self.sqs_state.current_queue.is_some()
                             && (self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -1524,21 +1492,7 @@ impl App {
                     if is_pagination_focused && c.is_ascii_digit() {
                         self.page_input.push(c);
                     } else if self.current_service == Service::LambdaApplications {
-                        let is_input_focused =
-                            if self.lambda_application_state.current_application.is_some() {
-                                if self.lambda_application_state.detail_tab
-                                    == LambdaApplicationDetailTab::Deployments
-                                {
-                                    self.lambda_application_state.deployment_input_focus
-                                        == InputFocus::Filter
-                                } else {
-                                    self.lambda_application_state.resource_input_focus
-                                        == InputFocus::Filter
-                                }
-                            } else {
-                                self.lambda_application_state.input_focus == InputFocus::Filter
-                            };
-                        if is_input_focused {
+                        if crate::lambda::applications::is_filter_focused(self) {
                             self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::CloudFormationStacks {
@@ -1589,25 +1543,8 @@ impl App {
                         if self.apig_state.input_focus == InputFocus::Filter {
                             self.apply_filter_operation(|f| f.push(c));
                         }
-                    } else if self.current_service == Service::LambdaFunctions
-                        && self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
-                    {
-                        if self.lambda_state.alias_input_focus == InputFocus::Filter {
-                            self.apply_filter_operation(|f| f.push(c));
-                        }
-                    } else if self.current_service == Service::LambdaFunctions
-                        && self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        if self.lambda_state.version_input_focus == InputFocus::Filter {
-                            self.apply_filter_operation(|f| f.push(c));
-                        }
-                    } else if self.current_service == Service::LambdaFunctions
-                        && self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    {
-                        if self.lambda_state.alias_input_focus == InputFocus::Filter {
+                    } else if self.current_service == Service::LambdaFunctions {
+                        if crate::lambda::functions::filter_char_allowed(self) {
                             self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::SqsQueues
@@ -2208,165 +2145,9 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::LambdaFunctions {
-                    let idx = self.column_selector_index;
-                    // Check if we're in Versions tab
-                    if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        // Version columns
-                        if idx > 0 && idx <= self.lambda_state.version_column_ids.len() {
-                            if let Some(col) = self.lambda_state.version_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .lambda_state
-                                    .version_visible_column_ids
-                                    .iter()
-                                    .position(|c| *c == *col)
-                                {
-                                    self.lambda_state.version_visible_column_ids.remove(pos);
-                                } else {
-                                    self.lambda_state
-                                        .version_visible_column_ids
-                                        .push(col.clone());
-                                }
-                            }
-                        } else if idx == self.lambda_state.version_column_ids.len() + 3 {
-                            self.lambda_state.version_table.page_size = PageSize::Ten;
-                        } else if idx == self.lambda_state.version_column_ids.len() + 4 {
-                            self.lambda_state.version_table.page_size = PageSize::TwentyFive;
-                        } else if idx == self.lambda_state.version_column_ids.len() + 5 {
-                            self.lambda_state.version_table.page_size = PageSize::Fifty;
-                        } else if idx == self.lambda_state.version_column_ids.len() + 6 {
-                            self.lambda_state.version_table.page_size = PageSize::OneHundred;
-                        }
-                    } else if (self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Aliases)
-                        || (self.lambda_state.current_version.is_some()
-                            && self.lambda_state.detail_tab == LambdaDetailTab::Configuration)
-                    {
-                        // Alias columns
-                        if idx > 0 && idx <= self.lambda_state.alias_column_ids.len() {
-                            if let Some(col) = self.lambda_state.alias_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .lambda_state
-                                    .alias_visible_column_ids
-                                    .iter()
-                                    .position(|c| *c == *col)
-                                {
-                                    self.lambda_state.alias_visible_column_ids.remove(pos);
-                                } else {
-                                    self.lambda_state.alias_visible_column_ids.push(col.clone());
-                                }
-                            }
-                        } else if idx == self.lambda_state.alias_column_ids.len() + 3 {
-                            self.lambda_state.alias_table.page_size = PageSize::Ten;
-                        } else if idx == self.lambda_state.alias_column_ids.len() + 4 {
-                            self.lambda_state.alias_table.page_size = PageSize::TwentyFive;
-                        } else if idx == self.lambda_state.alias_column_ids.len() + 5 {
-                            self.lambda_state.alias_table.page_size = PageSize::Fifty;
-                        } else if idx == self.lambda_state.alias_column_ids.len() + 6 {
-                            self.lambda_state.alias_table.page_size = PageSize::OneHundred;
-                        }
-                    } else {
-                        // Function columns
-                        if idx > 0 && idx <= self.lambda_state.function_column_ids.len() {
-                            if let Some(col) = self.lambda_state.function_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .lambda_state
-                                    .function_visible_column_ids
-                                    .iter()
-                                    .position(|c| *c == *col)
-                                {
-                                    self.lambda_state.function_visible_column_ids.remove(pos);
-                                } else {
-                                    self.lambda_state.function_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.lambda_state.function_column_ids.len() + 3 {
-                            self.lambda_state.table.page_size = PageSize::Ten;
-                        } else if idx == self.lambda_state.function_column_ids.len() + 4 {
-                            self.lambda_state.table.page_size = PageSize::TwentyFive;
-                        } else if idx == self.lambda_state.function_column_ids.len() + 5 {
-                            self.lambda_state.table.page_size = PageSize::Fifty;
-                        } else if idx == self.lambda_state.function_column_ids.len() + 6 {
-                            self.lambda_state.table.page_size = PageSize::OneHundred;
-                        }
-                    }
+                    crate::lambda::functions::toggle_column(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    if self.lambda_application_state.current_application.is_some() {
-                        // In detail view - handle resource or deployment columns
-                        if self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Overview
-                        {
-                            // Resources columns
-                            let idx = self.column_selector_index;
-                            if idx > 0 && idx <= self.lambda_resource_column_ids.len() {
-                                if let Some(col) = self.lambda_resource_column_ids.get(idx - 1) {
-                                    if let Some(pos) = self
-                                        .lambda_resource_visible_column_ids
-                                        .iter()
-                                        .position(|c| c == col)
-                                    {
-                                        self.lambda_resource_visible_column_ids.remove(pos);
-                                    } else {
-                                        self.lambda_resource_visible_column_ids.push(*col);
-                                    }
-                                }
-                            } else if idx == self.lambda_resource_column_ids.len() + 3 {
-                                self.lambda_application_state.resources.page_size = PageSize::Ten;
-                            } else if idx == self.lambda_resource_column_ids.len() + 4 {
-                                self.lambda_application_state.resources.page_size =
-                                    PageSize::TwentyFive;
-                            } else if idx == self.lambda_resource_column_ids.len() + 5 {
-                                self.lambda_application_state.resources.page_size = PageSize::Fifty;
-                            }
-                        } else {
-                            // Deployments columns
-                            let idx = self.column_selector_index;
-                            if idx > 0 && idx <= self.lambda_deployment_column_ids.len() {
-                                if let Some(col) = self.lambda_deployment_column_ids.get(idx - 1) {
-                                    if let Some(pos) = self
-                                        .lambda_deployment_visible_column_ids
-                                        .iter()
-                                        .position(|c| c == col)
-                                    {
-                                        self.lambda_deployment_visible_column_ids.remove(pos);
-                                    } else {
-                                        self.lambda_deployment_visible_column_ids.push(*col);
-                                    }
-                                }
-                            } else if idx == self.lambda_deployment_column_ids.len() + 3 {
-                                self.lambda_application_state.deployments.page_size = PageSize::Ten;
-                            } else if idx == self.lambda_deployment_column_ids.len() + 4 {
-                                self.lambda_application_state.deployments.page_size =
-                                    PageSize::TwentyFive;
-                            } else if idx == self.lambda_deployment_column_ids.len() + 5 {
-                                self.lambda_application_state.deployments.page_size =
-                                    PageSize::Fifty;
-                            }
-                        }
-                    } else {
-                        // In list view - handle application columns
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.lambda_application_column_ids.len() {
-                            if let Some(col) = self.lambda_application_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .lambda_application_visible_column_ids
-                                    .iter()
-                                    .position(|c| *c == *col)
-                                {
-                                    self.lambda_application_visible_column_ids.remove(pos);
-                                } else {
-                                    self.lambda_application_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.lambda_application_column_ids.len() + 3 {
-                            self.lambda_application_state.table.page_size = PageSize::Ten;
-                        } else if idx == self.lambda_application_column_ids.len() + 4 {
-                            self.lambda_application_state.table.page_size = PageSize::TwentyFive;
-                        } else if idx == self.lambda_application_column_ids.len() + 5 {
-                            self.lambda_application_state.table.page_size = PageSize::Fifty;
-                        }
-                    }
+                    crate::lambda::applications::toggle_column(self);
                 } else if self.view_mode == ViewMode::Events {
                     if let Some(col) = self.cw_log_event_column_ids.get(self.column_selector_index)
                     {
@@ -2688,21 +2469,9 @@ impl App {
                 {
                     crate::ecr::actions::next_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
-                    // Lambda: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.lambda_state.function_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
+                    crate::lambda::functions::next_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    // Lambda Applications: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.lambda_application_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
+                    crate::lambda::applications::next_preferences(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     // CloudFormation: Columns(0), PageSize(columns.len() + 2)
                     let page_size_idx = self.cfn_column_ids.len() + 2;
@@ -2919,19 +2688,9 @@ impl App {
                 {
                     crate::ecr::actions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
-                    let page_size_idx = self.lambda_state.function_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::lambda::functions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    let page_size_idx = self.lambda_application_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::lambda::applications::prev_preferences(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     let page_size_idx = self.cfn_column_ids.len() + 2;
                     if self.column_selector_index >= page_size_idx {
@@ -3139,8 +2898,7 @@ impl App {
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
-                    self.lambda_application_state.detail_tab =
-                        self.lambda_application_state.detail_tab.next();
+                    crate::lambda::applications::next_detail_tab(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                 {
@@ -3187,25 +2945,7 @@ impl App {
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
-                    if self.lambda_state.current_version.is_some() {
-                        // Version view: use VersionDetailTab enum
-                        self.lambda_state.version_detail_tab =
-                            self.lambda_state.version_detail_tab.next();
-                        self.lambda_state.detail_tab =
-                            self.lambda_state.version_detail_tab.to_detail_tab();
-                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
-                            self.lambda_state.set_metrics_loading(true);
-                            self.lambda_state.set_monitoring_scroll(0);
-                            self.lambda_state.clear_metrics();
-                        }
-                    } else {
-                        self.lambda_state.detail_tab = self.lambda_state.detail_tab.next();
-                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
-                            self.lambda_state.set_metrics_loading(true);
-                            self.lambda_state.set_monitoring_scroll(0);
-                            self.lambda_state.clear_metrics();
-                        }
-                    }
+                    crate::lambda::functions::next_detail_tab(self);
                 } else if self.current_service == Service::CloudFormationStacks
                     && self.cfn_state.current_stack.is_some()
                 {
@@ -3244,8 +2984,7 @@ impl App {
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
-                    self.lambda_application_state.detail_tab =
-                        self.lambda_application_state.detail_tab.prev();
+                    crate::lambda::applications::prev_detail_tab(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                 {
@@ -3276,25 +3015,7 @@ impl App {
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
-                    if self.lambda_state.current_version.is_some() {
-                        // Version view: use VersionDetailTab enum
-                        self.lambda_state.version_detail_tab =
-                            self.lambda_state.version_detail_tab.prev();
-                        self.lambda_state.detail_tab =
-                            self.lambda_state.version_detail_tab.to_detail_tab();
-                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
-                            self.lambda_state.set_metrics_loading(true);
-                            self.lambda_state.set_monitoring_scroll(0);
-                            self.lambda_state.clear_metrics();
-                        }
-                    } else {
-                        self.lambda_state.detail_tab = self.lambda_state.detail_tab.prev();
-                        if self.lambda_state.detail_tab == LambdaDetailTab::Monitor {
-                            self.lambda_state.set_metrics_loading(true);
-                            self.lambda_state.set_monitoring_scroll(0);
-                            self.lambda_state.clear_metrics();
-                        }
-                    }
+                    crate::lambda::functions::prev_detail_tab(self);
                 } else if self.current_service == Service::CloudFormationStacks
                     && self.cfn_state.current_stack.is_some()
                 {
@@ -3332,32 +3053,10 @@ impl App {
                     }
                 } else if self.current_service == Service::LambdaFunctions {
                     self.mode = Mode::FilterInput;
-                    if self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
-                    {
-                        self.lambda_state.alias_input_focus = InputFocus::Filter;
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        self.lambda_state.version_input_focus = InputFocus::Filter;
-                    } else if self.lambda_state.current_function.is_none() {
-                        self.lambda_state.input_focus = InputFocus::Filter;
-                    }
+                    crate::lambda::functions::start_filter(self);
                 } else if self.current_service == Service::LambdaApplications {
                     self.mode = Mode::FilterInput;
-                    if self.lambda_application_state.current_application.is_some() {
-                        // In detail view - check which tab
-                        if self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Overview
-                        {
-                            self.lambda_application_state.resource_input_focus = InputFocus::Filter;
-                        } else {
-                            self.lambda_application_state.deployment_input_focus =
-                                InputFocus::Filter;
-                        }
-                    } else {
-                        self.lambda_application_state.input_focus = InputFocus::Filter;
-                    }
+                    crate::lambda::applications::start_filter(self);
                 } else if self.current_service == Service::IamRoles {
                     self.mode = Mode::FilterInput;
                 } else if self.current_service == Service::CloudFormationStacks {
@@ -3424,27 +3123,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
-                    use crate::ui::lambda::FILTER_CONTROLS;
-                    if self.lambda_application_state.current_application.is_some() {
-                        if self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Deployments
-                        {
-                            self.lambda_application_state.deployment_input_focus = self
-                                .lambda_application_state
-                                .deployment_input_focus
-                                .next(&FILTER_CONTROLS);
-                        } else {
-                            self.lambda_application_state.resource_input_focus = self
-                                .lambda_application_state
-                                .resource_input_focus
-                                .next(&FILTER_CONTROLS);
-                        }
-                    } else {
-                        self.lambda_application_state.input_focus = self
-                            .lambda_application_state
-                            .input_focus
-                            .next(&FILTER_CONTROLS);
-                    }
+                    crate::lambda::applications::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
@@ -3584,26 +3263,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
-                    use crate::ui::lambda::FILTER_CONTROLS;
-                    if self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
-                    {
-                        self.lambda_state.alias_input_focus =
-                            self.lambda_state.alias_input_focus.next(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        self.lambda_state.version_input_focus =
-                            self.lambda_state.version_input_focus.next(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    {
-                        self.lambda_state.alias_input_focus =
-                            self.lambda_state.alias_input_focus.next(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_none() {
-                        self.lambda_state.input_focus =
-                            self.lambda_state.input_focus.next(&FILTER_CONTROLS);
-                    }
+                    crate::lambda::functions::next_filter_focus(self);
                 }
             }
             Action::PrevFilterFocus => {
@@ -3625,27 +3285,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
-                    use crate::ui::lambda::FILTER_CONTROLS;
-                    if self.lambda_application_state.current_application.is_some() {
-                        if self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Deployments
-                        {
-                            self.lambda_application_state.deployment_input_focus = self
-                                .lambda_application_state
-                                .deployment_input_focus
-                                .prev(&FILTER_CONTROLS);
-                        } else {
-                            self.lambda_application_state.resource_input_focus = self
-                                .lambda_application_state
-                                .resource_input_focus
-                                .prev(&FILTER_CONTROLS);
-                        }
-                    } else {
-                        self.lambda_application_state.input_focus = self
-                            .lambda_application_state
-                            .input_focus
-                            .prev(&FILTER_CONTROLS);
-                    }
+                    crate::lambda::applications::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudFormationStacks
                 {
@@ -3770,26 +3410,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
-                    use crate::ui::lambda::FILTER_CONTROLS;
-                    if self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
-                    {
-                        self.lambda_state.alias_input_focus =
-                            self.lambda_state.alias_input_focus.prev(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        self.lambda_state.version_input_focus =
-                            self.lambda_state.version_input_focus.prev(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    {
-                        self.lambda_state.alias_input_focus =
-                            self.lambda_state.alias_input_focus.prev(&FILTER_CONTROLS);
-                    } else if self.lambda_state.current_function.is_none() {
-                        self.lambda_state.input_focus =
-                            self.lambda_state.input_focus.prev(&FILTER_CONTROLS);
-                    }
+                    crate::lambda::functions::prev_filter_focus(self);
                 }
             }
             Action::ToggleFilterCheckbox => {
@@ -4038,9 +3659,9 @@ impl App {
                     self.log_groups_state.loading = true;
                     self.insights_state.insights.query_completed = true;
                 } else if self.current_service == Service::LambdaFunctions {
-                    self.lambda_state.table.loading = true;
+                    crate::lambda::functions::refresh(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    self.lambda_application_state.table.loading = true;
+                    crate::lambda::applications::refresh(self);
                 } else if matches!(
                     self.view_mode,
                     ViewMode::Events | ViewMode::Detail | ViewMode::List
@@ -4065,10 +3686,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::yank(self);
                 } else if self.current_service == Service::LambdaFunctions {
-                    let filtered_functions = filtered_lambda_functions(self);
-                    if let Some(func) = self.lambda_state.table.get_selected(&filtered_functions) {
-                        copy_to_clipboard(&func.arn);
-                    }
+                    crate::lambda::functions::yank(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     if let Some(stack_name) = &self.cfn_state.current_stack {
                         // In detail view - copy current stack ARN
@@ -4347,19 +3965,13 @@ impl App {
                         self.update_current_tab_breadcrumb();
                     }
                 }
-                // Lambda: go back from version detail to function detail
+                // Lambda: go back from version/alias/function detail
                 else if self.current_service == Service::LambdaFunctions
-                    && self.lambda_state.current_version.is_some()
+                    && (self.lambda_state.current_version.is_some()
+                        || self.lambda_state.current_alias.is_some()
+                        || self.lambda_state.current_function.is_some())
                 {
-                    self.lambda_state.current_version = None;
-                    self.lambda_state.detail_tab = LambdaDetailTab::Versions;
-                }
-                // Lambda: go back from alias detail to function detail
-                else if self.current_service == Service::LambdaFunctions
-                    && self.lambda_state.current_alias.is_some()
-                {
-                    self.lambda_state.current_alias = None;
-                    self.lambda_state.detail_tab = LambdaDetailTab::Aliases;
+                    crate::lambda::functions::go_back(self);
                 }
                 // CloudWatch Alarms: go back from alarm detail to list
                 else if self.current_service == Service::CloudWatchAlarms
@@ -4370,19 +3982,11 @@ impl App {
                     self.view_mode = ViewMode::List;
                     self.update_current_tab_breadcrumb();
                 }
-                // Lambda: go back from function detail to list
-                else if self.current_service == Service::LambdaFunctions
-                    && self.lambda_state.current_function.is_some()
-                {
-                    self.lambda_state.current_function = None;
-                    self.update_current_tab_breadcrumb();
-                }
                 // Lambda Applications: go back from application detail to list
                 else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
-                    self.lambda_application_state.current_application = None;
-                    self.update_current_tab_breadcrumb();
+                    crate::lambda::applications::go_back(self);
                 }
                 // CloudFormation: go back from stack detail to list
                 else if self.current_service == Service::CloudFormationStacks
@@ -4606,16 +4210,10 @@ impl App {
                 parts.extend(crate::ecr::actions::breadcrumb(self));
             }
             Service::LambdaFunctions => {
-                parts.push("Lambda".to_string());
-                if let Some(func) = &self.lambda_state.current_function {
-                    parts.push(func.clone());
-                } else {
-                    parts.push("Functions".to_string());
-                }
+                parts.extend(crate::lambda::functions::breadcrumb(self));
             }
             Service::LambdaApplications => {
-                parts.push("Lambda".to_string());
-                parts.push("Applications".to_string());
+                parts.extend(crate::lambda::applications::breadcrumb());
             }
             Service::CloudFormationStacks => {
                 parts.push("CloudFormation".to_string());
@@ -4670,7 +4268,7 @@ impl App {
     }
 
     pub fn get_console_url(&self) -> String {
-        use crate::{cfn, cw, iam, lambda, s3};
+        use crate::{cfn, cw, iam, s3};
 
         match self.current_service {
             Service::CloudWatchLogGroups => {
@@ -4743,33 +4341,8 @@ impl App {
                 }
             }
             Service::EcrRepositories => crate::ecr::actions::console_url(self),
-            Service::LambdaFunctions => {
-                if let Some(func_name) = &self.lambda_state.current_function {
-                    if let Some(version) = &self.lambda_state.current_version {
-                        lambda::console_url_function_version(
-                            &self.config.region,
-                            func_name,
-                            version,
-                            &self.lambda_state.detail_tab,
-                        )
-                    } else {
-                        lambda::console_url_function_detail(&self.config.region, func_name)
-                    }
-                } else {
-                    lambda::console_url_functions(&self.config.region)
-                }
-            }
-            Service::LambdaApplications => {
-                if let Some(app_name) = &self.lambda_application_state.current_application {
-                    lambda::console_url_application_detail(
-                        &self.config.region,
-                        app_name,
-                        &self.lambda_application_state.detail_tab,
-                    )
-                } else {
-                    lambda::console_url_applications(&self.config.region)
-                }
-            }
+            Service::LambdaFunctions => crate::lambda::functions::console_url(self),
+            Service::LambdaApplications => crate::lambda::applications::console_url(self),
             Service::CloudFormationStacks => {
                 if let Some(stack_name) = &self.cfn_state.current_stack {
                     if let Some(stack) = self
@@ -4954,9 +4527,9 @@ impl App {
         } else if self.current_service == Service::SqsQueues {
             self.sqs_column_ids.len() - 1
         } else if self.current_service == Service::LambdaFunctions {
-            self.lambda_state.function_column_ids.len() + 6
+            crate::lambda::functions::column_selector_max(self)
         } else if self.current_service == Service::LambdaApplications {
-            self.lambda_application_column_ids.len() + 5
+            crate::lambda::applications::column_selector_max(self)
         } else if self.current_service == Service::CloudFormationStacks {
             self.cfn_column_ids.len() + 6
         } else if self.current_service == Service::IamUsers {
@@ -5010,9 +4583,9 @@ impl App {
         } else if self.current_service == Service::SqsQueues {
             self.sqs_column_ids.len()
         } else if self.current_service == Service::LambdaFunctions {
-            self.lambda_state.function_column_ids.len()
+            crate::lambda::functions::column_count(self)
         } else if self.current_service == Service::LambdaApplications {
-            self.lambda_application_column_ids.len()
+            crate::lambda::applications::column_count(self)
         } else if self.current_service == Service::CloudFormationStacks {
             self.cfn_column_ids.len()
         } else if self.current_service == Service::IamUsers {
@@ -5436,117 +5009,9 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::LambdaFunctions {
-                    if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Code
-                    {
-                        // Layer table navigation in Code tab
-                        if let Some(func_name) = &self.lambda_state.current_function {
-                            if let Some(func) = self
-                                .lambda_state
-                                .table
-                                .items
-                                .iter()
-                                .find(|f| f.name == *func_name)
-                            {
-                                let max = func.layers.len().saturating_sub(1);
-                                if !func.layers.is_empty() {
-                                    self.lambda_state.layer_selected =
-                                        (self.lambda_state.layer_selected + 1).min(max);
-                                }
-                            }
-                        }
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        // Version table navigation
-                        let filtered: Vec<_> = self
-                            .lambda_state
-                            .version_table
-                            .items
-                            .iter()
-                            .filter(|v| {
-                                self.lambda_state.version_table.filter.is_empty()
-                                    || v.version.to_lowercase().contains(
-                                        &self.lambda_state.version_table.filter.to_lowercase(),
-                                    )
-                                    || v.aliases.to_lowercase().contains(
-                                        &self.lambda_state.version_table.filter.to_lowercase(),
-                                    )
-                                    || v.description.to_lowercase().contains(
-                                        &self.lambda_state.version_table.filter.to_lowercase(),
-                                    )
-                            })
-                            .collect();
-                        if !filtered.is_empty() {
-                            self.lambda_state.version_table.selected =
-                                (self.lambda_state.version_table.selected + 1)
-                                    .min(filtered.len() - 1);
-                            self.lambda_state.version_table.snap_to_page();
-                        }
-                    } else if self.lambda_state.current_function.is_some()
-                        && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                            || (self.lambda_state.current_version.is_some()
-                                && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-                    {
-                        // Alias table navigation (both in Aliases tab and Version Configuration)
-                        let version_filter = self.lambda_state.current_version.clone();
-                        let filtered: Vec<_> = self
-                            .lambda_state
-                            .alias_table
-                            .items
-                            .iter()
-                            .filter(|a| {
-                                (version_filter.is_none()
-                                    || a.versions.contains(version_filter.as_ref().unwrap()))
-                                    && (self.lambda_state.alias_table.filter.is_empty()
-                                        || a.name.to_lowercase().contains(
-                                            &self.lambda_state.alias_table.filter.to_lowercase(),
-                                        )
-                                        || a.versions.to_lowercase().contains(
-                                            &self.lambda_state.alias_table.filter.to_lowercase(),
-                                        )
-                                        || a.description.to_lowercase().contains(
-                                            &self.lambda_state.alias_table.filter.to_lowercase(),
-                                        ))
-                            })
-                            .collect();
-                        if !filtered.is_empty() {
-                            self.lambda_state.alias_table.selected =
-                                (self.lambda_state.alias_table.selected + 1)
-                                    .min(filtered.len() - 1);
-                            self.lambda_state.alias_table.snap_to_page();
-                        }
-                    } else if self.lambda_state.current_function.is_none() {
-                        let filtered = filtered_lambda_functions(self);
-                        if !filtered.is_empty() {
-                            self.lambda_state.table.next_item(filtered.len());
-                            self.lambda_state.table.snap_to_page();
-                        }
-                    }
+                    crate::lambda::functions::next_item(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    if self.lambda_application_state.current_application.is_some() {
-                        if self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Overview
-                        {
-                            let len = self.lambda_application_state.resources.items.len();
-                            if len > 0 {
-                                self.lambda_application_state.resources.next_item(len);
-                            }
-                        } else {
-                            let len = self.lambda_application_state.deployments.items.len();
-                            if len > 0 {
-                                self.lambda_application_state.deployments.next_item(len);
-                            }
-                        }
-                    } else {
-                        let filtered = filtered_lambda_applications(self);
-                        if !filtered.is_empty() {
-                            self.lambda_application_state.table.selected =
-                                (self.lambda_application_state.table.selected + 1)
-                                    .min(filtered.len() - 1);
-                            self.lambda_application_state.table.snap_to_page();
-                        }
-                    }
+                    crate::lambda::applications::next_item(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     if self.cfn_state.current_stack.is_some()
                         && self.cfn_state.detail_tab == CfnDetailTab::Parameters
@@ -5841,15 +5306,12 @@ impl App {
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
                 {
-                    self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(1);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                     && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
                     && !self.lambda_state.is_metrics_loading()
                 {
-                    self.lambda_state.set_monitoring_scroll(
-                        self.lambda_state.monitoring_scroll().saturating_sub(1),
-                    );
+                    crate::lambda::functions::scroll_up(self);
                 } else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                     && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
@@ -5937,52 +5399,9 @@ impl App {
                         self.sqs_state.queues.prev_item();
                     }
                 } else if self.current_service == Service::LambdaFunctions {
-                    if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Code
-                    {
-                        // Layer table navigation in Code tab
-                        self.lambda_state.layer_selected =
-                            self.lambda_state.layer_selected.saturating_sub(1);
-                    } else if self.lambda_state.current_function.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                    {
-                        self.lambda_state.version_table.prev_item();
-                    } else if self.lambda_state.current_function.is_some()
-                        && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                            || (self.lambda_state.current_version.is_some()
-                                && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-                    {
-                        self.lambda_state.alias_table.prev_item();
-                    } else if self.lambda_state.current_function.is_none() {
-                        self.lambda_state.table.prev_item();
-                    }
+                    crate::lambda::functions::prev_item(self);
                 } else if self.current_service == Service::LambdaApplications {
-                    if self.lambda_application_state.current_application.is_some()
-                        && self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Overview
-                    {
-                        self.lambda_application_state.resources.selected = self
-                            .lambda_application_state
-                            .resources
-                            .selected
-                            .saturating_sub(1);
-                    } else if self.lambda_application_state.current_application.is_some()
-                        && self.lambda_application_state.detail_tab
-                            == LambdaApplicationDetailTab::Deployments
-                    {
-                        self.lambda_application_state.deployments.selected = self
-                            .lambda_application_state
-                            .deployments
-                            .selected
-                            .saturating_sub(1);
-                    } else {
-                        self.lambda_application_state.table.selected = self
-                            .lambda_application_state
-                            .table
-                            .selected
-                            .saturating_sub(1);
-                        self.lambda_application_state.table.snap_to_page();
-                    }
+                    crate::lambda::applications::prev_item(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     if self.cfn_state.current_stack.is_some()
                         && self.cfn_state.detail_tab == CfnDetailTab::Parameters
@@ -6164,112 +5583,11 @@ impl App {
             }
         } else if self.mode == Mode::FilterInput && self.current_service == Service::LambdaFunctions
         {
-            if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                && self.lambda_state.version_input_focus == InputFocus::Pagination
-            {
-                let page_size = self.lambda_state.version_table.page_size.value();
-                let filtered_count: usize = self
-                    .lambda_state
-                    .version_table
-                    .items
-                    .iter()
-                    .filter(|v| {
-                        self.lambda_state.version_table.filter.is_empty()
-                            || v.version
-                                .to_lowercase()
-                                .contains(&self.lambda_state.version_table.filter.to_lowercase())
-                            || v.aliases
-                                .to_lowercase()
-                                .contains(&self.lambda_state.version_table.filter.to_lowercase())
-                            || v.description
-                                .to_lowercase()
-                                .contains(&self.lambda_state.version_table.filter.to_lowercase())
-                    })
-                    .count();
-                let target = self.lambda_state.version_table.selected + page_size;
-                self.lambda_state.version_table.selected =
-                    target.min(filtered_count.saturating_sub(1));
-            } else if self.lambda_state.current_function.is_some()
-                && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    || (self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-                && self.lambda_state.alias_input_focus == InputFocus::Pagination
-            {
-                let page_size = self.lambda_state.alias_table.page_size.value();
-                let version_filter = self.lambda_state.current_version.clone();
-                let filtered_count = self
-                    .lambda_state
-                    .alias_table
-                    .items
-                    .iter()
-                    .filter(|a| {
-                        (version_filter.is_none()
-                            || a.versions.contains(version_filter.as_ref().unwrap()))
-                            && (self.lambda_state.alias_table.filter.is_empty()
-                                || a.name
-                                    .to_lowercase()
-                                    .contains(&self.lambda_state.alias_table.filter.to_lowercase())
-                                || a.versions
-                                    .to_lowercase()
-                                    .contains(&self.lambda_state.alias_table.filter.to_lowercase())
-                                || a.description
-                                    .to_lowercase()
-                                    .contains(&self.lambda_state.alias_table.filter.to_lowercase()))
-                    })
-                    .count();
-                let target = self.lambda_state.alias_table.selected + page_size;
-                self.lambda_state.alias_table.selected =
-                    target.min(filtered_count.saturating_sub(1));
-            } else if self.lambda_state.current_function.is_none() {
-                let page_size = self.lambda_state.table.page_size.value();
-                let filtered_count = filtered_lambda_functions(self).len();
-                self.lambda_state.input_focus.handle_page_down(
-                    &mut self.lambda_state.table.selected,
-                    &mut self.lambda_state.table.scroll_offset,
-                    page_size,
-                    filtered_count,
-                );
-            }
+            crate::lambda::functions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::LambdaApplications
         {
-            if self.lambda_application_state.current_application.is_some() {
-                if self.lambda_application_state.detail_tab
-                    == LambdaApplicationDetailTab::Deployments
-                {
-                    let page_size = self.lambda_application_state.deployments.page_size.value();
-                    let filtered_count = self.lambda_application_state.deployments.items.len();
-                    self.lambda_application_state
-                        .deployment_input_focus
-                        .handle_page_down(
-                            &mut self.lambda_application_state.deployments.selected,
-                            &mut self.lambda_application_state.deployments.scroll_offset,
-                            page_size,
-                            filtered_count,
-                        );
-                } else {
-                    let page_size = self.lambda_application_state.resources.page_size.value();
-                    let filtered_count = self.lambda_application_state.resources.items.len();
-                    self.lambda_application_state
-                        .resource_input_focus
-                        .handle_page_down(
-                            &mut self.lambda_application_state.resources.selected,
-                            &mut self.lambda_application_state.resources.scroll_offset,
-                            page_size,
-                            filtered_count,
-                        );
-                }
-            } else {
-                let page_size = self.lambda_application_state.table.page_size.value();
-                let filtered_count = filtered_lambda_applications(self).len();
-                self.lambda_application_state.input_focus.handle_page_down(
-                    &mut self.lambda_application_state.table.selected,
-                    &mut self.lambda_application_state.table.scroll_offset,
-                    page_size,
-                    filtered_count,
-                );
-            }
+            crate::lambda::applications::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
@@ -6300,8 +5618,7 @@ impl App {
             && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
             && !self.lambda_state.is_metrics_loading()
         {
-            self.lambda_state
-                .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
+            crate::lambda::functions::scroll_down(self);
         } else if self.current_service == Service::Ec2Instances
             && self.ec2_state.current_instance.is_some()
             && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
@@ -6433,11 +5750,9 @@ impl App {
                     filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter);
                 self.sqs_state.queues.page_down(filtered.len());
             } else if self.current_service == Service::LambdaFunctions {
-                let len = filtered_lambda_functions(self).len();
-                self.lambda_state.table.page_down(len);
+                crate::lambda::functions::page_down_normal(self);
             } else if self.current_service == Service::LambdaApplications {
-                let len = filtered_lambda_applications(self).len();
-                self.lambda_application_state.table.page_down(len);
+                crate::lambda::applications::page_down_normal(self);
             } else if self.current_service == Service::CloudFormationStacks {
                 if self.cfn_state.current_stack.is_some()
                     && self.cfn_state.detail_tab == CfnDetailTab::Parameters
@@ -6650,69 +5965,11 @@ impl App {
             }
         } else if self.mode == Mode::FilterInput && self.current_service == Service::LambdaFunctions
         {
-            if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                && self.lambda_state.version_input_focus == InputFocus::Pagination
-            {
-                let page_size = self.lambda_state.version_table.page_size.value();
-                self.lambda_state.version_table.selected = self
-                    .lambda_state
-                    .version_table
-                    .selected
-                    .saturating_sub(page_size);
-            } else if self.lambda_state.current_function.is_some()
-                && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    || (self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-                && self.lambda_state.alias_input_focus == InputFocus::Pagination
-            {
-                let page_size = self.lambda_state.alias_table.page_size.value();
-                self.lambda_state.alias_table.selected = self
-                    .lambda_state
-                    .alias_table
-                    .selected
-                    .saturating_sub(page_size);
-            } else if self.lambda_state.current_function.is_none() {
-                let page_size = self.lambda_state.table.page_size.value();
-                self.lambda_state.input_focus.handle_page_up(
-                    &mut self.lambda_state.table.selected,
-                    &mut self.lambda_state.table.scroll_offset,
-                    page_size,
-                );
-            }
+            crate::lambda::functions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::LambdaApplications
         {
-            if self.lambda_application_state.current_application.is_some() {
-                if self.lambda_application_state.detail_tab
-                    == LambdaApplicationDetailTab::Deployments
-                {
-                    let page_size = self.lambda_application_state.deployments.page_size.value();
-                    self.lambda_application_state
-                        .deployment_input_focus
-                        .handle_page_up(
-                            &mut self.lambda_application_state.deployments.selected,
-                            &mut self.lambda_application_state.deployments.scroll_offset,
-                            page_size,
-                        );
-                } else {
-                    let page_size = self.lambda_application_state.resources.page_size.value();
-                    self.lambda_application_state
-                        .resource_input_focus
-                        .handle_page_up(
-                            &mut self.lambda_application_state.resources.selected,
-                            &mut self.lambda_application_state.resources.scroll_offset,
-                            page_size,
-                        );
-                }
-            } else {
-                let page_size = self.lambda_application_state.table.page_size.value();
-                self.lambda_application_state.input_focus.handle_page_up(
-                    &mut self.lambda_application_state.table.selected,
-                    &mut self.lambda_application_state.table.scroll_offset,
-                    page_size,
-                );
-            }
+            crate::lambda::applications::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
@@ -6805,9 +6062,9 @@ impl App {
             } else if self.current_service == Service::SqsQueues {
                 self.sqs_state.queues.page_up();
             } else if self.current_service == Service::LambdaFunctions {
-                self.lambda_state.table.page_up();
+                crate::lambda::functions::page_up_normal(self);
             } else if self.current_service == Service::LambdaApplications {
-                self.lambda_application_state.table.page_up();
+                crate::lambda::applications::page_up_normal(self);
             } else if self.current_service == Service::CloudFormationStacks {
                 if self.cfn_state.current_stack.is_some()
                     && self.cfn_state.detail_tab == CfnDetailTab::Parameters
@@ -7114,49 +6371,9 @@ impl App {
                 self.sqs_state.queues.expand();
             }
         } else if self.current_service == Service::LambdaFunctions {
-            if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Code
-            {
-                // Expand selected layer
-                if self.lambda_state.layer_expanded != Some(self.lambda_state.layer_selected) {
-                    self.lambda_state.layer_expanded = Some(self.lambda_state.layer_selected);
-                } else {
-                    self.lambda_state.layer_expanded = None;
-                }
-            } else if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-            {
-                // Expand selected version
-                self.lambda_state.version_table.toggle_expand();
-            } else if self.lambda_state.current_function.is_some()
-                && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    || (self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-            {
-                // Expand selected alias
-                self.lambda_state.alias_table.toggle_expand();
-            } else if self.lambda_state.current_function.is_none() {
-                // Expand selected function
-                self.lambda_state.table.toggle_expand();
-            }
+            crate::lambda::functions::expand_row(self);
         } else if self.current_service == Service::LambdaApplications {
-            if self.lambda_application_state.current_application.is_some() {
-                // In detail view - expand resource or deployment
-                if self.lambda_application_state.detail_tab == LambdaApplicationDetailTab::Overview
-                {
-                    self.lambda_application_state.resources.toggle_expand();
-                } else {
-                    self.lambda_application_state.deployments.toggle_expand();
-                }
-            } else {
-                // Expand selected application in list
-                if self.lambda_application_state.table.expanded_item
-                    != Some(self.lambda_application_state.table.selected)
-                {
-                    self.lambda_application_state.table.expanded_item =
-                        Some(self.lambda_application_state.table.selected);
-                }
-            }
+            crate::lambda::applications::expand_row(self);
         } else if self.current_service == Service::CloudFormationStacks
             && self.cfn_state.current_stack.is_none()
         {
@@ -7324,38 +6541,10 @@ impl App {
                 }
             }
             Service::LambdaFunctions => {
-                if self.lambda_state.current_function.is_some()
-                    && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                {
-                    let filtered_count = self
-                        .lambda_state
-                        .version_table
-                        .filtered(|v| {
-                            self.lambda_state.version_table.filter.is_empty()
-                                || v.version.to_lowercase().contains(
-                                    &self.lambda_state.version_table.filter.to_lowercase(),
-                                )
-                                || v.aliases.to_lowercase().contains(
-                                    &self.lambda_state.version_table.filter.to_lowercase(),
-                                )
-                                || v.description.to_lowercase().contains(
-                                    &self.lambda_state.version_table.filter.to_lowercase(),
-                                )
-                        })
-                        .len();
-                    self.lambda_state
-                        .version_table
-                        .goto_page(page, filtered_count);
-                } else {
-                    let filtered_count = filtered_lambda_functions(self).len();
-                    self.lambda_state.table.goto_page(page, filtered_count);
-                }
+                crate::lambda::functions::go_to_page(self, page);
             }
             Service::LambdaApplications => {
-                let filtered_count = filtered_lambda_applications(self).len();
-                self.lambda_application_state
-                    .table
-                    .goto_page(page, filtered_count);
+                crate::lambda::applications::go_to_page(self, page);
             }
             Service::CloudFormationStacks => {
                 let filtered_count = filtered_cloudformation_stacks(self).len();
@@ -7627,42 +6816,9 @@ impl App {
                 self.sqs_state.queues.collapse();
             }
         } else if self.current_service == Service::LambdaFunctions {
-            if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Code
-            {
-                // Collapse selected layer
-                self.lambda_state.layer_expanded = None;
-            } else if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-            {
-                // Collapse selected version
-                self.lambda_state.version_table.collapse();
-            } else if self.lambda_state.current_function.is_some()
-                && (self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                    || (self.lambda_state.current_version.is_some()
-                        && self.lambda_state.detail_tab == LambdaDetailTab::Configuration))
-            {
-                // Collapse selected alias
-                self.lambda_state.alias_table.collapse();
-            } else if self.lambda_state.current_function.is_none() {
-                // Collapse expanded function
-                self.lambda_state.table.collapse();
-            }
+            crate::lambda::functions::prev_pane(self);
         } else if self.current_service == Service::LambdaApplications {
-            if self.lambda_application_state.current_application.is_some() {
-                // In detail view - collapse resource or deployment
-                if self.lambda_application_state.detail_tab == LambdaApplicationDetailTab::Overview
-                {
-                    self.lambda_application_state.resources.collapse();
-                } else {
-                    self.lambda_application_state.deployments.collapse();
-                }
-            } else {
-                // Collapse expanded application in list
-                if self.lambda_application_state.table.has_expanded_item() {
-                    self.lambda_application_state.table.collapse();
-                }
-            }
+            crate::lambda::applications::prev_pane(self);
         } else if self.current_service == Service::CloudFormationStacks
             && self.cfn_state.current_stack.is_none()
         {
@@ -7912,7 +7068,8 @@ impl App {
             Service::EcrRepositories => {
                 crate::ecr::actions::collapse_row(self);
             }
-            Service::LambdaFunctions => self.lambda_state.table.collapse(),
+            Service::LambdaFunctions => crate::lambda::functions::collapse_row(self),
+            Service::LambdaApplications => crate::lambda::applications::prev_pane(self),
             Service::SqsQueues => self.sqs_state.queues.collapse(),
             Service::CloudFormationStacks => {
                 if self.cfn_state.current_stack.is_some() {
@@ -8969,127 +8126,9 @@ impl App {
                     }
                 }
             } else if self.current_service == Service::LambdaFunctions {
-                if self.lambda_state.current_function.is_some()
-                    && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-                {
-                    // In Normal mode, select version to open detail view
-                    // In other modes (FilterInput), toggle expansion
-                    if self.mode == Mode::Normal {
-                        let page_size = self.lambda_state.version_table.page_size.value();
-                        let filtered: Vec<_> = self
-                            .lambda_state
-                            .version_table
-                            .items
-                            .iter()
-                            .filter(|v| {
-                                self.lambda_state.version_table.filter.is_empty()
-                                    || v.version.to_lowercase().contains(
-                                        &self.lambda_state.version_table.filter.to_lowercase(),
-                                    )
-                                    || v.aliases.to_lowercase().contains(
-                                        &self.lambda_state.version_table.filter.to_lowercase(),
-                                    )
-                            })
-                            .collect();
-                        let current_page = self.lambda_state.version_table.selected / page_size;
-                        let start_idx = current_page * page_size;
-                        let end_idx = (start_idx + page_size).min(filtered.len());
-                        let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-                        let page_index = self.lambda_state.version_table.selected % page_size;
-                        if let Some(version) = paginated.get(page_index) {
-                            self.lambda_state.current_version = Some(version.version.clone());
-                            self.lambda_state.detail_tab = LambdaDetailTab::Code;
-                        }
-                    } else {
-                        // Toggle expansion
-                        if self.lambda_state.version_table.expanded_item
-                            == Some(self.lambda_state.version_table.selected)
-                        {
-                            self.lambda_state.version_table.collapse();
-                        } else {
-                            self.lambda_state.version_table.expanded_item =
-                                Some(self.lambda_state.version_table.selected);
-                        }
-                    }
-                } else if self.lambda_state.current_function.is_some()
-                    && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-                {
-                    // Select alias to view detail (no tab change - alias view has no tabs)
-                    let filtered: Vec<_> = self
-                        .lambda_state
-                        .alias_table
-                        .items
-                        .iter()
-                        .filter(|a| {
-                            self.lambda_state.alias_table.filter.is_empty()
-                                || a.name
-                                    .to_lowercase()
-                                    .contains(&self.lambda_state.alias_table.filter.to_lowercase())
-                                || a.versions
-                                    .to_lowercase()
-                                    .contains(&self.lambda_state.alias_table.filter.to_lowercase())
-                        })
-                        .collect();
-                    if let Some(alias) = self.lambda_state.alias_table.get_selected(&filtered) {
-                        self.lambda_state.current_alias = Some(alias.name.clone());
-                    }
-                } else if self.lambda_state.current_function.is_none() {
-                    let filtered_functions = filtered_lambda_functions(self);
-                    if let Some(func) = self.lambda_state.table.get_selected(&filtered_functions) {
-                        self.lambda_state.current_function = Some(func.name.clone());
-                        self.lambda_state.detail_tab = LambdaDetailTab::Code;
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::lambda::functions::select_item(self);
             } else if self.current_service == Service::LambdaApplications {
-                let filtered = filtered_lambda_applications(self);
-                if let Some(app) = self.lambda_application_state.table.get_selected(&filtered) {
-                    let app_name = app.name.clone();
-                    self.lambda_application_state.current_application = Some(app_name.clone());
-                    self.lambda_application_state.detail_tab = LambdaApplicationDetailTab::Overview;
-
-                    // Load mock resources
-                    use crate::lambda::Resource;
-                    self.lambda_application_state.resources.items = vec![
-                        Resource {
-                            logical_id: "ApiGatewayRestApi".to_string(),
-                            physical_id: "abc123xyz".to_string(),
-                            resource_type: "AWS::ApiGateway::RestApi".to_string(),
-                            last_modified: "2025-01-10 14:30:00 (UTC)".to_string(),
-                        },
-                        Resource {
-                            logical_id: "LambdaFunction".to_string(),
-                            physical_id: format!("{}-function", app_name),
-                            resource_type: "AWS::Lambda::Function".to_string(),
-                            last_modified: "2025-01-10 14:25:00 (UTC)".to_string(),
-                        },
-                        Resource {
-                            logical_id: "DynamoDBTable".to_string(),
-                            physical_id: format!("{}-table", app_name),
-                            resource_type: "AWS::DynamoDB::Table".to_string(),
-                            last_modified: "2025-01-09 10:15:00 (UTC)".to_string(),
-                        },
-                    ];
-
-                    // Load mock deployments
-                    use crate::lambda::Deployment;
-                    self.lambda_application_state.deployments.items = vec![
-                        Deployment {
-                            deployment_id: "d-ABC123XYZ".to_string(),
-                            resource_type: "AWS::Serverless::Application".to_string(),
-                            last_updated: "2025-01-10 14:30:00 (UTC)".to_string(),
-                            status: "Succeeded".to_string(),
-                        },
-                        Deployment {
-                            deployment_id: "d-DEF456UVW".to_string(),
-                            resource_type: "AWS::Serverless::Application".to_string(),
-                            last_updated: "2025-01-09 10:15:00 (UTC)".to_string(),
-                            status: "Succeeded".to_string(),
-                        },
-                    ];
-
-                    self.update_current_tab_breadcrumb();
-                }
+                crate::lambda::applications::select_item(self);
             } else if self.current_service == Service::CloudWatchLogGroups {
                 if self.view_mode == ViewMode::List {
                     // Map filtered selection to actual group index
@@ -14462,6 +13501,42 @@ mod region_latency_tests {
             app.ecr_state.repositories.selected, 0,
             "PageUp should move back to page 1"
         );
+    }
+
+    #[test]
+    fn test_ecr_repos_can_reach_last_page_when_not_multiple_of_page_size() {
+        use crate::ecr::repo::Repository as EcrRepository;
+        let mut app = test_app();
+        app.current_service = Service::EcrRepositories;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.ecr_state.input_focus = InputFocus::Pagination;
+
+        // 754 repos, page size 50 — last page starts at 750 (page 16)
+        app.ecr_state.repositories.items = (0..754)
+            .map(|i| EcrRepository {
+                name: format!("repo{:03}", i),
+                uri: format!("uri{}", i),
+                created_at: "2023-01-01".to_string(),
+                tag_immutability: "MUTABLE".to_string(),
+                encryption_type: "AES256".to_string(),
+            })
+            .collect();
+
+        // Navigate to page 15 (selected = 700)
+        app.ecr_state.repositories.selected = 700;
+
+        // Right arrow must reach page 16 (selected = 750)
+        app.handle_action(Action::PageDown);
+        assert_eq!(
+            app.ecr_state.repositories.selected, 750,
+            "Should reach last page (750) but got {}",
+            app.ecr_state.repositories.selected
+        );
+
+        // Right arrow again must stay at 750 (can't go past last page)
+        app.handle_action(Action::PageDown);
+        assert_eq!(app.ecr_state.repositories.selected, 750);
     }
 
     #[test]
@@ -22363,6 +21438,156 @@ mod lambda_version_tab_tests {
         assert!(app
             .lambda_resource_column_ids
             .contains(&"column.lambda.resource.logical_id"));
+    }
+
+    #[test]
+    fn test_lambda_functions_list_right_expands_left_collapses() {
+        use crate::lambda::Function;
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::LambdaFunctions;
+        app.service_selected = true;
+        app.lambda_state.table.items = vec![Function {
+            name: "fn1".to_string(),
+            arn: "arn::fn1".to_string(),
+            application: None,
+            description: String::new(),
+            package_type: String::new(),
+            runtime: "python3.12".to_string(),
+            architecture: String::new(),
+            code_size: 0,
+            code_sha256: String::new(),
+            memory_mb: 128,
+            timeout_seconds: 3,
+            last_modified: String::new(),
+            layers: vec![],
+        }];
+        app.lambda_state.table.selected = 0;
+
+        // Right arrow should expand
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.lambda_state.table.expanded_item, Some(0));
+
+        // Right arrow again should NOT collapse (stays expanded)
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.lambda_state.table.expanded_item, Some(0));
+
+        // Left arrow should collapse
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.lambda_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_lambda_applications_list_right_expands_left_collapses() {
+        use crate::lambda::Application;
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::LambdaApplications;
+        app.service_selected = true;
+        app.lambda_application_state.table.items = vec![Application {
+            name: "my-app".to_string(),
+            arn: String::new(),
+            description: String::new(),
+            status: "ACTIVE".to_string(),
+            last_modified: String::new(),
+        }];
+        app.lambda_application_state.table.selected = 0;
+
+        // Right arrow should expand
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.lambda_application_state.table.expanded_item, Some(0));
+
+        // Right arrow again should NOT collapse (stays expanded)
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.lambda_application_state.table.expanded_item, Some(0));
+
+        // Left arrow should collapse
+        app.handle_action(Action::CollapseRow);
+        assert_eq!(app.lambda_application_state.table.expanded_item, None);
+    }
+
+    #[test]
+    fn test_lambda_application_enter_on_deployments_tab_does_not_switch_to_overview() {
+        use crate::lambda::Application;
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.current_service = Service::LambdaApplications;
+        app.service_selected = true;
+        app.lambda_application_state.table.items = vec![Application {
+            name: "my-app".to_string(),
+            arn: String::new(),
+            description: String::new(),
+            status: "ACTIVE".to_string(),
+            last_modified: String::new(),
+        }];
+
+        // Select the application (Enter on list)
+        app.handle_action(Action::Select);
+        assert!(app.lambda_application_state.current_application.is_some());
+
+        // Switch to Deployments tab
+        use crate::ui::lambda::ApplicationDetailTab as LambdaApplicationDetailTab;
+        app.lambda_application_state.detail_tab = LambdaApplicationDetailTab::Deployments;
+        assert_eq!(
+            app.lambda_application_state.detail_tab,
+            LambdaApplicationDetailTab::Deployments
+        );
+
+        // Enter on Deployments tab must NOT switch back to Overview
+        app.handle_action(Action::Select);
+        assert_eq!(
+            app.lambda_application_state.detail_tab,
+            LambdaApplicationDetailTab::Deployments
+        );
+    }
+
+    #[test]
+    fn test_lambda_applications_pagination_focus_left_right_jump_pages() {
+        use crate::lambda::Application;
+        let mut app = test_app();
+        app.current_service = Service::LambdaApplications;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.lambda_application_state.input_focus = InputFocus::Pagination;
+
+        // 100 apps, page size 50 — 2 pages
+        app.lambda_application_state.table.items = (0..100)
+            .map(|i| Application {
+                name: format!("app{:03}", i),
+                arn: String::new(),
+                description: String::new(),
+                status: "ACTIVE".to_string(),
+                last_modified: String::new(),
+            })
+            .collect();
+        app.lambda_application_state.table.selected = 0;
+
+        // Right arrow (PageDown) must jump to page 2
+        app.handle_action(Action::PageDown);
+        assert_eq!(
+            app.lambda_application_state.table.selected, 50,
+            "Right arrow with pagination focus should jump to page 2"
+        );
+
+        // Left arrow (PageUp) must jump back to page 1
+        app.handle_action(Action::PageUp);
+        assert_eq!(
+            app.lambda_application_state.table.selected, 0,
+            "Left arrow with pagination focus should jump back to page 1"
+        );
+
+        // Up/Down arrows must NOT move table selection when pagination is focused
+        app.handle_action(Action::NextItem);
+        assert_eq!(
+            app.lambda_application_state.table.selected, 0,
+            "Down arrow must not move table when pagination is focused"
+        );
+        app.lambda_application_state.table.selected = 5;
+        app.handle_action(Action::PrevItem);
+        assert_eq!(
+            app.lambda_application_state.table.selected, 5,
+            "Up arrow must not move table when pagination is focused"
+        );
     }
 
     #[test]

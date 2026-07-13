@@ -336,4 +336,32 @@ impl IamClient {
 
         Ok(response.access_key_metadata().len())
     }
+
+    /// Returns (create_date, update_date) for a managed policy.
+    pub async fn get_policy_metadata(&self, policy_arn: &str) -> Result<(String, String), String> {
+        let client = self.config.iam_client();
+
+        let resp = client
+            .get_policy()
+            .policy_arn(policy_arn)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to get policy metadata: {}", e))?;
+
+        let policy = resp
+            .policy()
+            .ok_or_else(|| "No policy returned".to_string())?;
+
+        let fmt = |dt: Option<&aws_sdk_iam::primitives::DateTime>| -> String {
+            dt.map(|d| {
+                chrono::DateTime::from_timestamp(d.secs(), 0)
+                    .unwrap_or_default()
+                    .format("%Y-%m-%d %H:%M:%S (UTC)")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "-".to_string())
+        };
+
+        Ok((fmt(policy.create_date()), fmt(policy.update_date())))
+    }
 }

@@ -1,3 +1,5 @@
+pub mod actions;
+
 use crate::common::t;
 use crate::common::{format_duration_seconds, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column;

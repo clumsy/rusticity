@@ -351,13 +351,13 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     }
 }
 
-fn nav_page_down(selected: &mut usize, max: usize, page_size: usize) {
+pub(crate) fn nav_page_down(selected: &mut usize, max: usize, page_size: usize) {
     if max > 0 {
         *selected = (*selected + page_size).min(max - 1);
     }
 }
 
-fn toggle_iam_preference(
+pub(crate) fn toggle_iam_preference(
     idx: usize,
     column_ids: &[String],
     visible_column_ids: &mut Vec<String>,
@@ -383,7 +383,7 @@ fn toggle_iam_preference(
     }
 }
 
-fn toggle_iam_preference_static(
+pub(crate) fn toggle_iam_preference_static(
     idx: usize,
     column_ids: &[ColumnId],
     visible_column_ids: &mut Vec<ColumnId>,
@@ -409,7 +409,7 @@ fn toggle_iam_preference_static(
     }
 }
 
-fn toggle_iam_page_size_only(idx: usize, base_idx: usize, page_size: &mut PageSize) {
+pub(crate) fn toggle_iam_page_size_only(idx: usize, base_idx: usize, page_size: &mut PageSize) {
     if idx == base_idx {
         *page_size = PageSize::Ten;
     } else if idx == base_idx + 1 {
@@ -604,26 +604,11 @@ impl App {
             } else if self.current_service == Service::CloudFormationStacks {
                 self.cfn_state.table.reset();
             } else if self.current_service == Service::IamUsers {
-                if self.iam_state.current_user.is_some() {
-                    self.iam_state.user_tags.reset();
-                    self.iam_state.policies.reset();
-                } else {
-                    self.iam_state.users.reset();
-                }
+                crate::iam::actions::apply_filter_reset_users(self);
             } else if self.current_service == Service::IamRoles {
-                if self.iam_state.current_role.is_some() {
-                    self.iam_state.tags.reset();
-                    self.iam_state.policies.reset();
-                } else {
-                    self.iam_state.roles.reset();
-                }
+                crate::iam::actions::apply_filter_reset_roles(self);
             } else if self.current_service == Service::IamUserGroups {
-                if self.iam_state.current_group.is_some() {
-                    self.iam_state.policies.reset();
-                    self.iam_state.group_users.reset();
-                } else {
-                    self.iam_state.groups.reset();
-                }
+                crate::iam::actions::apply_filter_reset_groups(self);
             } else if self.current_service == Service::CloudWatchLogGroups {
                 if self.view_mode == ViewMode::List {
                     self.log_groups_state.log_groups.reset();
@@ -1213,13 +1198,13 @@ impl App {
                         self.sqs_state.queues.reset();
                     }
                     Service::IamRoles => {
-                        self.iam_state.roles.reset();
+                        crate::iam::actions::reset_on_service_select_roles(self);
                     }
                     Service::IamUsers => {
-                        self.iam_state.users.reset();
+                        crate::iam::actions::reset_on_service_select_users(self);
                     }
                     Service::IamUserGroups => {
-                        self.iam_state.groups.reset();
+                        crate::iam::actions::reset_on_service_select_groups(self);
                     }
                     Service::CloudWatchAlarms => {
                         self.alarms_state.table.reset();
@@ -2868,21 +2853,15 @@ impl App {
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                 {
-                    self.iam_state.role_tab = self.iam_state.role_tab.next();
-                    if self.iam_state.role_tab == RoleTab::Tags {
-                        self.iam_state.tags.loading = true;
-                    }
+                    crate::iam::actions::next_detail_tab_roles(self);
                 } else if self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    self.iam_state.user_tab = self.iam_state.user_tab.next();
-                    if self.iam_state.user_tab == UserTab::Tags {
-                        self.iam_state.user_tags.loading = true;
-                    }
+                    crate::iam::actions::next_detail_tab_users(self);
                 } else if self.current_service == Service::IamUserGroups
                     && self.iam_state.current_group.is_some()
                 {
-                    self.iam_state.group_tab = self.iam_state.group_tab.next();
+                    crate::iam::actions::next_detail_tab_groups(self);
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.next();
                     if self.log_groups_state.detail_tab == DetailTab::Tags {
@@ -2946,15 +2925,15 @@ impl App {
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                 {
-                    self.iam_state.role_tab = self.iam_state.role_tab.prev();
+                    crate::iam::actions::prev_detail_tab_roles(self);
                 } else if self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    self.iam_state.user_tab = self.iam_state.user_tab.prev();
+                    crate::iam::actions::prev_detail_tab_users(self);
                 } else if self.current_service == Service::IamUserGroups
                     && self.iam_state.current_group.is_some()
                 {
-                    self.iam_state.group_tab = self.iam_state.group_tab.prev();
+                    crate::iam::actions::prev_detail_tab_groups(self);
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.prev();
                 } else if self.current_service == Service::S3Buckets {
@@ -3665,43 +3644,9 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::IamUsers {
-                    if self.iam_state.current_user.is_some() {
-                        if let Some(user_name) = &self.iam_state.current_user {
-                            if let Some(user) = self
-                                .iam_state
-                                .users
-                                .items
-                                .iter()
-                                .find(|u| u.user_name == *user_name)
-                            {
-                                copy_to_clipboard(&user.arn);
-                            }
-                        }
-                    } else {
-                        let filtered_users = filtered_iam_users(self);
-                        if let Some(user) = self.iam_state.users.get_selected(&filtered_users) {
-                            copy_to_clipboard(&user.arn);
-                        }
-                    }
+                    crate::iam::actions::yank_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        if let Some(role_name) = &self.iam_state.current_role {
-                            if let Some(role) = self
-                                .iam_state
-                                .roles
-                                .items
-                                .iter()
-                                .find(|r| r.role_name == *role_name)
-                            {
-                                copy_to_clipboard(&role.arn);
-                            }
-                        }
-                    } else {
-                        let filtered_roles = filtered_iam_roles(self);
-                        if let Some(role) = self.iam_state.roles.get_selected(&filtered_roles) {
-                            copy_to_clipboard(&role.arn);
-                        }
-                    }
+                    crate::iam::actions::yank_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
                     if self.iam_state.current_group.is_some() {
                         if let Some(group_name) = &self.iam_state.current_group {
@@ -3885,37 +3830,17 @@ impl App {
                 {
                     self.sqs_state.current_queue = None;
                 }
-                // IAM: go back from user detail to list
+                // IAM: go back
                 else if self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    self.iam_state.current_user = None;
-                    self.iam_state.policies.items.clear();
-                    self.iam_state.policies.reset();
-                    self.update_current_tab_breadcrumb();
-                }
-                // IAM: go back from group detail to list
-                else if self.current_service == Service::IamUserGroups
+                    crate::iam::actions::go_back_users(self);
+                } else if self.current_service == Service::IamUserGroups
                     && self.iam_state.current_group.is_some()
                 {
-                    self.iam_state.current_group = None;
-                    self.update_current_tab_breadcrumb();
-                }
-                // IAM: go back from role detail to list
-                else if self.current_service == Service::IamRoles {
-                    if self.view_mode == ViewMode::PolicyView {
-                        // Go back from policy view to role detail
-                        self.view_mode = ViewMode::Detail;
-                        self.iam_state.current_policy = None;
-                        self.iam_state.policy_document.clear();
-                        self.iam_state.policy_scroll = 0;
-                        self.update_current_tab_breadcrumb();
-                    } else if self.iam_state.current_role.is_some() {
-                        self.iam_state.current_role = None;
-                        self.iam_state.policies.items.clear();
-                        self.iam_state.policies.reset();
-                        self.update_current_tab_breadcrumb();
-                    }
+                    crate::iam::actions::go_back_groups(self);
+                } else if self.current_service == Service::IamRoles {
+                    crate::iam::actions::go_back_roles(self);
                 }
                 // Lambda: go back from version/alias/function detail
                 else if self.current_service == Service::LambdaFunctions
@@ -4168,25 +4093,13 @@ impl App {
                 }
             }
             Service::IamUsers => {
-                parts.push("IAM".to_string());
-                parts.push("Users".to_string());
+                parts.extend(crate::iam::actions::breadcrumb_users());
             }
             Service::IamRoles => {
-                parts.push("IAM".to_string());
-                parts.push("Roles".to_string());
-                if let Some(role_name) = &self.iam_state.current_role {
-                    parts.push(role_name.clone());
-                    if let Some(policy_name) = &self.iam_state.current_policy {
-                        parts.push(policy_name.clone());
-                    }
-                }
+                parts.extend(crate::iam::actions::breadcrumb_roles(self));
             }
             Service::IamUserGroups => {
-                parts.push("IAM".to_string());
-                parts.push("User Groups".to_string());
-                if let Some(group_name) = &self.iam_state.current_group {
-                    parts.push(group_name.clone());
-                }
+                parts.extend(crate::iam::actions::breadcrumb_groups(self));
             }
             Service::Ec2Instances => {
                 parts.push("EC2".to_string());
@@ -4212,7 +4125,7 @@ impl App {
     }
 
     pub fn get_console_url(&self) -> String {
-        use crate::{cfn, cw, iam};
+        use crate::{cfn, cw};
 
         match self.current_service {
             Service::CloudWatchLogGroups => {
@@ -4298,44 +4211,9 @@ impl App {
                 }
                 cfn::console_url_stacks(&self.config.region)
             }
-            Service::IamUsers => {
-                if let Some(user_name) = &self.iam_state.current_user {
-                    let section = match self.iam_state.user_tab {
-                        UserTab::Permissions => "permissions",
-                        UserTab::Groups => "groups",
-                        UserTab::Tags => "tags",
-                        UserTab::SecurityCredentials => "security_credentials",
-                        UserTab::LastAccessed => "access_advisor",
-                    };
-                    iam::console_url_user_detail(&self.config.region, user_name, section)
-                } else {
-                    iam::console_url_users(&self.config.region)
-                }
-            }
-            Service::IamRoles => {
-                if let Some(policy_name) = &self.iam_state.current_policy {
-                    if let Some(role_name) = &self.iam_state.current_role {
-                        return iam::console_url_role_policy(
-                            &self.config.region,
-                            role_name,
-                            policy_name,
-                        );
-                    }
-                }
-                if let Some(role_name) = &self.iam_state.current_role {
-                    let section = match self.iam_state.role_tab {
-                        RoleTab::Permissions => "permissions",
-                        RoleTab::TrustRelationships => "trust_relationships",
-                        RoleTab::Tags => "tags",
-                        RoleTab::LastAccessed => "access_advisor",
-                        RoleTab::RevokeSessions => "revoke_sessions",
-                    };
-                    iam::console_url_role_detail(&self.config.region, role_name, section)
-                } else {
-                    iam::console_url_roles(&self.config.region)
-                }
-            }
-            Service::IamUserGroups => iam::console_url_groups(&self.config.region),
+            Service::IamUsers => crate::iam::actions::console_url_users(self),
+            Service::IamRoles => crate::iam::actions::console_url_roles(self),
+            Service::IamUserGroups => crate::iam::actions::console_url_groups(self),
             Service::Ec2Instances => {
                 if let Some(instance_id) = &self.ec2_state.current_instance {
                     format!(
@@ -8748,19 +8626,27 @@ impl App {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let mut policies: Vec<IamPolicy> = attached_policies
-            .into_iter()
-            .map(|p| IamPolicy {
+        let mut policies: Vec<IamPolicy> = Vec::new();
+        for p in attached_policies {
+            let (creation_time, edited_time) = if let Some(arn) = p.policy_arn() {
+                self.iam_client
+                    .get_policy_metadata(arn)
+                    .await
+                    .unwrap_or_else(|_| ("-".to_string(), "-".to_string()))
+            } else {
+                ("-".to_string(), "-".to_string())
+            };
+            policies.push(IamPolicy {
                 policy_name: p.policy_name().unwrap_or("").to_string(),
                 policy_type: "Managed".to_string(),
                 attached_via: "Direct".to_string(),
                 attached_entities: "-".to_string(),
                 description: "-".to_string(),
-                creation_time: "-".to_string(),
-                edited_time: "-".to_string(),
+                creation_time,
+                edited_time,
                 policy_arn: p.policy_arn().map(|s| s.to_string()),
-            })
-            .collect();
+            });
+        }
 
         // Load inline policies
         let inline_policy_names = self
@@ -12039,6 +11925,48 @@ mod iam_policy_view_tests {
         assert_eq!(app.view_mode, ViewMode::Detail);
         assert_eq!(app.iam_state.current_policy, None);
         assert_eq!(app.iam_state.policies.expanded_item, Some(0));
+    }
+
+    #[test]
+    fn test_managed_policy_has_creation_and_edit_time() {
+        // Managed policies have a policy_arn and should show creation/edit times
+        // when loaded. Inline policies don't have these (they're embedded in the role).
+        // This test verifies managed policies don't show "-" for creation_time.
+        use crate::iam::Policy as IamPolicy;
+        let managed = IamPolicy {
+            policy_name: "MyManagedPolicy".to_string(),
+            policy_type: "Managed".to_string(),
+            attached_via: "Direct".to_string(),
+            attached_entities: "-".to_string(),
+            description: "-".to_string(),
+            creation_time: "2024-01-01 00:00:00 (UTC)".to_string(),
+            edited_time: "2024-06-01 00:00:00 (UTC)".to_string(),
+            policy_arn: Some("arn:aws:iam::123:policy/MyManagedPolicy".to_string()),
+        };
+        assert_ne!(
+            managed.creation_time, "-",
+            "Managed policy must have a real creation time, not '-'"
+        );
+        assert_ne!(
+            managed.edited_time, "-",
+            "Managed policy must have a real edit time, not '-'"
+        );
+
+        // Inline policies legitimately have no creation/edit time
+        let inline = IamPolicy {
+            policy_name: "InlinePolicy".to_string(),
+            policy_type: "Inline".to_string(),
+            attached_via: "Direct".to_string(),
+            attached_entities: "-".to_string(),
+            description: "-".to_string(),
+            creation_time: "-".to_string(),
+            edited_time: "-".to_string(),
+            policy_arn: None,
+        };
+        assert_eq!(
+            inline.creation_time, "-",
+            "Inline policies have no creation time"
+        );
     }
 }
 

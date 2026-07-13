@@ -749,7 +749,7 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                     // Check in nested prefix previews
-                                    for (_, nested_preview) in prefix_preview.iter() {
+                                    for nested_preview in prefix_preview.values() {
                                         if nested_preview.iter().any(|o| o.is_prefix && o.key == prefix) {
                                             return true;
                                         }

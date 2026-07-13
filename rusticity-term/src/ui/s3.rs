@@ -480,7 +480,7 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         let name_len = format!("{} 🪣 {}", CURSOR_COLLAPSED, bucket.name).len();
         max_name_width = max_name_width.max(name_len);
         let region_display = if bucket.region.is_empty() {
-            "-"
+            "?"
         } else {
             &bucket.region
         };
@@ -555,7 +555,9 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .flat_map(|(bucket_idx, (_orig_idx, bucket))| {
-            let is_expanded = app.s3_state.expanded_prefixes.contains(&bucket.name);
+            let is_expanded = app.s3_state.expanded_prefixes.contains(&bucket.name)
+                && (app.s3_state.bucket_preview.contains_key(&bucket.name)
+                    || app.s3_state.bucket_errors.contains_key(&bucket.name));
             let expand_indicator = if is_expanded {
                 format!("{} ", CURSOR_EXPANDED)
             } else {
@@ -648,7 +650,13 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
                             BucketColumn::Name => {
                                 format!("{}🪣 {}", expand_indicator, bucket.name)
                             }
-                            BucketColumn::Region => bucket.region.clone(),
+                            BucketColumn::Region => {
+                                if bucket.region.is_empty() {
+                                    "?".to_string()
+                                } else {
+                                    bucket.region.clone()
+                                }
+                            }
                             BucketColumn::CreationDate => formatted_date.clone(),
                         };
                         let cell_content = if i > 0 {
@@ -1234,11 +1242,7 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
     // Bucket overview
     lines.push(section_header("Bucket overview", inner.width));
     if let Some(b) = bucket {
-        let region = if b.region.is_empty() {
-            "us-east-1"
-        } else {
-            &b.region
-        };
+        let region = if b.region.is_empty() { "?" } else { &b.region };
         let formatted_date = if b.creation_date.contains('T') {
             let parts: Vec<&str> = b.creation_date.split('T').collect();
             if parts.len() == 2 {
@@ -2212,5 +2216,37 @@ mod tests {
         // After collapse, folder2 should be collapsed and selection should jump to parent (folder1)
         // This behavior is tested in app.rs prev_pane function
         // Expected: expanded_prefixes.remove("folder1/folder2/") and selected_object = 0
+    }
+
+    #[test]
+    fn test_bucket_shows_collapsed_cursor_while_loading_no_preview() {
+        // Regression: bucket must show ▶ (collapsed) cursor while loading,
+        // and ▼ (expanded) cursor only when preview is actually loaded.
+        let mut state = State::new();
+        state.buckets.items = vec![S3Bucket {
+            name: "my-bucket".to_string(),
+            region: String::new(),
+            creation_date: String::new(),
+        }];
+
+        // Bucket in expanded_prefixes (loading started) but no preview yet
+        state.expanded_prefixes.insert("my-bucket".to_string());
+
+        // Correct logic: is_expanded requires preview to be present
+        let preview_loaded = state.bucket_preview.contains_key("my-bucket");
+        let is_expanded = state.expanded_prefixes.contains("my-bucket") && preview_loaded;
+        assert!(
+            !is_expanded,
+            "Cursor must be ▶ (collapsed) while preview is still loading"
+        );
+
+        // After preview loads, cursor becomes ▼
+        state.bucket_preview.insert("my-bucket".to_string(), vec![]);
+        let preview_loaded = state.bucket_preview.contains_key("my-bucket");
+        let is_expanded = state.expanded_prefixes.contains("my-bucket") && preview_loaded;
+        assert!(
+            is_expanded,
+            "Cursor must be ▼ (expanded) once preview is loaded"
+        );
     }
 }

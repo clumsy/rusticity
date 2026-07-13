@@ -592,13 +592,7 @@ impl App {
             } else if self.current_service == Service::Ec2Instances {
                 self.ec2_state.table.reset();
             } else if self.current_service == Service::S3Buckets {
-                if self.s3_state.current_bucket.is_some() {
-                    self.s3_state.selected_object = 0;
-                } else {
-                    self.s3_state.buckets.reset();
-                    self.s3_state.selected_row = 0;
-                    self.s3_state.bucket_scroll_offset = 0;
-                }
+                crate::s3::actions::apply_filter_reset(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
@@ -1197,8 +1191,7 @@ impl App {
                 // Reset selection when closing filter to avoid out-of-bounds
                 match self.current_service {
                     Service::S3Buckets => {
-                        self.s3_state.selected_row = 0;
-                        self.s3_state.selected_object = 0;
+                        crate::s3::actions::reset_on_service_select(self);
                     }
                     Service::CloudFormationStacks => {
                         if self.cfn_state.current_stack.is_some()
@@ -1809,24 +1802,7 @@ impl App {
                 if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_none()
                 {
-                    let idx = self.column_selector_index;
-                    if idx > 0 && idx <= self.s3_bucket_column_ids.len() {
-                        if let Some(col) = self.s3_bucket_column_ids.get(idx - 1) {
-                            Self::toggle_column_visibility(
-                                &mut self.s3_bucket_visible_column_ids,
-                                &self.s3_bucket_column_ids,
-                                *col,
-                            );
-                        }
-                    } else if idx == self.s3_bucket_column_ids.len() + 3 {
-                        self.s3_state.buckets.page_size = PageSize::Ten;
-                    } else if idx == self.s3_bucket_column_ids.len() + 4 {
-                        self.s3_state.buckets.page_size = PageSize::TwentyFive;
-                    } else if idx == self.s3_bucket_column_ids.len() + 5 {
-                        self.s3_state.buckets.page_size = PageSize::Fifty;
-                    } else if idx == self.s3_bucket_column_ids.len() + 6 {
-                        self.s3_state.buckets.page_size = PageSize::OneHundred;
-                    }
+                    crate::s3::actions::toggle_column(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     // Map flat list index to actual item
                     // 0: Columns header, 1-16: columns, 17: empty, 18: ViewAs header, 19-20: view options
@@ -2634,12 +2610,7 @@ impl App {
                 } else if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_none()
                 {
-                    let page_size_idx = self.s3_bucket_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
+                    crate::s3::actions::next_preferences(self);
                 } else if self.current_service == Service::CloudWatchLogGroups {
                     if self.view_mode == ViewMode::Events {
                         // Events view: only columns, no sections to cycle
@@ -2822,12 +2793,7 @@ impl App {
                 } else if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_none()
                 {
-                    let page_size_idx = self.s3_bucket_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::s3::actions::prev_preferences(self);
                 } else if self.current_service == Service::CloudWatchLogGroups {
                     if self.view_mode == ViewMode::Events {
                         // Events view: only columns, no sections to cycle
@@ -2923,15 +2889,7 @@ impl App {
                         self.log_groups_state.tags.loading = true;
                     }
                 } else if self.current_service == Service::S3Buckets {
-                    if self.s3_state.current_bucket.is_some() {
-                        self.s3_state.object_tab = self.s3_state.object_tab.next();
-                    } else {
-                        self.s3_state.bucket_type = match self.s3_state.bucket_type {
-                            S3BucketType::GeneralPurpose => S3BucketType::Directory,
-                            S3BucketType::Directory => S3BucketType::GeneralPurpose,
-                        };
-                        self.s3_state.buckets.reset();
-                    }
+                    crate::s3::actions::next_detail_tab(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.alarms_state.alarm_tab = match self.alarms_state.alarm_tab {
                         AlarmTab::AllAlarms => AlarmTab::InAlarm,
@@ -3000,9 +2958,7 @@ impl App {
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.prev();
                 } else if self.current_service == Service::S3Buckets {
-                    if self.s3_state.current_bucket.is_some() {
-                        self.s3_state.object_tab = self.s3_state.object_tab.prev();
-                    }
+                    crate::s3::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     self.alarms_state.alarm_tab = match self.alarms_state.alarm_tab {
                         AlarmTab::AllAlarms => AlarmTab::InAlarm,
@@ -3037,7 +2993,7 @@ impl App {
                     self.cloudtrail_state.input_focus = InputFocus::Filter;
                 } else if self.current_service == Service::S3Buckets {
                     self.mode = Mode::FilterInput;
-                    self.log_groups_state.filter_mode = true;
+                    crate::s3::actions::start_filter(self);
                 } else if self.current_service == Service::ApiGatewayApis
                     || self.current_service == Service::EcrRepositories
                     || self.current_service == Service::IamUsers
@@ -3112,9 +3068,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::S3Buckets
                 {
-                    const S3_FILTER_CONTROLS: [InputFocus; 2] =
-                        [InputFocus::Filter, InputFocus::Pagination];
-                    self.s3_state.input_focus = self.s3_state.input_focus.next(&S3_FILTER_CONTROLS);
+                    crate::s3::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::Ec2Instances
                 {
@@ -3277,6 +3231,10 @@ impl App {
                     use crate::ui::apig::FILTER_CONTROLS;
                     self.apig_state.input_focus =
                         self.apig_state.input_focus.prev(&FILTER_CONTROLS);
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::S3Buckets
+                {
+                    crate::s3::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::Ec2Instances
                 {
@@ -3905,13 +3863,7 @@ impl App {
                 else if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_some()
                 {
-                    if !self.s3_state.prefix_stack.is_empty() {
-                        self.s3_state.prefix_stack.pop();
-                        self.s3_state.buckets.loading = true;
-                    } else {
-                        self.s3_state.current_bucket = None;
-                        self.s3_state.objects.clear();
-                    }
+                    crate::s3::actions::go_back(self);
                 }
                 // ECR: go back from images to repositories
                 else if self.current_service == Service::EcrRepositories
@@ -4192,15 +4144,7 @@ impl App {
                 parts.push("Event History".to_string());
             }
             Service::S3Buckets => {
-                parts.push("S3".to_string());
-                if let Some(bucket) = &self.s3_state.current_bucket {
-                    parts.push(bucket.clone());
-                    if let Some(prefix) = self.s3_state.prefix_stack.last() {
-                        parts.push(prefix.trim_end_matches('/').to_string());
-                    }
-                } else {
-                    parts.push("Buckets".to_string());
-                }
+                parts.extend(crate::s3::actions::breadcrumb(self));
             }
             Service::SqsQueues => {
                 parts.push("SQS".to_string());
@@ -4268,7 +4212,7 @@ impl App {
     }
 
     pub fn get_console_url(&self) -> String {
-        use crate::{cfn, cw, iam, s3};
+        use crate::{cfn, cw, iam};
 
         match self.current_service {
             Service::CloudWatchLogGroups => {
@@ -4325,14 +4269,7 @@ impl App {
                     )
                 }
             }
-            Service::S3Buckets => {
-                if let Some(bucket_name) = &self.s3_state.current_bucket {
-                    let prefix = self.s3_state.prefix_stack.join("");
-                    s3::console_url_bucket(&self.config.region, bucket_name, &prefix)
-                } else {
-                    s3::console_url_buckets(&self.config.region)
-                }
-            }
+            Service::S3Buckets => crate::s3::actions::console_url(self),
             Service::SqsQueues => {
                 if let Some(queue_url) = &self.sqs_state.current_queue {
                     console_url_queue_detail(&self.config.region, queue_url)
@@ -4499,7 +4436,7 @@ impl App {
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
         {
-            self.s3_bucket_column_ids.len() + 6
+            crate::s3::actions::column_selector_max(self)
         } else if self.view_mode == ViewMode::Events {
             self.cw_log_event_column_ids.len() - 1
         } else if self.view_mode == ViewMode::Detail {
@@ -4555,7 +4492,7 @@ impl App {
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
         {
-            self.s3_bucket_column_ids.len()
+            crate::s3::actions::column_count(self)
         } else if self.view_mode == ViewMode::Events {
             self.cw_log_event_column_ids.len()
         } else if self.view_mode == ViewMode::Detail {
@@ -4615,15 +4552,9 @@ impl App {
         match self.mode {
             Mode::FilterInput => {
                 if self.current_service == Service::S3Buckets
-                    && self.s3_state.input_focus == InputFocus::Pagination
+                    && crate::s3::actions::is_pagination_focused(self)
                 {
-                    // Navigate to next page
-                    let page_size = self.s3_state.buckets.page_size.value();
-                    let total_rows = crate::ui::s3::calculate_filtered_bucket_rows(self);
-                    let max_offset = total_rows.saturating_sub(page_size);
-                    self.s3_state.selected_row =
-                        (self.s3_state.selected_row + page_size).min(max_offset);
-                    self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
+                    crate::s3::actions::page_down_filter_input(self);
                 } else if self.current_service == Service::CloudTrailEvents
                     && self.cloudtrail_state.input_focus == InputFocus::Pagination
                 {
@@ -5149,13 +5080,9 @@ impl App {
         match self.mode {
             Mode::FilterInput => {
                 if self.current_service == Service::S3Buckets
-                    && self.s3_state.input_focus == InputFocus::Pagination
+                    && crate::s3::actions::is_pagination_focused(self)
                 {
-                    // Navigate to previous page
-                    let page_size = self.s3_state.buckets.page_size.value();
-                    self.s3_state.selected_row =
-                        self.s3_state.selected_row.saturating_sub(page_size);
-                    self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
+                    crate::s3::actions::page_up_filter_input(self);
                 } else if self.current_service == Service::CloudTrailEvents
                     && self.cloudtrail_state.input_focus == InputFocus::Pagination
                 {
@@ -5475,15 +5402,7 @@ impl App {
             }
             self.column_selector_index = next_idx;
         } else if self.mode == Mode::FilterInput && self.current_service == Service::S3Buckets {
-            if self.s3_state.input_focus == InputFocus::Pagination {
-                // Navigate to next page
-                let page_size = self.s3_state.buckets.page_size.value();
-                let total_rows = self.calculate_total_bucket_rows();
-                let max_offset = total_rows.saturating_sub(page_size);
-                self.s3_state.selected_row =
-                    (self.s3_state.selected_row + page_size).min(max_offset);
-                self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-            }
+            crate::s3::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudFormationStacks
         {
@@ -5879,12 +5798,7 @@ impl App {
             }
             self.column_selector_index = prev_idx;
         } else if self.mode == Mode::FilterInput && self.current_service == Service::S3Buckets {
-            if self.s3_state.input_focus == InputFocus::Pagination {
-                // Navigate to previous page
-                let page_size = self.s3_state.buckets.page_size.value();
-                self.s3_state.selected_row = self.s3_state.selected_row.saturating_sub(page_size);
-                self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-            }
+            crate::s3::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudFormationStacks
         {
@@ -6195,6 +6109,14 @@ impl App {
                             if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
                                 if !preview.is_empty() {
                                     self.s3_state.selected_row = row_idx + 1;
+                                    // Adjust scroll so new selection stays visible
+                                    let visible = self.s3_state.bucket_visible_rows.get();
+                                    if self.s3_state.selected_row
+                                        >= self.s3_state.bucket_scroll_offset + visible
+                                    {
+                                        self.s3_state.bucket_scroll_offset =
+                                            self.s3_state.selected_row.saturating_sub(visible - 1);
+                                    }
                                 }
                             }
                         }
@@ -6202,10 +6124,19 @@ impl App {
                     }
                     row_idx += 1;
 
-                    // Skip error rows - they're not selectable
+                    // Count error rows in traversal so row indices match the render
                     if self.s3_state.bucket_errors.contains_key(&bucket.name)
                         && self.s3_state.expanded_prefixes.contains(&bucket.name)
                     {
+                        if let Some(err) = self.s3_state.bucket_errors.get(&bucket.name) {
+                            let max_width = 120;
+                            let error_rows = if err.len() > max_width {
+                                err.len().div_ceil(max_width)
+                            } else {
+                                1
+                            };
+                            row_idx += error_rows;
+                        }
                         continue;
                     }
 
@@ -6285,7 +6216,8 @@ impl App {
                                 break;
                             }
                         } else {
-                            row_idx += 1;
+                            // Preview not loaded yet — this bucket has no visible child rows,
+                            // so row_idx must not advance past the bucket itself.
                             if row_idx > self.s3_state.selected_row {
                                 break;
                             }
@@ -7261,13 +7193,47 @@ impl App {
                     let mut row_idx = 0;
                     for bucket in filtered_buckets {
                         if row_idx == self.s3_state.selected_row {
-                            // Toggle bucket expansion
                             if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                                self.s3_state.expanded_prefixes.remove(&bucket.name);
+                                // Already expanded: if preview loaded, enter first child
+                                if let Some(preview) =
+                                    self.s3_state.bucket_preview.get(&bucket.name)
+                                {
+                                    if !preview.is_empty() {
+                                        self.s3_state.selected_row = row_idx + 1;
+                                        let visible = self.s3_state.bucket_visible_rows.get();
+                                        if self.s3_state.selected_row
+                                            >= self.s3_state.bucket_scroll_offset + visible
+                                        {
+                                            self.s3_state.bucket_scroll_offset = self
+                                                .s3_state
+                                                .selected_row
+                                                .saturating_sub(visible - 1);
+                                        }
+                                    }
+                                    // If preview empty, nothing to enter — stay
+                                } else {
+                                    // Preview still loading — stay on bucket
+                                }
                             } else {
                                 self.s3_state.expanded_prefixes.insert(bucket.name.clone());
-                                self.s3_state.selected_row = row_idx + 1; // Move to first child
                                 self.s3_state.buckets.loading = true;
+                                // Move to first child only if preview already loaded
+                                if let Some(preview) =
+                                    self.s3_state.bucket_preview.get(&bucket.name)
+                                {
+                                    if !preview.is_empty() {
+                                        self.s3_state.selected_row = row_idx + 1;
+                                        let visible = self.s3_state.bucket_visible_rows.get();
+                                        if self.s3_state.selected_row
+                                            >= self.s3_state.bucket_scroll_offset + visible
+                                        {
+                                            self.s3_state.bucket_scroll_offset = self
+                                                .s3_state
+                                                .selected_row
+                                                .saturating_sub(visible - 1);
+                                        }
+                                    }
+                                }
                             }
                             return;
                         }
@@ -7288,6 +7254,19 @@ impl App {
                                     self.s3_state.selected_row = new_row;
                                     if loading {
                                         self.s3_state.buckets.loading = true;
+                                    }
+                                    // Adjust scroll so new selection stays visible
+                                    let visible = self.s3_state.bucket_visible_rows.get();
+                                    if self.s3_state.selected_row
+                                        >= self.s3_state.bucket_scroll_offset + visible
+                                    {
+                                        self.s3_state.bucket_scroll_offset =
+                                            self.s3_state.selected_row.saturating_sub(visible - 1);
+                                    } else if self.s3_state.selected_row
+                                        < self.s3_state.bucket_scroll_offset
+                                    {
+                                        self.s3_state.bucket_scroll_offset =
+                                            self.s3_state.selected_row;
                                     }
                                     return;
                                 }
@@ -8395,7 +8374,7 @@ impl App {
     }
 
     pub async fn load_bucket_preview(&mut self, bucket_name: String) -> anyhow::Result<()> {
-        let bucket_region = self
+        let stored_region = self
             .s3_state
             .buckets
             .items
@@ -8405,13 +8384,30 @@ impl App {
                 if b.region.is_empty() {
                     None
                 } else {
-                    Some(b.region.as_str())
+                    Some(b.region.clone())
                 }
-            })
-            .unwrap_or(self.config.region.as_str());
+            });
+
+        let bucket_region = match stored_region {
+            Some(r) => r,
+            None => {
+                let r = self.s3_client.get_bucket_location(&bucket_name).await?;
+                // Cache the discovered region back into the bucket
+                if let Some(b) = self
+                    .s3_state
+                    .buckets
+                    .items
+                    .iter_mut()
+                    .find(|b| b.name == bucket_name)
+                {
+                    b.region = r.clone();
+                }
+                r
+            }
+        };
         let objects = self
             .s3_client
-            .list_objects(&bucket_name, bucket_region, "")
+            .list_objects(&bucket_name, &bucket_region, "")
             .await?;
         let preview: Vec<S3Object> = objects
             .into_iter()
@@ -8423,8 +8419,49 @@ impl App {
                 storage_class,
             })
             .collect();
-        self.s3_state.bucket_preview.insert(bucket_name, preview);
+        self.s3_state
+            .bucket_preview
+            .insert(bucket_name.clone(), preview);
+        self.after_bucket_preview_loaded(&bucket_name);
         Ok(())
+    }
+
+    /// Called after a bucket's preview is loaded. If the bucket is the currently
+    /// selected bucket (selection is on the bucket row itself), advance selection
+    /// to the first child row so the user lands inside the bucket automatically.
+    pub fn after_bucket_preview_loaded(&mut self, bucket_name: &str) {
+        if self.s3_state.current_bucket.is_some() {
+            return; // inside a bucket view, not the bucket list
+        }
+        // Find the row index of this bucket in the current view
+        let mut row_idx = 0usize;
+        for b in &self.s3_state.buckets.items {
+            if b.name == bucket_name {
+                // Only advance if selection is sitting on this exact bucket row
+                if self.s3_state.selected_row == row_idx {
+                    if let Some(preview) = self.s3_state.bucket_preview.get(bucket_name) {
+                        if !preview.is_empty() {
+                            self.s3_state.selected_row = row_idx + 1;
+                            let visible = self.s3_state.bucket_visible_rows.get();
+                            if self.s3_state.selected_row
+                                >= self.s3_state.bucket_scroll_offset + visible
+                            {
+                                self.s3_state.bucket_scroll_offset =
+                                    self.s3_state.selected_row.saturating_sub(visible - 1);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            row_idx += 1;
+            // Account for this bucket's loaded children
+            if self.s3_state.expanded_prefixes.contains(&b.name) {
+                if let Some(p) = self.s3_state.bucket_preview.get(&b.name) {
+                    row_idx += p.len();
+                }
+            }
+        }
     }
 
     pub async fn load_prefix_preview(
@@ -8432,7 +8469,7 @@ impl App {
         bucket_name: String,
         prefix: String,
     ) -> anyhow::Result<()> {
-        let bucket_region = self
+        let stored_region = self
             .s3_state
             .buckets
             .items
@@ -8442,13 +8479,29 @@ impl App {
                 if b.region.is_empty() {
                     None
                 } else {
-                    Some(b.region.as_str())
+                    Some(b.region.clone())
                 }
-            })
-            .unwrap_or(self.config.region.as_str());
+            });
+
+        let bucket_region = match stored_region {
+            Some(r) => r,
+            None => {
+                let r = self.s3_client.get_bucket_location(&bucket_name).await?;
+                if let Some(b) = self
+                    .s3_state
+                    .buckets
+                    .items
+                    .iter_mut()
+                    .find(|b| b.name == bucket_name)
+                {
+                    b.region = r.clone();
+                }
+                r
+            }
+        };
         let objects = self
             .s3_client
-            .list_objects(&bucket_name, bucket_region, &prefix)
+            .list_objects(&bucket_name, &bucket_region, &prefix)
             .await?;
         let preview: Vec<S3Object> = objects
             .into_iter()
@@ -9049,7 +9102,7 @@ impl App {
     }
 
     /// Toggle column visibility, ensuring at least one column remains visible
-    fn toggle_column_visibility<T: PartialEq + Copy>(
+    pub(crate) fn toggle_column_visibility<T: PartialEq + Copy>(
         visible_columns: &mut Vec<T>,
         _all_columns: &[T],
         column_to_toggle: T,
@@ -19526,6 +19579,975 @@ mod lambda_version_tab_tests {
         // Left arrow (PageUp) should go back
         app.handle_action(Action::PageUp);
         assert_eq!(app.s3_state.selected_row, 10);
+    }
+
+    #[test]
+    fn test_s3_bucket_preview_uses_bucket_region_not_config_region() {
+        // Regression: load_bucket_preview was falling back to self.config.region when
+        // the bucket's stored region was empty (which it always is from list_buckets).
+        // This caused IllegalLocationConstraintException for cross-region buckets.
+        // The fix: resolve the actual region via get_bucket_location when region is empty.
+        //
+        // This test verifies the region stored in the bucket is used when available,
+        // not the app's configured region.
+        use S3Bucket;
+        let mut app = test_app();
+        app.config.region = "ap-southeast-3".to_string(); // user's configured region
+
+        // Bucket is actually in us-east-1 — different from app region
+        app.s3_state.buckets.items = vec![S3Bucket {
+            name: "my-bucket".to_string(),
+            region: "us-east-1".to_string(), // correct bucket region stored
+            creation_date: String::new(),
+        }];
+
+        // The stored region must take precedence over config.region
+        let bucket = app
+            .s3_state
+            .buckets
+            .items
+            .iter()
+            .find(|b| b.name == "my-bucket")
+            .unwrap();
+        let effective_region = if bucket.region.is_empty() {
+            app.config.region.as_str()
+        } else {
+            bucket.region.as_str()
+        };
+        assert_eq!(
+            effective_region, "us-east-1",
+            "load_bucket_preview must use bucket's region, not app config region"
+        );
+        assert_ne!(
+            effective_region, "ap-southeast-3",
+            "Must NOT fall back to configured region for cross-region buckets"
+        );
+    }
+
+    #[test]
+    fn test_s3_scroll_follows_selection_after_bucket_expand() {
+        use S3Bucket;
+        use S3Object;
+        // Regression: expanding a bucket below the visible area didn't update bucket_scroll_offset,
+        // so the selection (now pointing to the first child row) left the visible area.
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        // 5 buckets, visible area is 3 rows (bucket_visible_rows = 3)
+        app.s3_state.buckets.items = (0..5)
+            .map(|i| S3Bucket {
+                name: format!("bucket{}", i),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            })
+            .collect();
+
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(3);
+
+        // Select row 2 (third bucket), scroll offset = 0 → row 2 is visible
+        app.s3_state.selected_row = 2;
+        app.s3_state.bucket_scroll_offset = 0;
+
+        // Expand bucket2 — it gets 2 children, selected_row moves to 3
+        app.s3_state.bucket_preview.insert(
+            "bucket2".to_string(),
+            vec![
+                S3Object {
+                    key: "file1.txt".to_string(),
+                    is_prefix: false,
+                    size: 100,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+                S3Object {
+                    key: "file2.txt".to_string(),
+                    is_prefix: false,
+                    size: 200,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+            ],
+        );
+
+        // Simulate expand: selected_row moves to first child (row 3)
+        // After expand, row 3 must be within [scroll_offset, scroll_offset + visible_rows)
+        // i.e. bucket_scroll_offset must be adjusted so row 3 is visible
+        app.handle_action(Action::CollapseRow); // first collapse to reset
+        app.handle_action(Action::NextPane); // expand
+
+        // selected_row should now be 3 (first child), scroll_offset must keep it visible
+        let visible = app.s3_state.bucket_visible_rows.get();
+        let in_view = app.s3_state.selected_row >= app.s3_state.bucket_scroll_offset
+            && app.s3_state.selected_row < app.s3_state.bucket_scroll_offset + visible;
+        assert!(
+            in_view,
+            "selected_row {} must be visible in [{}, {})",
+            app.s3_state.selected_row,
+            app.s3_state.bucket_scroll_offset,
+            app.s3_state.bucket_scroll_offset + visible
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_without_preview_does_not_move_selection() {
+        // Regression: when a bucket preview is not yet loaded (still loading),
+        // right arrow must NOT move selection to "first child" (row_idx + 1).
+        // Selection must stay on the bucket row until preview arrives.
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.selected_row = 0; // on bucket0
+                                       // No preview loaded yet for bucket0
+
+        app.handle_action(Action::NextPane); // right arrow — expand, triggers loading
+
+        // Must stay on row 0 until preview arrives
+        assert_eq!(
+            app.s3_state.selected_row, 0,
+            "Selection must not move before preview is loaded"
+        );
+        // Bucket must be marked as expanded and loading
+        assert!(app.s3_state.expanded_prefixes.contains("bucket0"));
+        assert!(app.s3_state.buckets.loading);
+    }
+
+    #[test]
+    fn test_s3_expand_with_preview_moves_to_first_child() {
+        // After preview is loaded, right arrow must move selection to first child immediately.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.selected_row = 0;
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        // First right arrow: expands and immediately moves to first child (preview already loaded)
+        app.handle_action(Action::NextPane);
+        assert_eq!(app.s3_state.selected_row, 1, "Should move to first child");
+    }
+
+    #[test]
+    fn test_s3_expand_then_load_then_right_goes_to_first_child_not_sibling() {
+        // Repro: right arrow → loading starts (selection stays on bucket) →
+        // preview arrives → right arrow again → must go to first child (row 1),
+        // NOT to next sibling bucket (row 2 if no children counted, or higher).
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.selected_row = 0;
+
+        // Step 1: right arrow — no preview yet, expands + loading
+        app.handle_action(Action::NextPane);
+        assert_eq!(
+            app.s3_state.selected_row, 0,
+            "Must stay on bucket0 while loading"
+        );
+        assert!(app.s3_state.buckets.loading);
+
+        // Step 2: simulate preview arriving (like main.rs does after load_bucket_preview)
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+        app.s3_state.buckets.loading = false;
+
+        // Step 3: right arrow again — must go to first child (row 1), not sibling (row 2)
+        app.handle_action(Action::NextPane);
+        assert_eq!(
+            app.s3_state.selected_row, 1,
+            "After preview loads, right arrow must select first child (row 1), not sibling (row 2)"
+        );
+    }
+
+    #[test]
+    fn test_s3_first_expand_never_moves_selection_before_children_visible() {
+        // Rule: selection must NEVER move to a new row until the children rows
+        // are actually present in the data (preview loaded). This prevents
+        // showing a "selected next sibling" before children appear.
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        // No preview for bucket0
+        app.s3_state.selected_row = 0;
+
+        // First expand (right arrow = ExpandRow): no preview → must NOT move selection
+        app.handle_action(Action::ExpandRow);
+        assert_eq!(
+            app.s3_state.selected_row, 0,
+            "Selection must stay on bucket0 until children are visible"
+        );
+        assert!(app.s3_state.expanded_prefixes.contains("bucket0"));
+        assert!(app.s3_state.buckets.loading);
+    }
+
+    #[test]
+    fn test_s3_after_preview_loads_selection_moves_to_first_child() {
+        // After first expand triggers loading, once preview arrives the selection
+        // must automatically advance to the first child.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "b0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "b1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.selected_row = 0;
+
+        // Step 1: right arrow — no preview, expand + loading, selection stays
+        app.handle_action(Action::ExpandRow);
+        assert_eq!(
+            app.s3_state.selected_row, 0,
+            "Must stay on bucket while loading"
+        );
+
+        // Step 2: simulate preview arriving (main.rs calls load_bucket_preview)
+        app.s3_state.bucket_preview.insert(
+            "b0".to_string(),
+            vec![S3Object {
+                key: "f.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+        // After load, app must advance selection to first child
+        app.after_bucket_preview_loaded("b0");
+        assert_eq!(
+            app.s3_state.selected_row, 1,
+            "After preview loads, selection must advance to first child (row 1)"
+        );
+    }
+
+    #[test]
+    fn test_s3_right_arrow_on_expanded_loaded_bucket_enters_first_child() {
+        // When bucket is already expanded AND preview is loaded, right arrow
+        // must move selection to first child — NOT collapse the bucket.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "b0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "b1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.expanded_prefixes.insert("b0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "b0".to_string(),
+            vec![S3Object {
+                key: "f.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+        app.s3_state.selected_row = 0;
+
+        app.handle_action(Action::ExpandRow);
+
+        // Must enter first child, not collapse
+        assert!(
+            app.s3_state.expanded_prefixes.contains("b0"),
+            "Must stay expanded"
+        );
+        assert_eq!(app.s3_state.selected_row, 1, "Must move to first child");
+    }
+
+    #[test]
+    fn test_s3_second_expand_press_collapses_when_already_expanded_with_children() {
+        // Collapse is done via left arrow (CollapseRow), not right arrow.
+        // Right arrow on expanded+loaded bucket enters first child.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+        app.s3_state.buckets.items = vec![S3Bucket {
+            name: "bucket0".to_string(),
+            region: "us-east-1".to_string(),
+            creation_date: String::new(),
+        }];
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+        app.s3_state.selected_row = 0;
+
+        // Left arrow collapses
+        app.handle_action(Action::CollapseRow);
+        assert!(
+            !app.s3_state.expanded_prefixes.contains("bucket0"),
+            "Left arrow must collapse the bucket"
+        );
+        assert_eq!(app.s3_state.selected_row, 0);
+    }
+
+    #[test]
+    fn test_s3_expand_row_index_correct_when_prior_bucket_has_error() {
+        // Repro: bucket0 is expanded and has an error message (1+ error rows).
+        // next_pane uses `continue` for error buckets, skipping their error rows.
+        // But calculate_filtered_bucket_rows counts error rows.
+        // This causes selected_row=2 to map to bucket2 in next_pane
+        // but to the error row of bucket0 visually — wrong expansion target.
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+
+        // bucket0 is expanded with an error (1 error row)
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state
+            .bucket_errors
+            .insert("bucket0".to_string(), "AccessDenied".to_string());
+
+        // Visual rows: 0=bucket0, 1=⚠️error, 2=bucket1, 3=bucket2
+        // calculate_filtered_bucket_rows = 4
+        let total = crate::ui::s3::calculate_filtered_bucket_rows(&app);
+        assert_eq!(
+            total, 4,
+            "Should be 4 rows: bucket0 + error + bucket1 + bucket2"
+        );
+
+        // User selects bucket2 (visual row 3)
+        app.s3_state.selected_row = 3;
+
+        // bucket2 has a preview
+        use crate::s3::Object as S3Object;
+        app.s3_state.bucket_preview.insert(
+            "bucket2".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        app.handle_action(Action::NextPane);
+
+        // Must expand bucket2 (row 3), select its first child (row 4)
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket2"),
+            "Must expand bucket2, not bucket1"
+        );
+        assert_eq!(
+            app.s3_state.selected_row, 4,
+            "First child of bucket2 must be row 4"
+        );
+    }
+
+    #[test]
+    fn test_s3_next_pane_row_count_matches_calculate_filtered_bucket_rows() {
+        // The row index next_pane uses to find the selected bucket must match
+        // the row index that calculate_filtered_bucket_rows produces.
+        // If they diverge, selecting row N expands a different bucket than expected.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+
+        // bucket0 expanded + loaded with 3 children
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            vec![
+                S3Object {
+                    key: "a.txt".to_string(),
+                    is_prefix: false,
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+                S3Object {
+                    key: "b.txt".to_string(),
+                    is_prefix: false,
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+                S3Object {
+                    key: "c.txt".to_string(),
+                    is_prefix: false,
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+            ],
+        );
+
+        // bucket1 expanded + loading (no preview yet)
+        app.s3_state.expanded_prefixes.insert("bucket1".to_string());
+
+        // calculate_filtered_bucket_rows: 3 buckets + 3 children of bucket0 + 0 loading = 6
+        let total = crate::ui::s3::calculate_filtered_bucket_rows(&app);
+        assert_eq!(
+            total, 6,
+            "Total rows: bucket0(1)+3children+bucket1(1)+bucket2(1)=6"
+        );
+
+        // Visual rows: 0=bucket0, 1=a, 2=b, 3=c, 4=bucket1(loading), 5=bucket2
+        // Select bucket2 (row 5)
+        app.s3_state.selected_row = 5;
+
+        // bucket2 has preview
+        app.s3_state.bucket_preview.insert(
+            "bucket2".to_string(),
+            vec![S3Object {
+                key: "x.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        app.handle_action(Action::NextPane);
+
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket2"),
+            "Must expand bucket2, not bucket1"
+        );
+        assert_eq!(
+            app.s3_state.selected_row, 6,
+            "First child of bucket2 must be row 6"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_row_index_correct_when_prior_bucket_has_loaded_children() {
+        // Repro: bucket0 is expanded AND has loaded children (e.g. 2 objects).
+        // This means visual rows are: 0=bucket0, 1=child0, 2=child1, 3=bucket1, 4=bucket2
+        // If user selects bucket2 (visual row 4) and presses right, next_pane must
+        // expand bucket2 — NOT a child of bucket0 (which is at row_idx 4 in old logic).
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+
+        // bucket0 is expanded AND has 2 children loaded
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            vec![
+                S3Object {
+                    key: "a.txt".to_string(),
+                    is_prefix: false,
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+                S3Object {
+                    key: "b.txt".to_string(),
+                    is_prefix: false,
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                },
+            ],
+        );
+
+        // Visual rows: 0=bucket0, 1=a.txt, 2=b.txt, 3=bucket1, 4=bucket2
+        // User selects bucket2 (visual row 4)
+        app.s3_state.selected_row = 4;
+
+        // bucket2 has preview ready
+        app.s3_state.bucket_preview.insert(
+            "bucket2".to_string(),
+            vec![S3Object {
+                key: "c.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        app.handle_action(Action::NextPane);
+
+        // Must expand bucket2 (row 4) and move to its first child (row 5)
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket2"),
+            "bucket2 must be expanded"
+        );
+        assert_eq!(
+            app.s3_state.selected_row, 5,
+            "Must select first child of bucket2 (row 5), not some wrong row"
+        );
+        assert!(
+            !app.s3_state.expanded_prefixes.contains("bucket1"),
+            "bucket1 must NOT be expanded"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_with_empty_preview_stays_on_bucket() {
+        // Repro: bucket has a preview but it's EMPTY (no objects at root).
+        // After expand, selected_row must stay on the bucket row — NOT advance to next sibling.
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        // bucket1 has empty preview (bucket exists but no root-level objects)
+        app.s3_state
+            .bucket_preview
+            .insert("bucket1".to_string(), vec![]);
+        app.s3_state.selected_row = 1; // on bucket1
+
+        app.handle_action(Action::NextPane);
+
+        // Must stay on bucket1 (row 1) — no children to enter
+        assert_eq!(
+            app.s3_state.selected_row, 1,
+            "Empty bucket: selection must stay on bucket row, not advance to next sibling"
+        );
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket1"),
+            "Bucket must be expanded (showing ▼)"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_with_preceding_loading_buckets_on_prior_page() {
+        // Repro: user is on page 2 (scroll_offset=50). Some buckets on page 1
+        // are expanded+loading. The next_pane traversal iterates all buckets from 0,
+        // and each loading bucket on page 1 still adds a phantom row, shifting
+        // the row where selected_row=55 actually lands.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        // 60 buckets
+        app.s3_state.buckets.items = (0..60)
+            .map(|i| S3Bucket {
+                name: format!("bucket{:02}", i),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            })
+            .collect();
+
+        // Buckets 0-2 on page 1 are expanded+loading (no preview)
+        for i in 0..3usize {
+            app.s3_state
+                .expanded_prefixes
+                .insert(format!("bucket{:02}", i));
+        }
+
+        app.s3_state.bucket_scroll_offset = 50;
+
+        // bucket55 has preview loaded
+        app.s3_state.bucket_preview.insert(
+            "bucket55".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        // selected_row = 55 (bucket55, visible row 5 on page 2)
+        app.s3_state.selected_row = 55;
+
+        app.handle_action(Action::NextPane);
+
+        // Must expand bucket55, select its first child (row 56)
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket55"),
+            "bucket55 must be expanded"
+        );
+        assert_eq!(
+            app.s3_state.selected_row, 56,
+            "Must select first child of bucket55 (row 56)"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_with_multiple_preceding_loading_buckets() {
+        // Repro: multiple buckets before the selected one are expanded+loading.
+        // Each was incorrectly adding a phantom row causing selection to point to wrong bucket.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = (0..5)
+            .map(|i| S3Bucket {
+                name: format!("bucket{}", i),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            })
+            .collect();
+
+        // Buckets 0, 1, 2 are expanded+loading (no preview)
+        for i in 0..3 {
+            app.s3_state
+                .expanded_prefixes
+                .insert(format!("bucket{}", i));
+        }
+
+        // bucket3 has preview loaded
+        app.s3_state.bucket_preview.insert(
+            "bucket3".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        // Visual: bucket0 (row 0), bucket1 (row 1), bucket2 (row 2), bucket3 (row 3), bucket4 (row 4)
+        // No loading rows visible since previews not loaded
+        app.s3_state.selected_row = 3; // bucket3
+
+        app.handle_action(Action::NextPane);
+
+        // Must expand bucket3, move to its first child (row 4)
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket3"),
+            "bucket3 must be expanded"
+        );
+        assert_eq!(
+            app.s3_state.selected_row, 4,
+            "Must select first child of bucket3 (row 4)"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_with_preceding_loading_bucket_selects_correct_row() {
+        // Repro: bucket0 is expanded+loading (in expanded_prefixes, no preview).
+        // next_pane's traversal adds a phantom row for bucket0's loading state.
+        // This shifts row_idx so that selecting bucket1 (visual row 1) actually
+        // points to bucket2 (visual row 2) in the traversal — wrong expansion target.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(10);
+
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+
+        // bucket0 is expanded+loading (in expanded_prefixes but NO preview)
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.buckets.loading = true;
+
+        // bucket1's preview is loaded
+        app.s3_state.bucket_preview.insert(
+            "bucket1".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        // User selects bucket1 (visual row 1 = bucket row, bucket0 has no visible children)
+        app.s3_state.selected_row = 1;
+
+        // Expand bucket1
+        app.handle_action(Action::NextPane);
+
+        // Must expand bucket1 (not bucket2), so selected_row = 2 (first child of bucket1)
+        assert_eq!(
+            app.s3_state.selected_row, 2,
+            "Must expand bucket1's first child (row 2), not bucket2 (row 3)"
+        );
+        assert!(
+            app.s3_state.expanded_prefixes.contains("bucket1"),
+            "bucket1 must be in expanded_prefixes"
+        );
+    }
+
+    #[test]
+    fn test_s3_expand_last_row_on_page_shows_first_child_not_next_page() {
+        // Repro: user selects the last bucket on a page (e.g. row 49 with page size 50),
+        // expands it. selected_row becomes 50 (first child). But scroll_offset is still 0,
+        // so row 50 is off screen — visually the next bucket (row 50 on next page) appears selected.
+        // Fix: after expanding the last row on a visible page, scroll must advance to show first child.
+        use crate::s3::Object as S3Object;
+        use S3Bucket;
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        // 3 buckets, visible area = 2 rows (tight to force the issue)
+        app.s3_state.buckets.items = vec![
+            S3Bucket {
+                name: "bucket0".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket1".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+            S3Bucket {
+                name: "bucket2".to_string(),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            },
+        ];
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(2);
+        // Select the last visible bucket (row 1), scroll_offset = 0 → rows 0 and 1 visible
+        app.s3_state.selected_row = 1;
+        app.s3_state.bucket_scroll_offset = 0;
+
+        // Preview already loaded
+        app.s3_state.bucket_preview.insert(
+            "bucket1".to_string(),
+            vec![S3Object {
+                key: "file.txt".to_string(),
+                is_prefix: false,
+                size: 0,
+                last_modified: String::new(),
+                storage_class: String::new(),
+            }],
+        );
+
+        app.handle_action(Action::NextPane); // right arrow — expand
+
+        // selected_row must be 2 (first child of bucket1)
+        assert_eq!(app.s3_state.selected_row, 2, "Must select first child");
+
+        // scroll_offset must have advanced so row 2 is visible
+        let visible = app.s3_state.bucket_visible_rows.get();
+        let in_view = app.s3_state.selected_row >= app.s3_state.bucket_scroll_offset
+            && app.s3_state.selected_row < app.s3_state.bucket_scroll_offset + visible;
+        assert!(
+            in_view,
+            "First child row {} must be visible in [{}, {})",
+            app.s3_state.selected_row,
+            app.s3_state.bucket_scroll_offset,
+            app.s3_state.bucket_scroll_offset + visible
+        );
     }
 
     #[test]

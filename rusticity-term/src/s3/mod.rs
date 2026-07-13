@@ -1,3 +1,5 @@
+pub mod actions;
+
 use crate::common::translate_column;
 use crate::common::{format_bytes, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
@@ -135,7 +137,13 @@ impl TableColumn<Bucket> for BucketColumn {
     fn render(&self, item: &Bucket) -> (String, Style) {
         let text = match self {
             BucketColumn::Name => item.name.clone(),
-            BucketColumn::Region => item.region.clone(),
+            BucketColumn::Region => {
+                if item.region.is_empty() {
+                    "?".to_string()
+                } else {
+                    item.region.clone()
+                }
+            }
             BucketColumn::CreationDate => item.creation_date.clone(),
         };
         (text, Style::default())
@@ -284,6 +292,33 @@ mod tests {
                 col.id()
             );
         }
+    }
+
+    #[test]
+    fn test_bucket_region_column_shows_question_mark_when_unknown() {
+        use crate::ui::table::Column;
+        let bucket = Bucket {
+            name: "my-bucket".to_string(),
+            region: String::new(), // unknown — not yet fetched
+            creation_date: String::new(),
+        };
+        let (value, _) = BucketColumn::Region.render(&bucket);
+        assert_eq!(
+            value, "?",
+            "Unknown region must render as '?' not empty string"
+        );
+    }
+
+    #[test]
+    fn test_bucket_region_column_shows_region_when_known() {
+        use crate::ui::table::Column;
+        let bucket = Bucket {
+            name: "my-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            creation_date: String::new(),
+        };
+        let (value, _) = BucketColumn::Region.render(&bucket);
+        assert_eq!(value, "us-east-1");
     }
 
     #[test]

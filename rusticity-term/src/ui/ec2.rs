@@ -363,7 +363,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
         labeled_field("Public DNS", &instance.public_ipv4_dns),
         labeled_field(
             "Hostname type",
-            format!("IP name: {}", &instance.private_dns_name),
+            format!("IP name: {}", instance.private_dns_name),
         ),
         labeled_field(
             "Private IP DNS name (IPv4 only)",
@@ -373,7 +373,7 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
         labeled_field("Elastic IP addresses", &instance.elastic_ip),
         labeled_field(
             "Auto-assigned IP address",
-            format!("{} [Public IP]", &instance.public_ipv4_address),
+            format!("{} [Public IP]", instance.public_ipv4_address),
         ),
         labeled_field("VPC ID", &instance.vpc_id),
         labeled_field("IAM Role", &instance.iam_instance_profile_arn),

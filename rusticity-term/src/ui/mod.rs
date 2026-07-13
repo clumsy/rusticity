@@ -2129,7 +2129,7 @@ fn render_space_menu(frame: &mut Frame, area: Rect) {
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(active_border()),
         )
         .style(Style::default().bg(Color::Black));
 
@@ -2503,7 +2503,11 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(active_border()),
+                .border_style(if !app.region_filter_active {
+                    active_border()
+                } else {
+                    Style::default()
+                }),
         )
         .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");

@@ -52,8 +52,6 @@ pub use crate::ui::cw::logs::{
     filtered_log_events, filtered_log_groups, filtered_log_streams, selected_log_group,
     DetailTab as CwLogsDetailTab, EventFilterFocus, FILTER_CONTROLS as LOG_FILTER_CONTROLS,
 };
-use crate::ui::ec2;
-use crate::ui::ec2::filtered_ec2_instances;
 pub use crate::ui::ec2::{
     DetailTab as Ec2DetailTab, State as Ec2State, StateFilter as Ec2StateFilter,
     STATE_FILTER as EC2_STATE_FILTER,
@@ -458,13 +456,7 @@ impl App {
         } else if self.current_service == Service::CloudTrailEvents {
             Some(&mut self.cloudtrail_state.table.filter)
         } else if self.current_service == Service::Ec2Instances {
-            if self.ec2_state.current_instance.is_some()
-                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-            {
-                Some(&mut self.ec2_state.tags.filter)
-            } else {
-                Some(&mut self.ec2_state.table.filter)
-            }
+            crate::ec2::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::S3Buckets {
             if self.s3_state.current_bucket.is_some() {
                 Some(&mut self.s3_state.object_filter)
@@ -590,7 +582,7 @@ impl App {
             } else if self.current_service == Service::CloudTrailEvents {
                 self.cloudtrail_state.table.reset();
             } else if self.current_service == Service::Ec2Instances {
-                self.ec2_state.table.reset();
+                crate::ec2::actions::apply_filter_reset(self);
             } else if self.current_service == Service::S3Buckets {
                 crate::s3::actions::apply_filter_reset(self);
             } else if self.current_service == Service::EcrRepositories {
@@ -1142,6 +1134,10 @@ impl App {
                 };
                 if should_navigate {
                     self.next_item();
+                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
+                    // In INSERT mode, 'j' goes to filter
+                    self.region_filter.push('j');
+                    self.region_picker_selected = 0;
                 }
             }
             Action::PrevItem => {
@@ -1155,6 +1151,10 @@ impl App {
                 };
                 if should_navigate {
                     self.prev_item();
+                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
+                    // In INSERT mode, 'k' goes to filter
+                    self.region_filter.push('k');
+                    self.region_picker_selected = 0;
                 }
             }
             Action::PageUp => self.page_up(),
@@ -1210,7 +1210,7 @@ impl App {
                         self.alarms_state.table.reset();
                     }
                     Service::Ec2Instances => {
-                        self.ec2_state.table.reset();
+                        crate::ec2::actions::apply_filter_reset(self);
                     }
                     Service::EcrRepositories => {
                         crate::ecr::actions::apply_filter_reset(self);
@@ -1440,7 +1440,7 @@ impl App {
                     } else if self.current_service == Service::CloudTrailEvents {
                         self.cloudtrail_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::Ec2Instances {
-                        self.ec2_state.input_focus == InputFocus::Pagination
+                        crate::ec2::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::CloudWatchLogGroups {
                         self.log_groups_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::ApiGatewayApis {
@@ -1540,10 +1540,7 @@ impl App {
                         && self.ec2_state.current_instance.is_some()
                         && self.ec2_state.detail_tab == Ec2DetailTab::Tags
                     {
-                        if self.ec2_state.input_focus == InputFocus::Filter {
-                            self.ec2_state.tags.filter.push(c);
-                            self.ec2_state.tags.selected = 0;
-                        }
+                        crate::ec2::actions::filter_char_push(self, c);
                     } else if self.current_service == Service::CloudWatchLogGroups {
                         if self.log_groups_state.input_focus == InputFocus::Filter {
                             self.apply_filter_operation(|f| f.push(c));
@@ -1644,10 +1641,7 @@ impl App {
                         && self.ec2_state.current_instance.is_some()
                         && self.ec2_state.detail_tab == Ec2DetailTab::Tags
                     {
-                        if self.ec2_state.input_focus == InputFocus::Filter {
-                            self.ec2_state.tags.filter.pop();
-                            self.ec2_state.tags.selected = 0;
-                        }
+                        crate::ec2::actions::filter_char_pop(self);
                     } else if self.current_service == Service::CloudWatchLogGroups {
                         if self.log_groups_state.input_focus == InputFocus::Filter {
                             self.apply_filter_operation(|f| {
@@ -1756,10 +1750,9 @@ impl App {
                     return;
                 }
 
-                // Don't allow opening preferences for EC2 instance detail tabs except Tags
+                // Block preferences for EC2 non-tag tabs
                 if self.current_service == Service::Ec2Instances
-                    && self.ec2_state.table.expanded_item.is_some()
-                    && self.ec2_state.detail_tab != Ec2DetailTab::Tags
+                    && crate::ec2::actions::block_column_selector(self)
                 {
                     return;
                 }
@@ -1925,54 +1918,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.current_instance.is_some()
-                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-                    {
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.ec2_state.tag_column_ids.len() {
-                            if let Some(col) = self.ec2_state.tag_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .ec2_state
-                                    .tag_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.ec2_state.tag_visible_column_ids.remove(pos);
-                                } else {
-                                    self.ec2_state.tag_visible_column_ids.push(col.clone());
-                                }
-                            }
-                        } else if idx == self.ec2_state.tag_column_ids.len() + 3 {
-                            self.ec2_state.tags.page_size = PageSize::Ten;
-                        } else if idx == self.ec2_state.tag_column_ids.len() + 4 {
-                            self.ec2_state.tags.page_size = PageSize::TwentyFive;
-                        } else if idx == self.ec2_state.tag_column_ids.len() + 5 {
-                            self.ec2_state.tags.page_size = PageSize::Fifty;
-                        } else if idx == self.ec2_state.tag_column_ids.len() + 6 {
-                            self.ec2_state.tags.page_size = PageSize::OneHundred;
-                        }
-                    } else {
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.ec2_column_ids.len() {
-                            if let Some(col) = self.ec2_column_ids.get(idx - 1) {
-                                if let Some(pos) =
-                                    self.ec2_visible_column_ids.iter().position(|c| c == col)
-                                {
-                                    self.ec2_visible_column_ids.remove(pos);
-                                } else {
-                                    self.ec2_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.ec2_column_ids.len() + 3 {
-                            self.ec2_state.table.page_size = PageSize::Ten;
-                        } else if idx == self.ec2_column_ids.len() + 4 {
-                            self.ec2_state.table.page_size = PageSize::TwentyFive;
-                        } else if idx == self.ec2_column_ids.len() + 5 {
-                            self.ec2_state.table.page_size = PageSize::Fifty;
-                        } else if idx == self.ec2_column_ids.len() + 6 {
-                            self.ec2_state.table.page_size = PageSize::OneHundred;
-                        }
-                    }
+                    crate::ec2::actions::toggle_column(self);
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some()
                         && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -2669,12 +2615,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    let page_size_idx = self.ec2_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::ec2::actions::next_preferences(self);
                 } else if self.current_service == Service::IamUsers {
                     if self.iam_state.current_user.is_some() {
                         match self.iam_state.user_tab {
@@ -2838,14 +2779,7 @@ impl App {
                 } else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                 {
-                    self.ec2_state.detail_tab = self.ec2_state.detail_tab.next();
-                    if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
-                        self.ec2_state.tags.loading = true;
-                    } else if self.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
-                        self.ec2_state.set_metrics_loading(true);
-                        self.ec2_state.set_monitoring_scroll(0);
-                        self.ec2_state.clear_metrics();
-                    }
+                    crate::ec2::actions::next_detail_tab(self);
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -2910,14 +2844,7 @@ impl App {
                 } else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                 {
-                    self.ec2_state.detail_tab = self.ec2_state.detail_tab.prev();
-                    if self.ec2_state.detail_tab == Ec2DetailTab::Tags {
-                        self.ec2_state.tags.loading = true;
-                    } else if self.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
-                        self.ec2_state.set_metrics_loading(true);
-                        self.ec2_state.set_monitoring_scroll(0);
-                        self.ec2_state.clear_metrics();
-                    }
+                    crate::ec2::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::LambdaApplications
                     && self.lambda_application_state.current_application.is_some()
                 {
@@ -3051,8 +2978,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::Ec2Instances
                 {
-                    self.ec2_state.input_focus =
-                        self.ec2_state.input_focus.next(&ec2::FILTER_CONTROLS);
+                    crate::ec2::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
@@ -3217,8 +3143,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::Ec2Instances
                 {
-                    self.ec2_state.input_focus =
-                        self.ec2_state.input_focus.prev(&ec2::FILTER_CONTROLS);
+                    crate::ec2::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaApplications
                 {
@@ -3352,10 +3277,7 @@ impl App {
             }
             Action::ToggleFilterCheckbox => {
                 if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
-                        self.ec2_state.state_filter = self.ec2_state.state_filter.next();
-                        self.ec2_state.table.reset();
-                    }
+                    crate::ec2::actions::toggle_filter_checkbox(self);
                 } else if self.mode == Mode::InsightsInput {
                     use crate::app::InsightsFocus;
                     if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
@@ -3455,14 +3377,8 @@ impl App {
                     self.lambda_state.set_monitoring_scroll(
                         self.lambda_state.monitoring_scroll().saturating_sub(1),
                     );
-                } else if self.current_service == Service::Ec2Instances
-                    && self.ec2_state.current_instance.is_some()
-                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-                    && !self.ec2_state.is_metrics_loading()
-                {
-                    self.ec2_state.set_monitoring_scroll(
-                        self.ec2_state.monitoring_scroll().saturating_sub(1),
-                    );
+                } else if self.current_service == Service::Ec2Instances {
+                    crate::ec2::actions::scroll_up(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -3577,12 +3493,17 @@ impl App {
                 }
             }
 
+            Action::MeasureLatency => {
+                if self.mode == Mode::RegionPicker {
+                    self.measure_region_latencies();
+                }
+            }
             Action::Refresh => {
                 if self.mode == Mode::ProfilePicker {
                     self.log_groups_state.loading = true;
                     self.log_groups_state.loading_message = "Refreshing...".to_string();
                 } else if self.mode == Mode::RegionPicker {
-                    self.measure_region_latencies();
+                    // Ctrl+R in region picker just refreshes — latency is via Ctrl+L
                 } else if self.mode == Mode::SessionPicker {
                     self.sessions = Session::list_all().unwrap_or_default();
                 } else if self.current_service == Service::CloudWatchAlarms
@@ -3820,9 +3741,7 @@ impl App {
                 else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                 {
-                    self.ec2_state.current_instance = None;
-                    self.view_mode = ViewMode::List;
-                    self.update_current_tab_breadcrumb();
+                    crate::ec2::actions::go_back(self);
                 }
                 // SQS: go back from queue detail to list
                 else if self.current_service == Service::SqsQueues
@@ -3893,13 +3812,7 @@ impl App {
                 }
                 // From EC2 instances view -> always collapse
                 else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.current_instance.is_some()
-                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-                    {
-                        self.ec2_state.tags.collapse();
-                    } else {
-                        self.ec2_state.table.collapse();
-                    }
+                    crate::ec2::actions::collapse_row(self);
                 }
                 // From events view -> collapse if expanded, otherwise back to detail view
                 else if self.view_mode == ViewMode::Events {
@@ -4102,8 +4015,7 @@ impl App {
                 parts.extend(crate::iam::actions::breadcrumb_groups(self));
             }
             Service::Ec2Instances => {
-                parts.push("EC2".to_string());
-                parts.push("Instances".to_string());
+                parts.extend(crate::ec2::actions::breadcrumb(self));
             }
             Service::ApiGatewayApis => {
                 parts.push("API Gateway".to_string());
@@ -4214,19 +4126,7 @@ impl App {
             Service::IamUsers => crate::iam::actions::console_url_users(self),
             Service::IamRoles => crate::iam::actions::console_url_roles(self),
             Service::IamUserGroups => crate::iam::actions::console_url_groups(self),
-            Service::Ec2Instances => {
-                if let Some(instance_id) = &self.ec2_state.current_instance {
-                    format!(
-                        "https://{}.console.aws.amazon.com/ec2/home?region={}#InstanceDetails:instanceId={}",
-                        self.config.region, self.config.region, instance_id
-                    )
-                } else {
-                    format!(
-                        "https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:",
-                        self.config.region, self.config.region
-                    )
-                }
-            }
+            Service::Ec2Instances => crate::ec2::actions::console_url(self),
             Service::ApiGatewayApis => {
                 use crate::apig;
                 if let Some(api) = &self.apig_state.current_api {
@@ -4330,13 +4230,7 @@ impl App {
                 self.cloudtrail_event_column_ids.len() + 6
             }
         } else if self.current_service == Service::Ec2Instances {
-            if self.ec2_state.current_instance.is_some()
-                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-            {
-                self.ec2_state.tag_column_ids.len() + 6
-            } else {
-                self.ec2_column_ids.len() + 6
-            }
+            crate::ec2::actions::column_selector_max(self)
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
@@ -4386,13 +4280,7 @@ impl App {
                 self.cloudtrail_event_column_ids.len()
             }
         } else if self.current_service == Service::Ec2Instances {
-            if self.ec2_state.current_instance.is_some()
-                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-            {
-                self.ec2_state.tag_column_ids.len()
-            } else {
-                self.ec2_column_ids.len()
-            }
+            crate::ec2::actions::column_count(self)
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
@@ -4474,10 +4362,7 @@ impl App {
                         self.cycle_policy_type_next();
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
-                        self.ec2_state.state_filter = self.ec2_state.state_filter.next();
-                        self.ec2_state.table.reset();
-                    }
+                    crate::ec2::actions::toggle_state_filter_next(self);
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
                     if self.sqs_state.input_focus == SUBSCRIPTION_REGION {
@@ -4663,13 +4548,6 @@ impl App {
                 {
                     self.lambda_state
                         .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
-                } else if self.current_service == Service::Ec2Instances
-                    && self.ec2_state.current_instance.is_some()
-                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-                    && !self.ec2_state.is_metrics_loading()
-                {
-                    self.ec2_state
-                        .set_monitoring_scroll((self.ec2_state.monitoring_scroll() + 1).min(5));
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -4746,37 +4624,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.current_instance.is_some()
-                        && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-                    {
-                        let filtered = crate::ui::ec2::filtered_tags(self);
-                        if !filtered.is_empty() {
-                            self.ec2_state.tags.next_item(filtered.len());
-                        }
-                    } else {
-                        let filtered: Vec<_> = self
-                            .ec2_state
-                            .table
-                            .items
-                            .iter()
-                            .filter(|i| self.ec2_state.state_filter.matches(&i.state))
-                            .filter(|i| {
-                                if self.ec2_state.table.filter.is_empty() {
-                                    return true;
-                                }
-                                i.name.contains(&self.ec2_state.table.filter)
-                                    || i.instance_id.contains(&self.ec2_state.table.filter)
-                                    || i.state.contains(&self.ec2_state.table.filter)
-                                    || i.instance_type.contains(&self.ec2_state.table.filter)
-                                    || i.availability_zone.contains(&self.ec2_state.table.filter)
-                                    || i.security_groups.contains(&self.ec2_state.table.filter)
-                                    || i.key_name.contains(&self.ec2_state.table.filter)
-                            })
-                            .collect();
-                        if !filtered.is_empty() {
-                            self.ec2_state.table.next_item(filtered.len());
-                        }
-                    }
+                    crate::ec2::actions::next_item(self);
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -5000,10 +4848,7 @@ impl App {
                         self.cycle_policy_type_prev();
                     }
                 } else if self.current_service == Service::Ec2Instances {
-                    if self.ec2_state.input_focus == EC2_STATE_FILTER {
-                        self.ec2_state.state_filter = self.ec2_state.state_filter.prev();
-                        self.ec2_state.table.reset();
-                    }
+                    crate::ec2::actions::toggle_state_filter_prev(self);
                 } else if self.current_service == Service::SqsQueues {
                     use crate::ui::sqs::SUBSCRIPTION_REGION;
                     if self.sqs_state.input_focus == SUBSCRIPTION_REGION {
@@ -5117,14 +4962,6 @@ impl App {
                     && !self.lambda_state.is_metrics_loading()
                 {
                     crate::lambda::functions::scroll_up(self);
-                } else if self.current_service == Service::Ec2Instances
-                    && self.ec2_state.current_instance.is_some()
-                    && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-                    && !self.ec2_state.is_metrics_loading()
-                {
-                    self.ec2_state.set_monitoring_scroll(
-                        self.ec2_state.monitoring_scroll().saturating_sub(1),
-                    );
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -5416,13 +5253,8 @@ impl App {
             && !self.lambda_state.is_metrics_loading()
         {
             crate::lambda::functions::scroll_down(self);
-        } else if self.current_service == Service::Ec2Instances
-            && self.ec2_state.current_instance.is_some()
-            && self.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-            && !self.ec2_state.is_metrics_loading()
-        {
-            self.ec2_state
-                .set_monitoring_scroll((self.ec2_state.monitoring_scroll() + 1).min(5));
+        } else if self.current_service == Service::Ec2Instances {
+            crate::ec2::actions::scroll_down(self);
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
@@ -5518,28 +5350,7 @@ impl App {
                     self.cloudtrail_state.table.page_down(filtered_count);
                 }
             } else if self.current_service == Service::Ec2Instances {
-                let filtered: Vec<_> = self
-                    .ec2_state
-                    .table
-                    .items
-                    .iter()
-                    .filter(|i| self.ec2_state.state_filter.matches(&i.state))
-                    .filter(|i| {
-                        if self.ec2_state.table.filter.is_empty() {
-                            return true;
-                        }
-                        i.name.contains(&self.ec2_state.table.filter)
-                            || i.instance_id.contains(&self.ec2_state.table.filter)
-                            || i.state.contains(&self.ec2_state.table.filter)
-                            || i.instance_type.contains(&self.ec2_state.table.filter)
-                            || i.availability_zone.contains(&self.ec2_state.table.filter)
-                            || i.security_groups.contains(&self.ec2_state.table.filter)
-                            || i.key_name.contains(&self.ec2_state.table.filter)
-                    })
-                    .collect();
-                if !filtered.is_empty() {
-                    self.ec2_state.table.page_down(filtered.len());
-                }
+                crate::ec2::actions::page_down_normal(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
@@ -5848,7 +5659,7 @@ impl App {
             } else if self.current_service == Service::CloudTrailEvents {
                 self.cloudtrail_state.table.page_up();
             } else if self.current_service == Service::Ec2Instances {
-                self.ec2_state.table.page_up();
+                crate::ec2::actions::page_up_normal(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::page_up_normal(self);
             } else if self.current_service == Service::SqsQueues {
@@ -6151,13 +5962,7 @@ impl App {
                 self.alarms_state.table.toggle_expand();
             }
         } else if self.current_service == Service::Ec2Instances {
-            if self.ec2_state.current_instance.is_some()
-                && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-            {
-                self.ec2_state.tags.toggle_expand();
-            } else if !self.ec2_state.table.is_expanded() {
-                self.ec2_state.table.toggle_expand();
-            }
+            crate::ec2::actions::expand_row(self);
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::next_pane(self);
         } else if self.current_service == Service::SqsQueues {
@@ -6600,7 +6405,7 @@ impl App {
             // Collapse expanded alarm
             self.alarms_state.table.collapse();
         } else if self.current_service == Service::Ec2Instances {
-            self.ec2_state.table.collapse();
+            crate::ec2::actions::prev_pane(self);
         } else if self.current_service == Service::ApiGatewayApis {
             self.apig_state.apis.collapse();
         } else if self.current_service == Service::EcrRepositories {
@@ -6867,13 +6672,7 @@ impl App {
             }
             Service::CloudWatchAlarms => self.alarms_state.table.collapse(),
             Service::Ec2Instances => {
-                if self.ec2_state.current_instance.is_some()
-                    && self.ec2_state.detail_tab == Ec2DetailTab::Tags
-                {
-                    self.ec2_state.tags.collapse();
-                } else {
-                    self.ec2_state.table.collapse();
-                }
+                crate::ec2::actions::collapse_row(self);
             }
             Service::EcrRepositories => {
                 crate::ecr::actions::collapse_row(self);
@@ -7453,6 +7252,11 @@ impl App {
 
     fn select_item(&mut self) {
         if self.mode == Mode::RegionPicker {
+            // If filter is active (INSERT mode), exit filter mode instead of selecting
+            if self.region_filter_active {
+                self.region_filter_active = false;
+                return;
+            }
             let filtered = self.get_filtered_regions();
             if let Some(region) = filtered.get(self.region_picker_selected) {
                 // Save current session before changing region
@@ -7886,14 +7690,7 @@ impl App {
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::select_item(self);
             } else if self.current_service == Service::Ec2Instances {
-                if self.ec2_state.current_instance.is_none() {
-                    let filtered_instances = filtered_ec2_instances(self);
-                    if let Some(instance) = self.ec2_state.table.get_selected(&filtered_instances) {
-                        self.ec2_state.current_instance = Some(instance.instance_id.clone());
-                        self.view_mode = ViewMode::Detail;
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::ec2::actions::select_item(self);
             } else if self.current_service == Service::SqsQueues {
                 if self.sqs_state.current_queue.is_none() {
                     let filtered_queues = filtered_queues(
@@ -8466,8 +8263,8 @@ impl App {
                 platform_details: i.platform_details,
                 status_checks: i.status_checks,
                 alarm_status: i.alarm_status,
-                private_dns_name: String::new(),
-                private_ip_address: String::new(),
+                private_dns_name: i.private_dns_name,
+                private_ip_address: i.private_ip_address,
                 security_group_ids: String::new(),
                 owner_id: String::new(),
                 volume_id: String::new(),
@@ -12283,6 +12080,88 @@ mod region_latency_tests {
         // Should have attempted to measure (even if all fail in test env)
         // The map should be initialized
         assert!(app.region_latencies.is_empty() || !app.region_latencies.is_empty());
+    }
+
+    #[test]
+    fn test_region_picker_enter_in_filter_mode_exits_insert_not_selects() {
+        // Regression: pressing Enter while filter is active (INSERT mode) must
+        // exit INSERT mode and move focus to the table — NOT select the first region.
+        // This matches ServicePicker behavior.
+        let mut app = test_app();
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = true; // INSERT mode — typing in filter
+        app.region_filter = "us".to_string();
+        let original_region = app.region.clone();
+
+        // Enter must exit INSERT mode, not select
+        app.handle_action(Action::Select);
+
+        assert!(
+            !app.region_filter_active,
+            "Filter must be deactivated (switch to NORMAL/table focus)"
+        );
+        assert_eq!(
+            app.mode,
+            Mode::RegionPicker,
+            "Must stay in RegionPicker, not close it"
+        );
+        assert_eq!(
+            app.region, original_region,
+            "Region must NOT change when Enter is pressed in INSERT mode"
+        );
+    }
+
+    #[test]
+    fn test_region_picker_enter_in_normal_mode_selects_region() {
+        // Second Enter (when filter is NOT active) must select the region.
+        let mut app = test_app();
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = false; // NORMAL mode — table focused
+        app.region_filter.clear();
+
+        app.handle_action(Action::Select);
+
+        // Should have selected and closed picker (mode changed)
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "Must close picker after selecting region in NORMAL mode"
+        );
+    }
+
+    #[test]
+    fn test_region_filter_can_type_any_character_in_insert_mode() {
+        // Regression: 'k' and 'j' couldn't be typed in the region filter because the
+        // keymap maps them to PrevItem/NextItem in RegionPicker mode, but they should
+        // go to the filter when region_filter_active is true.
+        use crate::keymap::{handle_key, Mode as KMode};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = test_app();
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = true;
+        app.region_filter.clear();
+
+        // Simulate actual keypresses through keymap
+        let t_key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let o_key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
+        let k_key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+
+        // These go through keymap → handle_action
+        if let Some(action) = handle_key(t_key, KMode::RegionPicker) {
+            app.handle_action(action);
+        }
+        if let Some(action) = handle_key(o_key, KMode::RegionPicker) {
+            app.handle_action(action);
+        }
+        if let Some(action) = handle_key(k_key, KMode::RegionPicker) {
+            app.handle_action(action);
+        }
+
+        assert_eq!(
+            app.region_filter, "tok",
+            "'k' must be typed into filter (not navigate up) when filter is active"
+        );
     }
 
     #[test]
@@ -18505,6 +18384,93 @@ mod lambda_version_tab_tests {
         app.ec2_state.detail_tab = Ec2DetailTab::Tags;
         app.handle_action(Action::OpenColumnSelector);
         assert_eq!(app.mode, Mode::ColumnSelector);
+    }
+
+    #[test]
+    fn test_ec2_monitoring_ctrl_u_scrolls_up() {
+        // Regression: Ctrl+D (PageDown) scrolls monitoring graphs down but
+        // Ctrl+U (PageUp) did NOT scroll up — it called page_up_normal which
+        // only pages the instance table, not the monitoring scroll.
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.ec2_state.current_instance = Some("i-abc".to_string());
+        app.ec2_state.detail_tab = Ec2DetailTab::Monitoring;
+
+        // Set scroll to non-zero
+        app.ec2_state.set_monitoring_scroll(3);
+        assert_eq!(app.ec2_state.monitoring_scroll(), 3);
+
+        // Ctrl+U (PageUp) must scroll monitoring up
+        app.handle_action(Action::PageUp);
+        assert_eq!(
+            app.ec2_state.monitoring_scroll(),
+            2,
+            "Ctrl+U must scroll monitoring up by 1"
+        );
+
+        // Ctrl+D (PageDown) scrolls down — verify symmetry
+        app.handle_action(Action::PageDown);
+        assert_eq!(
+            app.ec2_state.monitoring_scroll(),
+            3,
+            "Ctrl+D must scroll monitoring down by 1"
+        );
+    }
+
+    #[test]
+    fn test_ec2_instance_always_shows_when_state_filter_is_all_states() {
+        // Regression: an instance must appear in the table when state_filter is AllStates,
+        // regardless of instance state or whether name/private_ip are empty.
+        use crate::app::Ec2Instance;
+        use crate::ui::ec2::{filtered_ec2_instances, StateFilter};
+        let mut app = test_app();
+        app.current_service = Service::Ec2Instances;
+        app.service_selected = true;
+        app.ec2_state.table.filter.clear();
+        app.ec2_state.state_filter = StateFilter::AllStates;
+
+        // Instance with only id set (no name, no private IP — like a real unnamed instance)
+        app.ec2_state.table.items = vec![Ec2Instance {
+            instance_id: "i-05f181d4aaabadf5a".to_string(),
+            state: "running".to_string(),
+            ..Default::default()
+        }];
+
+        let filtered = filtered_ec2_instances(&app);
+        assert_eq!(
+            filtered.len(),
+            1,
+            "Instance must appear with AllStates filter and no text filter"
+        );
+        assert_eq!(filtered[0].instance_id, "i-05f181d4aaabadf5a");
+    }
+
+    #[test]
+    fn test_ec2_instance_private_ip_populated_from_load() {
+        // Regression: load_ec2_instances was setting private_ip_address = String::new()
+        // which means the render shows no private IP and filter by private IP never works.
+        // Verify the field is mapped from the loaded instance data.
+        use crate::app::Ec2Instance;
+        let instance = Ec2Instance {
+            instance_id: "i-abc".to_string(),
+            name: "my-server".to_string(),
+            state: "running".to_string(),
+            private_dns_name: "ip-10-0-1-5.ec2.internal".to_string(),
+            private_ip_address: "10.0.1.5".to_string(),
+            security_group_ids: "sg-abc123".to_string(),
+            ..Default::default()
+        };
+        // These fields must be set (not empty) for display and filter to work
+        assert!(
+            !instance.private_ip_address.is_empty(),
+            "private_ip_address must be populated"
+        );
+        assert!(
+            !instance.private_dns_name.is_empty(),
+            "private_dns_name must be populated"
+        );
     }
 
     #[test]

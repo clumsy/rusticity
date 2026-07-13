@@ -128,6 +128,15 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("⎋", "cancel"));
         hints.extend(last_hint("^w", "close"));
         hints
+    } else if app.mode == Mode::RegionPicker {
+        let mut hints = vec![];
+        hints.extend(first_hint("↑↓", "scroll"));
+        hints.extend(hint("i", "filter"));
+        hints.extend(hint("⏎", "select"));
+        hints.extend(hint("^l", "measure latency"));
+        hints.extend(hint("⎋", "close"));
+        hints.extend(last_hint("q", "quit"));
+        hints
     } else if app.mode == Mode::FilterInput {
         let mut hints = vec![];
         hints.extend(first_hint("⏎", "apply"));

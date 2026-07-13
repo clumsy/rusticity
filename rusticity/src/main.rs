@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad);
                         let is_profile_select = should_load && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
-                        let is_region_select = should_load && app.mode == rusticity_term::keymap::Mode::RegionPicker;
+                        let is_region_select = should_load && app.mode == rusticity_term::keymap::Mode::RegionPicker && !app.region_filter_active;
                         let is_profile_refresh = should_refresh && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
                         let prev_loading = app.log_groups_state.loading;
                         let prev_view_mode = app.view_mode;
@@ -896,6 +896,36 @@ async fn main() -> Result<()> {
                             match new_app_result {
                                 Ok(mut new_app) => {
                                     new_app.profile = profile_name;
+                                    // Restore previous service context if there was one
+                                    if prev_service_selected {
+                                        new_app.current_service = prev_service;
+                                        new_app.service_selected = true;
+                                        new_app.mode = rusticity_term::keymap::Mode::Normal;
+                                        // Force data reload — region changed, all cached data is stale.
+                                        // Set loading=true for the restored service so the load
+                                        // condition triggers even though service didn't "change".
+                                        match prev_service {
+                                            rusticity_term::app::Service::Ec2Instances => {
+                                                new_app.ec2_state.table.loading = true;
+                                            }
+                                            rusticity_term::app::Service::EcrRepositories => {
+                                                new_app.ecr_state.repositories.loading = true;
+                                            }
+                                            rusticity_term::app::Service::LambdaFunctions => {
+                                                new_app.lambda_state.table.loading = true;
+                                            }
+                                            rusticity_term::app::Service::LambdaApplications => {
+                                                new_app.lambda_application_state.table.loading = true;
+                                            }
+                                            rusticity_term::app::Service::CloudFormationStacks => {
+                                                new_app.cfn_state.table.loading = true;
+                                            }
+                                            _ => {
+                                                // Other services reload via log_groups_state.loading
+                                                new_app.log_groups_state.loading = true;
+                                            }
+                                        }
+                                    }
                                     app = new_app;
                                 },
                                 Err(e) => {

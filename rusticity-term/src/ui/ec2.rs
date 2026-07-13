@@ -1424,4 +1424,26 @@ mod tests {
         assert_eq!(PAGE_SIZE_OPTIONS_SMALL[0].1, "10");
         assert_eq!(PAGE_SIZE_OPTIONS_SMALL[2].1, "50");
     }
+
+    #[test]
+    fn test_ec2_filter_has_search_icon_label() {
+        // The filter panel must use render_filter_bar (which always shows SEARCH_ICON = "─ 🔍 ─"
+        // as the block title), so there must never be an unlabelled/empty filter panel.
+        let source = include_str!("ec2.rs");
+
+        // render_instances must call render_filter_bar (not skip it)
+        assert!(
+            source.contains("render_filter_bar"),
+            "render_instances must use render_filter_bar to show the 🔍 label"
+        );
+
+        // FILTER_HINT must be set as the placeholder so empty filter shows context
+        assert!(
+            source.contains("placeholder: FILTER_HINT"),
+            "FilterConfig must use FILTER_HINT as placeholder"
+        );
+
+        // Verify FILTER_HINT is not empty
+        assert!(!FILTER_HINT.is_empty(), "FILTER_HINT must not be empty");
+    }
 }

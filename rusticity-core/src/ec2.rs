@@ -19,6 +19,8 @@ pub struct Instance {
     pub platform_details: String,
     pub status_checks: String,
     pub alarm_status: String,
+    pub private_ip_address: String,
+    pub private_dns_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -125,6 +127,11 @@ impl Ec2Client {
                                 platform_details: inst.platform_details().unwrap_or("").to_string(),
                                 status_checks: String::new(),
                                 alarm_status: String::new(),
+                                private_ip_address: inst
+                                    .private_ip_address()
+                                    .unwrap_or("")
+                                    .to_string(),
+                                private_dns_name: inst.private_dns_name().unwrap_or("").to_string(),
                             });
                         }
                     }

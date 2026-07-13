@@ -1,3 +1,5 @@
+pub mod actions;
+
 use crate::common::{translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -14,7 +16,7 @@ pub fn init(i18n: &mut HashMap<String, String>) {
     tag::init(i18n);
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Instance {
     pub instance_id: String,
     pub name: String,

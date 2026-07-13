@@ -198,7 +198,9 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('j') | KeyCode::Down => Some(Action::NextItem),
             KeyCode::Char('k') | KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
-            KeyCode::Char('s') => Some(Action::Refresh),
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::MeasureLatency)
+            }
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Refresh),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             KeyCode::Char(c) => Some(Action::FilterInput(c)),
@@ -292,6 +294,7 @@ pub enum Action {
     PageUp,
     PageDown,
     Refresh,
+    MeasureLatency,
     RetryLoad,
     Yank,
     OpenInConsole,

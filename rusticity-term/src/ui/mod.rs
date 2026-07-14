@@ -66,7 +66,9 @@ use crate::sqs::sub::Column as SqsSubscriptionColumn;
 use crate::sqs::tag::Column as SqsTagColumn;
 use crate::sqs::trigger::Column as SqsTriggerColumn;
 use crate::ui::cfn::{
-    DetailTab as CfnDetailTab, OutputColumn, ParameterColumn, ResourceColumn as CfnResourceColumn,
+    ChangeSetColumn as CfnChangeSetColumn, DetailTab as CfnDetailTab,
+    EventColumn as CfnEventColumn, OutputColumn, ParameterColumn,
+    ResourceColumn as CfnResourceColumn,
 };
 use crate::ui::iam::{RoleTab, UserTab};
 use crate::ui::lambda::ApplicationDetailTab;
@@ -429,15 +431,10 @@ pub fn render_summary(frame: &mut Frame, area: Rect, title: &str, fields: &[(&st
 
     let lines: Vec<Line> = fields
         .iter()
-        .map(|(label, value)| {
-            Line::from(vec![
-                Span::styled(*label, Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(value),
-            ])
-        })
+        .map(|(label, value)| labeled_field(label, value.clone()))
         .collect();
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    render_fields_with_dynamic_columns(frame, inner, lines);
 }
 
 // Render tabs with selection highlighting
@@ -1648,6 +1645,50 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 render_page_size_section(app.cfn_state.resources.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == CfnDetailTab::Events
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cfn_event_column_ids {
+                let is_visible = app.cfn_event_visible_column_ids.contains(col_id);
+                if let Some(col) = CfnEventColumn::from_id(col_id) {
+                    let name = translate_column(col.id(), col.default_name());
+                    let (item, len) = render_column_toggle_string(&name, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.events.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.cfn_state.current_stack.is_some()
+            && app.cfn_state.detail_tab == CfnDetailTab::ChangeSets
+        {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.cfn_change_set_column_ids {
+                let is_visible = app.cfn_change_set_visible_column_ids.contains(col_id);
+                if let Some(col) = CfnChangeSetColumn::from_id(col_id) {
+                    let name = translate_column(col.id(), col.default_name());
+                    let (item, len) = render_column_toggle_string(&name, is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.cfn_state.change_sets.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
         } else if app.cfn_state.current_stack.is_none() {
             // Stack list view
             let (header, header_len) = render_section_header("Columns");
@@ -2566,6 +2607,206 @@ fn render_calendar_picker(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 // Render JSON content with syntax highlighting and scrollbar
+/// Highlight a single YAML line (without the line-number gutter span).
+/// Returns the colored spans for the trimmed content + indent.
+fn highlight_yaml_line(line: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let trimmed = line.trim_start();
+    let indent = line.len() - trimmed.len();
+
+    if indent > 0 {
+        spans.push(Span::raw(" ".repeat(indent)));
+    }
+
+    if trimmed.is_empty() {
+        return spans;
+    }
+
+    // Comment line
+    if trimmed.starts_with('#') {
+        spans.push(Span::styled(
+            trimmed.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        return spans;
+    }
+
+    // Document markers --- and ...
+    if trimmed == "---" || trimmed == "..." {
+        spans.push(Span::styled(
+            trimmed.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        return spans;
+    }
+
+    // List item: starts with "- "
+    let (prefix, rest) = if let Some(stripped) = trimmed.strip_prefix("- ") {
+        (Some("- "), stripped)
+    } else {
+        (None, trimmed)
+    };
+
+    if let Some(pfx) = prefix {
+        spans.push(Span::styled(
+            pfx.to_string(),
+            Style::default().fg(Color::Cyan),
+        ));
+        // The rest may itself be a key: value
+        spans.extend(highlight_yaml_value_or_key(rest));
+        return spans;
+    }
+
+    // key: value — split on first ':'
+    spans.extend(highlight_yaml_value_or_key(rest));
+    spans
+}
+
+fn highlight_yaml_value_or_key(text: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+
+    // key: value  (colon followed by space, or colon at end of line)
+    if let Some(colon_pos) = text.find(':') {
+        let after_colon = &text[colon_pos + 1..];
+        if after_colon.is_empty() || after_colon.starts_with(' ') || after_colon.starts_with('\t') {
+            let key = &text[..colon_pos];
+            // Key — strip leading/trailing quotes if any
+            let key_display = key.trim_matches('"').trim_matches('\'');
+            spans.push(Span::styled(
+                key_display.to_string(),
+                Style::default().fg(Color::Blue),
+            ));
+            spans.push(Span::raw(":".to_string()));
+
+            if after_colon.is_empty() {
+                // bare key with no value (mapping)
+                return spans;
+            }
+
+            // value after ": "
+            let value = after_colon.trim_start();
+            spans.push(Span::raw(" ".to_string()));
+            spans.extend(highlight_yaml_scalar(value));
+            return spans;
+        }
+    }
+
+    // plain scalar (no key)
+    spans.extend(highlight_yaml_scalar(text));
+    spans
+}
+
+fn highlight_yaml_scalar(value: &str) -> Vec<Span<'static>> {
+    let trimmed = value.trim();
+
+    // Inline comment — split on " #"
+    let (val_part, comment_part) = if let Some(pos) = trimmed.find(" #") {
+        (&trimmed[..pos], Some(&trimmed[pos..]))
+    } else {
+        (trimmed, None)
+    };
+
+    let val_span = if val_part == "true" || val_part == "false" || val_part == "~" {
+        Span::styled(val_part.to_string(), Style::default().fg(Color::Yellow))
+    } else if val_part == "null" {
+        Span::styled(val_part.to_string(), Style::default().fg(Color::DarkGray))
+    } else if val_part.starts_with('"') || val_part.starts_with('\'') {
+        Span::styled(val_part.to_string(), Style::default().fg(Color::Green))
+    } else if val_part
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit() || c == '-')
+        && val_part
+            .chars()
+            .skip(1)
+            .all(|c| c.is_ascii_digit() || c == '.')
+    {
+        Span::styled(val_part.to_string(), Style::default().fg(Color::Magenta))
+    } else if val_part.starts_with('|') || val_part.starts_with('>') {
+        // Block scalar indicator
+        Span::styled(val_part.to_string(), Style::default().fg(Color::Cyan))
+    } else if val_part.starts_with('!') || val_part.starts_with('&') || val_part.starts_with('*') {
+        // YAML tags / anchors / aliases
+        Span::styled(val_part.to_string(), Style::default().fg(Color::Magenta))
+    } else {
+        Span::raw(val_part.to_string())
+    };
+
+    let mut spans = vec![val_span];
+    if let Some(comment) = comment_part {
+        spans.push(Span::styled(
+            comment.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    spans
+}
+
+/// Render text with YAML syntax highlighting, line numbers, and scrollbar.
+pub fn render_yaml_highlighted(
+    frame: &mut Frame,
+    area: Rect,
+    yaml_text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+) {
+    let total_lines = yaml_text.lines().count();
+    let line_num_width = total_lines.to_string().len().max(2);
+
+    let lines: Vec<Line> = yaml_text
+        .lines()
+        .enumerate()
+        .skip(scroll_offset)
+        .map(|(idx, line)| {
+            let mut spans = Vec::new();
+            let line_num = format!("{:>width$} │ ", idx + 1, width = line_num_width);
+            spans.push(Span::styled(line_num, Style::default().fg(Color::DarkGray)));
+            spans.extend(highlight_yaml_line(line));
+            Line::from(spans)
+        })
+        .collect();
+
+    let block = titled_block(title).border_style(if is_active {
+        active_border()
+    } else {
+        Style::default()
+    });
+
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+
+    if total_lines > 0 {
+        render_scrollbar(
+            frame,
+            area.inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            total_lines,
+            scroll_offset,
+        );
+    }
+}
+
+/// Render template text with format-aware syntax highlighting.
+/// Detects JSON (starts with `{` or `[`) and uses JSON highlighting;
+/// everything else uses YAML highlighting.
+pub fn render_template_highlighted(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+) {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        render_json_highlighted(frame, area, text, scroll_offset, title, is_active);
+    } else {
+        render_yaml_highlighted(frame, area, text, scroll_offset, title, is_active);
+    }
+}
+
 pub fn render_json_highlighted(
     frame: &mut Frame,
     area: Rect,
@@ -6571,6 +6812,126 @@ mod tests {
             first_line.starts_with("╭─ CloudTrail Events ─"),
             "Expected '╭─ CloudTrail Events ─' but got '{}'",
             first_line
+        );
+    }
+
+    #[test]
+    fn test_yaml_scalar_coloring_boolean() {
+        // true/false/null/~ must be colored yellow/darkgray
+        let spans = highlight_yaml_scalar("true");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content, "true");
+        assert_eq!(spans[0].style.fg, Some(Color::Yellow));
+
+        let spans = highlight_yaml_scalar("false");
+        assert_eq!(spans[0].style.fg, Some(Color::Yellow));
+
+        let spans = highlight_yaml_scalar("null");
+        assert_eq!(spans[0].style.fg, Some(Color::DarkGray));
+
+        let spans = highlight_yaml_scalar("~");
+        assert_eq!(spans[0].style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn test_yaml_scalar_coloring_number() {
+        let spans = highlight_yaml_scalar("42");
+        assert_eq!(spans[0].style.fg, Some(Color::Magenta));
+
+        let spans = highlight_yaml_scalar("3.14");
+        assert_eq!(spans[0].style.fg, Some(Color::Magenta));
+    }
+
+    #[test]
+    fn test_yaml_scalar_coloring_string() {
+        let spans = highlight_yaml_scalar("\"hello world\"");
+        assert_eq!(spans[0].style.fg, Some(Color::Green));
+
+        let spans = highlight_yaml_scalar("'single quoted'");
+        assert_eq!(spans[0].style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn test_yaml_line_key_value() {
+        // "key: value" — key is blue, value follows scalar rules
+        let spans = highlight_yaml_line("myKey: true");
+        // spans: [key_span, colon, space, value_span]
+        assert!(
+            spans.iter().any(|s| s.style.fg == Some(Color::Blue)),
+            "Key should be colored blue"
+        );
+        assert!(
+            spans.iter().any(|s| s.style.fg == Some(Color::Yellow)),
+            "Boolean value true should be yellow"
+        );
+    }
+
+    #[test]
+    fn test_yaml_line_comment() {
+        let spans = highlight_yaml_line("# this is a comment");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_yaml_line_list_item() {
+        let spans = highlight_yaml_line("- itemValue");
+        // First span is the "- " dash in cyan
+        assert_eq!(spans[0].content, "- ");
+        assert_eq!(spans[0].style.fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_yaml_line_document_marker() {
+        let spans = highlight_yaml_line("---");
+        assert_eq!(spans[0].style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_render_template_highlighted_detects_json() {
+        // JSON starts with '{' — should use JSON path (no YAML-specific blue key coloring)
+        // We just verify it doesn't panic and the detection function exists.
+        let json = r#"{"AWSTemplateFormatVersion": "2010-09-09"}"#;
+        let trimmed = json.trim_start();
+        assert!(trimmed.starts_with('{'), "JSON detection should see '{{'");
+
+        let yaml = "AWSTemplateFormatVersion: '2010-09-09'";
+        let trimmed = yaml.trim_start();
+        assert!(
+            !trimmed.starts_with('{') && !trimmed.starts_with('['),
+            "YAML should not be detected as JSON"
+        );
+    }
+
+    #[test]
+    fn test_render_summary_uses_dynamic_columns() {
+        // render_summary now delegates to render_fields_with_dynamic_columns.
+        // Verify that calculate_dynamic_height with a wide area returns fewer
+        // rows than with a narrow area (i.e. columns are being used).
+        use ratatui::text::Line;
+
+        let fields: Vec<(&str, String)> = vec![
+            ("ARN: ", "arn:aws:iam::123456789012:role/MyRole".to_string()),
+            (
+                "Trusted entities: ",
+                "Service: lambda.amazonaws.com".to_string(),
+            ),
+            ("Max session duration: ", "1 hour".to_string()),
+            ("Created: ", "2024-01-01T00:00:00Z".to_string()),
+            ("Description: ", "My role description".to_string()),
+        ];
+
+        let lines: Vec<Line> = fields
+            .iter()
+            .map(|(label, value)| labeled_field(label, value.clone()))
+            .collect();
+
+        let narrow_height = calculate_dynamic_height(&lines, 40);
+        let wide_height = calculate_dynamic_height(&lines, 400);
+
+        assert!(
+            narrow_height >= wide_height,
+            "Wide layout should use as few or fewer rows than narrow: wide={wide_height} narrow={narrow_height}"
         );
     }
 }

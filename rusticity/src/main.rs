@@ -509,6 +509,16 @@ async fn main() -> Result<()> {
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
+                            if let Err(e) = app.load_cfn_events(&stack_name).await {
+                                app.error_message = Some(format!("Failed to load events: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            if let Err(e) = app.load_cfn_change_sets(&stack_name).await {
+                                app.error_message = Some(format!("Failed to load change sets: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
                             app.cfn_state.table.loading = false;
                         }
 

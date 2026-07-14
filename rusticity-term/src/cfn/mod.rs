@@ -1,3 +1,5 @@
+pub mod actions;
+
 use crate::common::{translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::cfn::DetailTab;
 use crate::ui::table::Column as TableColumn;
@@ -60,9 +62,15 @@ pub fn console_url_stack_detail_with_tab(region: &str, stack_id: &str, tab: &Det
         DetailTab::GitSync => "gitsync",
     };
     let encoded_arn = urlencoding::encode(stack_id);
+    // The ChangeSets tab requires the extra eventsView=graph query parameter
+    let extra = if matches!(tab, DetailTab::ChangeSets) {
+        "&eventsView=graph"
+    } else {
+        ""
+    };
     format!(
-        "https://{}.console.aws.amazon.com/cloudformation/home?region={}#/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}",
-        region, region, tab_path, encoded_arn
+        "https://{}.console.aws.amazon.com/cloudformation/home?region={}#/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}{}",
+        region, region, tab_path, encoded_arn, extra
     )
 }
 

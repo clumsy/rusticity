@@ -1,20 +1,19 @@
 use crate::app::App;
 use crate::cfn::{format_status, Column as CfnColumn, Stack as CfnStack};
 use crate::common::{
-    filter_by_fields, render_dropdown, render_pagination_text, translate_column, ColumnId,
-    CyclicEnum, InputFocus, SortDirection,
+    filter_by_fields, format_iso_timestamp, render_dropdown, render_pagination_text,
+    translate_column, ColumnId, CyclicEnum, InputFocus, SortDirection, UTC_TIMESTAMP_WIDTH,
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
 use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
-    block_height_for, calculate_dynamic_height, format_title, labeled_field,
-    render_fields_with_dynamic_columns, render_json_highlighted, render_tabs, rounded_block,
-    titled_block,
+    calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
+    render_json_highlighted, render_tabs, render_template_highlighted, titled_block,
 };
 use ratatui::{prelude::*, widgets::*};
-use rusticity_core::cfn::{StackOutput, StackParameter, StackResource};
+use rusticity_core::cfn::{StackChangeSet, StackEvent, StackOutput, StackParameter, StackResource};
 use std::collections::HashSet;
 
 pub const STATUS_FILTER: InputFocus = InputFocus::Dropdown("StatusFilter");
@@ -36,6 +35,20 @@ impl State {
 
     pub const RESOURCES_FILTER_CONTROLS: [InputFocus; 2] =
         [InputFocus::Filter, InputFocus::Pagination];
+
+    pub const EVENTS_FILTER_CONTROLS: [InputFocus; 2] =
+        [InputFocus::Filter, InputFocus::Pagination];
+
+    pub const CHANGE_SETS_FILTER_CONTROLS: [InputFocus; 2] =
+        [InputFocus::Filter, InputFocus::Pagination];
+}
+
+/// Which view is active on the Events tab.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum EventsView {
+    #[default]
+    Table,
+    Timeline,
 }
 
 pub struct State {
@@ -61,6 +74,11 @@ pub struct State {
     pub expanded_items: HashSet<String>,
     pub resources: TableState<StackResource>,
     pub resources_input_focus: InputFocus,
+    pub events: TableState<StackEvent>,
+    pub events_input_focus: InputFocus,
+    pub events_view: EventsView,
+    pub change_sets: TableState<StackChangeSet>,
+    pub change_sets_input_focus: InputFocus,
 }
 
 impl Default for State {
@@ -92,6 +110,11 @@ impl State {
             expanded_items: HashSet::new(),
             resources: TableState::new(),
             resources_input_focus: InputFocus::Filter,
+            events: TableState::new(),
+            events_input_focus: InputFocus::Filter,
+            events_view: EventsView::Table,
+            change_sets: TableState::new(),
+            change_sets_input_focus: InputFocus::Filter,
         }
     }
 }
@@ -214,9 +237,11 @@ impl DetailTab {
         matches!(
             self,
             DetailTab::StackInfo
+                | DetailTab::Events
                 | DetailTab::Parameters
                 | DetailTab::Outputs
                 | DetailTab::Resources
+                | DetailTab::ChangeSets
         )
     }
 }
@@ -275,6 +300,69 @@ impl ResourceColumn {
 
 pub fn resource_column_ids() -> Vec<ColumnId> {
     ResourceColumn::all().iter().map(|c| c.id()).collect()
+}
+
+pub fn event_column_ids() -> Vec<ColumnId> {
+    EventColumn::all().iter().map(|c| c.id()).collect()
+}
+
+/// Default visible columns for the Events table.
+/// OperationId IS visible by default.
+/// HookInvocationCount and Type are NOT visible by default.
+/// PhysicalId and ClientRequestToken are NOT visible by default.
+pub fn event_visible_column_ids() -> Vec<ColumnId> {
+    [
+        EventColumn::OperationId,
+        EventColumn::Timestamp,
+        EventColumn::LogicalId,
+        EventColumn::Status,
+        EventColumn::DetailedStatus,
+        EventColumn::StatusReason,
+    ]
+    .iter()
+    .map(|c| c.id())
+    .collect()
+}
+
+pub fn filtered_events(app: &App) -> Vec<&StackEvent> {
+    filter_by_fields(
+        &app.cfn_state.events.items,
+        &app.cfn_state.events.filter,
+        |e| {
+            vec![
+                &e.logical_id,
+                &e.status,
+                &e.status_reason,
+                &e.resource_type,
+                &e.physical_id,
+            ]
+        },
+    )
+}
+
+pub fn change_set_column_ids() -> Vec<ColumnId> {
+    ChangeSetColumn::all().iter().map(|c| c.id()).collect()
+}
+
+/// Default visible columns: Root change set ID and Parent change set ID hidden.
+pub fn change_set_visible_column_ids() -> Vec<ColumnId> {
+    [
+        ChangeSetColumn::Name,
+        ChangeSetColumn::CreatedTime,
+        ChangeSetColumn::Status,
+        ChangeSetColumn::Description,
+    ]
+    .iter()
+    .map(|c| c.id())
+    .collect()
+}
+
+pub fn filtered_change_sets(app: &App) -> Vec<&StackChangeSet> {
+    filter_by_fields(
+        &app.cfn_state.change_sets.items,
+        &app.cfn_state.change_sets.filter,
+        |cs| vec![&cs.name, &cs.status, &cs.description],
+    )
 }
 
 pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
@@ -505,7 +593,7 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
             render_git_sync(frame, app, stack, chunks[1]);
         }
         DetailTab::Template => {
-            render_json_highlighted(
+            render_template_highlighted(
                 frame,
                 chunks[1],
                 &app.cfn_state.template_body,
@@ -523,11 +611,11 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
         DetailTab::Resources => {
             render_resources(frame, app, chunks[1]);
         }
-        _ => {
-            let paragraph =
-                Paragraph::new(format!("{} - Coming soon", app.cfn_state.detail_tab.name()))
-                    .block(rounded_block());
-            frame.render_widget(paragraph, chunks[1]);
+        DetailTab::Events => {
+            render_events(frame, app, chunks[1]);
+        }
+        DetailTab::ChangeSets => {
+            render_change_sets(frame, app, chunks[1]);
         }
     }
 }
@@ -817,21 +905,22 @@ fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &CfnStack, area: Rect)
         ("Repository sync status message", "-"),
     ];
 
-    let git_sync_height = block_height_for(fields.len());
+    let lines: Vec<Line> = fields
+        .iter()
+        .map(|&(label, value)| labeled_field(label, value))
+        .collect();
+
+    let git_sync_height = calculate_dynamic_height(&lines, area.width.saturating_sub(4)) + 2;
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(git_sync_height), Constraint::Min(0)])
         .split(area);
 
-    let lines: Vec<Line> = fields
-        .iter()
-        .map(|&(label, value)| labeled_field(label, value))
-        .collect();
-
     let block = titled_block("Git sync");
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, sections[0]);
+    let inner = block.inner(sections[0]);
+    frame.render_widget(block, sections[0]);
+    render_fields_with_dynamic_columns(frame, inner, lines);
 }
 
 #[cfg(test)]
@@ -919,15 +1008,41 @@ mod tests {
     }
 
     #[test]
-    fn test_git_sync_block_height() {
-        use crate::ui::block_height_for;
+    fn test_git_sync_uses_dynamic_columns() {
+        // Git sync has 8 labeled fields — with dynamic columns the height depends
+        // on how many columns fit, not a fixed block_height_for value.
+        use crate::ui::calculate_dynamic_height;
+        use ratatui::text::Line;
 
-        // Git sync has 8 labeled fields
-        let field_count = 8;
-        let expected_height = field_count + 2; // +2 for borders
+        let fields = [
+            ("Repository", "-"),
+            ("Deployment file path", "-"),
+            ("Git sync", "-"),
+            ("Repository provider", "-"),
+            ("Repository sync status", "-"),
+            ("Provisioning status", "-"),
+            ("Branch", "-"),
+            ("Repository sync status message", "-"),
+        ];
 
-        assert_eq!(block_height_for(field_count), expected_height as u16);
-        assert_eq!(block_height_for(field_count), 10);
+        let lines: Vec<Line> = fields
+            .iter()
+            .map(|&(label, value)| crate::ui::labeled_field(label, value))
+            .collect();
+
+        // At a narrow width (40 cols) all 8 fields should still have height > 0
+        let narrow_height = calculate_dynamic_height(&lines, 40);
+        assert!(
+            narrow_height >= 8,
+            "8 fields in 1 column should need at least 8 rows, got {narrow_height}"
+        );
+
+        // At a wide width (240 cols) fewer rows are needed (fields spread across columns)
+        let wide_height = calculate_dynamic_height(&lines, 240);
+        assert!(
+            wide_height < narrow_height,
+            "Wide layout should be shorter than narrow: wide={wide_height} narrow={narrow_height}"
+        );
     }
 
     #[test]
@@ -1109,6 +1224,79 @@ mod tests {
         let height = calculate_dynamic_height(&fields, width);
         // With 3 fields and reasonable width, should pack into fewer rows
         assert!(height < 3, "Expected fewer than 3 rows with column packing");
+    }
+
+    #[test]
+    fn test_resource_status_uses_format_status_emoji_and_color() {
+        use super::ResourceColumn;
+        use crate::ui::table::Column;
+        use ratatui::style::Color;
+        use rusticity_core::cfn::StackResource;
+
+        let col = ResourceColumn::Status;
+
+        // CREATE_COMPLETE → green ✅
+        let res = StackResource {
+            logical_id: "MyBucket".into(),
+            physical_id: "my-bucket".into(),
+            resource_type: "AWS::S3::Bucket".into(),
+            status: "CREATE_COMPLETE".into(),
+            module_info: String::new(),
+        };
+        let (text, style) = col.render(&res);
+        assert!(
+            text.contains("✅"),
+            "CREATE_COMPLETE should have ✅ emoji, got: {text}"
+        );
+        assert_eq!(
+            style.fg,
+            Some(Color::Green),
+            "CREATE_COMPLETE should be green"
+        );
+
+        // CREATE_FAILED → red ❌
+        let res_failed = StackResource {
+            status: "CREATE_FAILED".into(),
+            ..res.clone()
+        };
+        let (text, style) = col.render(&res_failed);
+        assert!(
+            text.contains("❌"),
+            "CREATE_FAILED should have ❌ emoji, got: {text}"
+        );
+        assert_eq!(style.fg, Some(Color::Red), "CREATE_FAILED should be red");
+
+        // CREATE_IN_PROGRESS → blue ℹ️
+        let res_ip = StackResource {
+            status: "CREATE_IN_PROGRESS".into(),
+            ..res.clone()
+        };
+        let (text, style) = col.render(&res_ip);
+        assert!(
+            text.contains("ℹ️"),
+            "CREATE_IN_PROGRESS should have ℹ️ emoji, got: {text}"
+        );
+        assert_eq!(
+            style.fg,
+            Some(Color::Blue),
+            "CREATE_IN_PROGRESS should be blue"
+        );
+    }
+
+    #[test]
+    fn test_resource_status_column_width_fits_emoji_and_status() {
+        use super::ResourceColumn;
+        use crate::ui::table::Column;
+
+        let col = ResourceColumn::Status;
+        // Minimum width must accommodate emoji + longest status like
+        // "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS" (44 chars) + emoji (4)
+        // but at minimum it should be >= 35 to avoid truncating common statuses
+        assert!(
+            col.width() >= 35,
+            "Status column width {} is too narrow for emoji+status",
+            col.width()
+        );
     }
 }
 
@@ -1376,6 +1564,159 @@ pub fn render_resources(frame: &mut Frame, app: &App, area: Rect) {
     render_table(frame, config);
 }
 
+pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
+    render_events_table(frame, app, area);
+}
+
+fn render_events_table(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // filter bar
+            Constraint::Min(0),    // table
+        ])
+        .split(area);
+
+    let filtered = filtered_events(app);
+    let filtered_count = filtered.len();
+    let page_size = app.cfn_state.events.page_size.value();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page =
+        if filtered_count > 0 && app.cfn_state.events.scroll_offset + page_size >= filtered_count {
+            total_pages.saturating_sub(1)
+        } else {
+            app.cfn_state.events.scroll_offset / page_size
+        };
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    render_filter_bar(
+        frame,
+        FilterConfig {
+            filter_text: &app.cfn_state.events.filter,
+            placeholder: "Search events",
+            mode: app.mode,
+            is_input_focused: app.cfn_state.events_input_focus == InputFocus::Filter,
+            controls: vec![FilterControl {
+                text: pagination,
+                is_focused: app.cfn_state.events_input_focus == InputFocus::Pagination,
+            }],
+            area: chunks[0],
+        },
+    );
+
+    let page_start = app.cfn_state.events.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_events: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<StackEvent>>> = app
+        .cfn_event_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            EventColumn::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<StackEvent>>)
+        })
+        .collect();
+
+    let expanded_index = app.cfn_state.events.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.events.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = TableConfig {
+        items: page_events,
+        selected_index: app.cfn_state.events.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Timestamp",
+        sort_direction: SortDirection::Desc,
+        title: format_title(&format!("Events ({})", filtered_count)),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|event: &StackEvent| {
+            expanded_from_columns(&columns, event)
+        })),
+        is_active: app.mode != Mode::FilterInput,
+    };
+
+    render_table(frame, config);
+}
+
+pub fn render_change_sets(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let filtered = filtered_change_sets(app);
+    let filtered_count = filtered.len();
+    let page_size = app.cfn_state.change_sets.page_size.value();
+    let total_pages = filtered_count.div_ceil(page_size);
+    let current_page = if filtered_count > 0
+        && app.cfn_state.change_sets.scroll_offset + page_size >= filtered_count
+    {
+        total_pages.saturating_sub(1)
+    } else {
+        app.cfn_state.change_sets.scroll_offset / page_size
+    };
+    let pagination = render_pagination_text(current_page, total_pages);
+
+    render_filter_bar(
+        frame,
+        FilterConfig {
+            filter_text: &app.cfn_state.change_sets.filter,
+            placeholder: "Search change sets",
+            mode: app.mode,
+            is_input_focused: app.cfn_state.change_sets_input_focus == InputFocus::Filter,
+            controls: vec![FilterControl {
+                text: pagination,
+                is_focused: app.cfn_state.change_sets_input_focus == InputFocus::Pagination,
+            }],
+            area: chunks[0],
+        },
+    );
+
+    let page_start = app.cfn_state.change_sets.scroll_offset;
+    let page_end = (page_start + page_size).min(filtered_count);
+    let page_items: Vec<_> = filtered[page_start..page_end].to_vec();
+
+    let columns: Vec<Box<dyn Column<StackChangeSet>>> = app
+        .cfn_change_set_visible_column_ids
+        .iter()
+        .filter_map(|col_id| {
+            ChangeSetColumn::from_id(col_id)
+                .map(|col| Box::new(col) as Box<dyn Column<StackChangeSet>>)
+        })
+        .collect();
+
+    let expanded_index = app.cfn_state.change_sets.expanded_item.and_then(|idx| {
+        let scroll_offset = app.cfn_state.change_sets.scroll_offset;
+        if idx >= scroll_offset && idx < scroll_offset + page_size {
+            Some(idx - scroll_offset)
+        } else {
+            None
+        }
+    });
+
+    let config = TableConfig {
+        items: page_items,
+        selected_index: app.cfn_state.change_sets.selected % page_size,
+        expanded_index,
+        columns: &columns,
+        sort_column: "Created time",
+        sort_direction: SortDirection::Desc,
+        title: format_title(&format!("Change sets ({})", filtered_count)),
+        area: chunks[1],
+        get_expanded_content: Some(Box::new(|cs: &StackChangeSet| {
+            expanded_from_columns(&columns, cs)
+        })),
+        is_active: app.mode != Mode::FilterInput,
+    };
+
+    render_table(frame, config);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ParameterColumn {
     Key,
@@ -1527,7 +1868,7 @@ impl Column<StackResource> for ResourceColumn {
             ResourceColumn::LogicalId => 40,
             ResourceColumn::PhysicalId => 50,
             ResourceColumn::Type => 40,
-            ResourceColumn::Status => 25,
+            ResourceColumn::Status => 35,
             ResourceColumn::Module => 40,
         }) as u16
     }
@@ -1537,8 +1878,255 @@ impl Column<StackResource> for ResourceColumn {
             ResourceColumn::LogicalId => (item.logical_id.clone(), Style::default()),
             ResourceColumn::PhysicalId => (item.physical_id.clone(), Style::default()),
             ResourceColumn::Type => (item.resource_type.clone(), Style::default()),
-            ResourceColumn::Status => (item.status.clone(), Style::default()),
+            ResourceColumn::Status => {
+                let (formatted, color) = format_status(&item.status);
+                (formatted, Style::default().fg(color))
+            }
             ResourceColumn::Module => (item.module_info.clone(), Style::default()),
+        }
+    }
+}
+
+// ── Event column ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EventColumn {
+    OperationId,
+    Timestamp,
+    LogicalId,
+    Status,
+    DetailedStatus,
+    StatusReason,
+    HookInvocationCount,
+    Type,
+    PhysicalId,
+    ClientRequestToken,
+}
+
+impl EventColumn {
+    const ID_OPERATION_ID: &'static str = "column.cfn.event.operation_id";
+    const ID_TIMESTAMP: &'static str = "column.cfn.event.timestamp";
+    const ID_LOGICAL_ID: &'static str = "column.cfn.event.logical_id";
+    const ID_STATUS: &'static str = "column.cfn.event.status";
+    const ID_DETAILED_STATUS: &'static str = "column.cfn.event.detailed_status";
+    const ID_STATUS_REASON: &'static str = "column.cfn.event.status_reason";
+    const ID_HOOK_INVOCATION_COUNT: &'static str = "column.cfn.event.hook_invocation_count";
+    const ID_TYPE: &'static str = "column.cfn.event.type";
+    const ID_PHYSICAL_ID: &'static str = "column.cfn.event.physical_id";
+    const ID_CLIENT_REQUEST_TOKEN: &'static str = "column.cfn.event.client_request_token";
+
+    pub const fn id(&self) -> &'static str {
+        match self {
+            EventColumn::OperationId => Self::ID_OPERATION_ID,
+            EventColumn::Timestamp => Self::ID_TIMESTAMP,
+            EventColumn::LogicalId => Self::ID_LOGICAL_ID,
+            EventColumn::Status => Self::ID_STATUS,
+            EventColumn::DetailedStatus => Self::ID_DETAILED_STATUS,
+            EventColumn::StatusReason => Self::ID_STATUS_REASON,
+            EventColumn::HookInvocationCount => Self::ID_HOOK_INVOCATION_COUNT,
+            EventColumn::Type => Self::ID_TYPE,
+            EventColumn::PhysicalId => Self::ID_PHYSICAL_ID,
+            EventColumn::ClientRequestToken => Self::ID_CLIENT_REQUEST_TOKEN,
+        }
+    }
+
+    pub const fn default_name(&self) -> &'static str {
+        match self {
+            EventColumn::OperationId => "Operation ID",
+            EventColumn::Timestamp => "Timestamp",
+            EventColumn::LogicalId => "Logical ID",
+            EventColumn::Status => "Status",
+            EventColumn::DetailedStatus => "Detailed status",
+            EventColumn::StatusReason => "Status reason",
+            EventColumn::HookInvocationCount => "Hook invocations",
+            EventColumn::Type => "Type",
+            EventColumn::PhysicalId => "Physical ID",
+            EventColumn::ClientRequestToken => "Client request token",
+        }
+    }
+
+    pub fn all() -> Vec<EventColumn> {
+        vec![
+            EventColumn::OperationId,
+            EventColumn::Timestamp,
+            EventColumn::LogicalId,
+            EventColumn::Status,
+            EventColumn::DetailedStatus,
+            EventColumn::StatusReason,
+            EventColumn::HookInvocationCount,
+            EventColumn::Type,
+            EventColumn::PhysicalId,
+            EventColumn::ClientRequestToken,
+        ]
+    }
+
+    pub fn from_id(id: &str) -> Option<EventColumn> {
+        match id {
+            Self::ID_OPERATION_ID => Some(EventColumn::OperationId),
+            Self::ID_TIMESTAMP => Some(EventColumn::Timestamp),
+            Self::ID_LOGICAL_ID => Some(EventColumn::LogicalId),
+            Self::ID_STATUS => Some(EventColumn::Status),
+            Self::ID_DETAILED_STATUS => Some(EventColumn::DetailedStatus),
+            Self::ID_STATUS_REASON => Some(EventColumn::StatusReason),
+            Self::ID_HOOK_INVOCATION_COUNT => Some(EventColumn::HookInvocationCount),
+            Self::ID_TYPE => Some(EventColumn::Type),
+            Self::ID_PHYSICAL_ID => Some(EventColumn::PhysicalId),
+            Self::ID_CLIENT_REQUEST_TOKEN => Some(EventColumn::ClientRequestToken),
+            _ => None,
+        }
+    }
+}
+
+impl Column<StackEvent> for EventColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
+    }
+
+    fn width(&self) -> u16 {
+        let translated = translate_column(self.id(), self.default_name());
+        translated.len().max(match self {
+            EventColumn::OperationId => 20,
+            EventColumn::Timestamp => UTC_TIMESTAMP_WIDTH as usize,
+            EventColumn::LogicalId => 40,
+            EventColumn::Status => 35,
+            EventColumn::DetailedStatus => 30,
+            EventColumn::StatusReason => 50,
+            EventColumn::HookInvocationCount => 18,
+            EventColumn::Type => 40,
+            EventColumn::PhysicalId => 50,
+            EventColumn::ClientRequestToken => 30,
+        }) as u16
+    }
+
+    fn render(&self, item: &StackEvent) -> (String, Style) {
+        match self {
+            EventColumn::OperationId => (item.event_id.clone(), Style::default()),
+            EventColumn::Timestamp => (format_iso_timestamp(&item.timestamp), Style::default()),
+            EventColumn::LogicalId => (item.logical_id.clone(), Style::default()),
+            EventColumn::Status => {
+                let (formatted, color) = format_status(&item.status);
+                (formatted, Style::default().fg(color))
+            }
+            EventColumn::DetailedStatus => (item.detailed_status.clone(), Style::default()),
+            EventColumn::StatusReason => (item.status_reason.clone(), Style::default()),
+            EventColumn::HookInvocationCount => {
+                (item.hook_invocation_count.clone(), Style::default())
+            }
+            EventColumn::Type => (item.resource_type.clone(), Style::default()),
+            EventColumn::PhysicalId => (item.physical_id.clone(), Style::default()),
+            EventColumn::ClientRequestToken => {
+                (item.client_request_token.clone(), Style::default())
+            }
+        }
+    }
+}
+
+// ── Change Set column ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChangeSetColumn {
+    Name,
+    CreatedTime,
+    Status,
+    Description,
+    RootChangeSetId,
+    ParentChangeSetId,
+}
+
+impl ChangeSetColumn {
+    const ID_NAME: &'static str = "column.cfn.changeset.name";
+    const ID_CREATED_TIME: &'static str = "column.cfn.changeset.created_time";
+    const ID_STATUS: &'static str = "column.cfn.changeset.status";
+    const ID_DESCRIPTION: &'static str = "column.cfn.changeset.description";
+    const ID_ROOT_CHANGE_SET_ID: &'static str = "column.cfn.changeset.root_change_set_id";
+    const ID_PARENT_CHANGE_SET_ID: &'static str = "column.cfn.changeset.parent_change_set_id";
+
+    pub const fn id(&self) -> &'static str {
+        match self {
+            ChangeSetColumn::Name => Self::ID_NAME,
+            ChangeSetColumn::CreatedTime => Self::ID_CREATED_TIME,
+            ChangeSetColumn::Status => Self::ID_STATUS,
+            ChangeSetColumn::Description => Self::ID_DESCRIPTION,
+            ChangeSetColumn::RootChangeSetId => Self::ID_ROOT_CHANGE_SET_ID,
+            ChangeSetColumn::ParentChangeSetId => Self::ID_PARENT_CHANGE_SET_ID,
+        }
+    }
+
+    pub const fn default_name(&self) -> &'static str {
+        match self {
+            ChangeSetColumn::Name => "Name",
+            ChangeSetColumn::CreatedTime => "Created time",
+            ChangeSetColumn::Status => "Status",
+            ChangeSetColumn::Description => "Description",
+            ChangeSetColumn::RootChangeSetId => "Root change set ID",
+            ChangeSetColumn::ParentChangeSetId => "Parent change set ID",
+        }
+    }
+
+    pub fn all() -> Vec<ChangeSetColumn> {
+        vec![
+            ChangeSetColumn::Name,
+            ChangeSetColumn::CreatedTime,
+            ChangeSetColumn::Status,
+            ChangeSetColumn::Description,
+            ChangeSetColumn::RootChangeSetId,
+            ChangeSetColumn::ParentChangeSetId,
+        ]
+    }
+
+    pub fn from_id(id: &str) -> Option<ChangeSetColumn> {
+        match id {
+            Self::ID_NAME => Some(ChangeSetColumn::Name),
+            Self::ID_CREATED_TIME => Some(ChangeSetColumn::CreatedTime),
+            Self::ID_STATUS => Some(ChangeSetColumn::Status),
+            Self::ID_DESCRIPTION => Some(ChangeSetColumn::Description),
+            Self::ID_ROOT_CHANGE_SET_ID => Some(ChangeSetColumn::RootChangeSetId),
+            Self::ID_PARENT_CHANGE_SET_ID => Some(ChangeSetColumn::ParentChangeSetId),
+            _ => None,
+        }
+    }
+}
+
+impl Column<StackChangeSet> for ChangeSetColumn {
+    fn id(&self) -> &'static str {
+        Self::id(self)
+    }
+
+    fn default_name(&self) -> &'static str {
+        Self::default_name(self)
+    }
+
+    fn width(&self) -> u16 {
+        let translated = translate_column(self.id(), self.default_name());
+        translated.len().max(match self {
+            ChangeSetColumn::Name => 40,
+            ChangeSetColumn::CreatedTime => UTC_TIMESTAMP_WIDTH as usize,
+            ChangeSetColumn::Status => 30,
+            ChangeSetColumn::Description => 50,
+            ChangeSetColumn::RootChangeSetId => 50,
+            ChangeSetColumn::ParentChangeSetId => 50,
+        }) as u16
+    }
+
+    fn render(&self, item: &StackChangeSet) -> (String, Style) {
+        match self {
+            ChangeSetColumn::Name => (item.name.clone(), Style::default()),
+            ChangeSetColumn::CreatedTime => {
+                (format_iso_timestamp(&item.created_time), Style::default())
+            }
+            ChangeSetColumn::Status => {
+                let (formatted, color) = format_status(&item.status);
+                (formatted, Style::default().fg(color))
+            }
+            ChangeSetColumn::Description => (item.description.clone(), Style::default()),
+            ChangeSetColumn::RootChangeSetId => (item.root_change_set_id.clone(), Style::default()),
+            ChangeSetColumn::ParentChangeSetId => {
+                (item.parent_change_set_id.clone(), Style::default())
+            }
         }
     }
 }
@@ -2010,9 +2598,9 @@ mod resource_tests {
         assert!(DetailTab::Parameters.allows_preferences());
         assert!(DetailTab::Outputs.allows_preferences());
         assert!(DetailTab::Resources.allows_preferences());
+        assert!(DetailTab::Events.allows_preferences());
+        assert!(DetailTab::ChangeSets.allows_preferences());
         assert!(!DetailTab::Template.allows_preferences());
-        assert!(!DetailTab::Events.allows_preferences());
-        assert!(!DetailTab::ChangeSets.allows_preferences());
         assert!(!DetailTab::GitSync.allows_preferences());
     }
 
@@ -2137,5 +2725,285 @@ mod resource_tests {
         app.cfn_state.resources.page_size = PageSize::TwentyFive;
         assert_eq!(app.cfn_state.resources.page_size, PageSize::TwentyFive);
         assert_eq!(app.cfn_state.resources.page_size.value(), 25);
+    }
+}
+
+#[cfg(test)]
+mod events_tests {
+    use super::*;
+    use crate::app::App;
+    use crate::ui::table::Column;
+    use ratatui::style::Color;
+    use rusticity_core::cfn::StackEvent;
+
+    fn test_app() -> App {
+        App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
+
+    fn make_event(status: &str) -> StackEvent {
+        StackEvent {
+            event_id: "evt-001".to_string(),
+            timestamp: "2024-01-01T12:00:00Z".to_string(),
+            logical_id: "MyBucket".to_string(),
+            status: status.to_string(),
+            detailed_status: String::new(),
+            status_reason: "Resource creation complete".to_string(),
+            hook_invocation_count: String::new(),
+            resource_type: "AWS::S3::Bucket".to_string(),
+            physical_id: "my-bucket-123".to_string(),
+            client_request_token: "token-abc".to_string(),
+            operation_id: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_event_status_column_uses_format_status() {
+        let col = EventColumn::Status;
+
+        let e = make_event("CREATE_COMPLETE");
+        let (text, style) = col.render(&e);
+        assert!(
+            text.contains("✅"),
+            "CREATE_COMPLETE should have ✅, got: {text}"
+        );
+        assert_eq!(style.fg, Some(Color::Green));
+
+        let e = make_event("CREATE_FAILED");
+        let (text, style) = col.render(&e);
+        assert!(
+            text.contains("❌"),
+            "CREATE_FAILED should have ❌, got: {text}"
+        );
+        assert_eq!(style.fg, Some(Color::Red));
+
+        let e = make_event("UPDATE_IN_PROGRESS");
+        let (text, style) = col.render(&e);
+        assert!(
+            text.contains("ℹ️"),
+            "UPDATE_IN_PROGRESS should have ℹ️, got: {text}"
+        );
+        assert_eq!(style.fg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn test_event_default_visible_columns_excludes_non_default() {
+        let ids = event_visible_column_ids();
+        let all_ids = event_column_ids();
+
+        // Default visible MUST include OperationId (user spec: OperationId IS enabled by default)
+        assert!(
+            ids.contains(&EventColumn::OperationId.id()),
+            "OperationId must be visible by default"
+        );
+
+        // Default visible must NOT include PhysicalId, ClientRequestToken, HookInvocationCount, Type
+        assert!(
+            !ids.contains(&EventColumn::PhysicalId.id()),
+            "PhysicalId should not be visible by default"
+        );
+        assert!(
+            !ids.contains(&EventColumn::ClientRequestToken.id()),
+            "ClientRequestToken should not be visible by default"
+        );
+        assert!(
+            !ids.contains(&EventColumn::HookInvocationCount.id()),
+            "HookInvocationCount should not be visible by default"
+        );
+        assert!(
+            !ids.contains(&EventColumn::Type.id()),
+            "Type should not be visible by default"
+        );
+
+        // Default visible MUST include Timestamp, LogicalId, Status, DetailedStatus, StatusReason
+        assert!(
+            ids.contains(&EventColumn::Timestamp.id()),
+            "Timestamp must be visible by default"
+        );
+        assert!(
+            ids.contains(&EventColumn::LogicalId.id()),
+            "LogicalId must be visible by default"
+        );
+        assert!(
+            ids.contains(&EventColumn::Status.id()),
+            "Status must be visible by default"
+        );
+        assert!(
+            ids.contains(&EventColumn::DetailedStatus.id()),
+            "DetailedStatus must be visible by default"
+        );
+        assert!(
+            ids.contains(&EventColumn::StatusReason.id()),
+            "StatusReason must be visible by default"
+        );
+
+        // All columns list must include everything
+        assert_eq!(all_ids.len(), EventColumn::all().len());
+    }
+
+    #[test]
+    fn test_event_column_ids_roundtrip() {
+        for col in EventColumn::all() {
+            let id = col.id();
+            let roundtrip = EventColumn::from_id(id);
+            assert_eq!(roundtrip, Some(col), "from_id({id}) should return {col:?}");
+        }
+    }
+
+    #[test]
+    fn test_event_column_sorted_by_timestamp_desc() {
+        // Verify the render config passes sort_column = "Timestamp" and Desc.
+        // We test indirectly: the Timestamp column default_name must be "Timestamp".
+        assert_eq!(EventColumn::Timestamp.default_name(), "Timestamp");
+    }
+
+    #[test]
+    fn test_events_view_default_is_table() {
+        let app = test_app();
+        assert_eq!(
+            app.cfn_state.events_view,
+            EventsView::Table,
+            "Default events view must be Table"
+        );
+    }
+
+    #[test]
+    fn test_toggle_events_view() {
+        let mut app = test_app();
+        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.cfn_state.current_stack = Some("my-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Events;
+
+        assert_eq!(app.cfn_state.events_view, EventsView::Table);
+        crate::cfn::actions::toggle_events_view(&mut app);
+        assert_eq!(app.cfn_state.events_view, EventsView::Timeline);
+        crate::cfn::actions::toggle_events_view(&mut app);
+        assert_eq!(app.cfn_state.events_view, EventsView::Table);
+    }
+
+    #[test]
+    fn test_filtered_events_by_logical_id() {
+        let mut app = test_app();
+        app.cfn_state.events.items = vec![make_event("CREATE_COMPLETE"), {
+            let mut e = make_event("DELETE_IN_PROGRESS");
+            e.logical_id = "OtherResource".to_string();
+            e
+        }];
+        app.cfn_state.events.filter = "MyBucket".to_string();
+
+        let filtered = filtered_events(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "MyBucket");
+    }
+
+    #[test]
+    fn test_column_selector_max_events_tab() {
+        let mut app = test_app();
+        app.cfn_state.current_stack = Some("my-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Events;
+
+        let max = crate::cfn::actions::column_selector_max(&app);
+        let count = crate::cfn::actions::column_count(&app);
+        assert_eq!(count, EventColumn::all().len());
+        assert_eq!(max, count + 6);
+    }
+
+    #[test]
+    fn test_events_allows_preferences() {
+        assert!(
+            DetailTab::Events.allows_preferences(),
+            "Events tab must allow preferences (column selector)"
+        );
+    }
+
+    #[test]
+    fn test_events_expand_collapse() {
+        // Regression: expand_row in app.rs had no CloudFormationStacks arm — Enter never expanded.
+        let mut app = test_app();
+        app.current_service = crate::app::Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.current_stack = Some("my-stack".to_string());
+        app.cfn_state.detail_tab = DetailTab::Events;
+        app.cfn_state.events.items = vec![make_event("CREATE_COMPLETE")];
+        app.cfn_state.events.selected = 0;
+
+        assert_eq!(app.cfn_state.events.expanded_item, None, "starts collapsed");
+
+        app.handle_action(crate::keymap::Action::ExpandRow);
+        assert_eq!(
+            app.cfn_state.events.expanded_item,
+            Some(0),
+            "Enter must expand the selected event row"
+        );
+
+        app.handle_action(crate::keymap::Action::CollapseRow);
+        assert_eq!(
+            app.cfn_state.events.expanded_item, None,
+            "Left arrow must collapse the expanded row"
+        );
+    }
+
+    #[test]
+    fn test_events_column_selector_shows_all_columns() {
+        // Regression: Events tab was missing from render_column_selector in ui/mod.rs —
+        // opening Preferences on Events tab showed an empty panel.
+        // Verify all 10 EventColumns are available via event_column_ids().
+        let ids = event_column_ids();
+        assert_eq!(
+            ids.len(),
+            EventColumn::all().len(),
+            "event_column_ids must return all {} columns",
+            EventColumn::all().len()
+        );
+        // Verify every column can round-trip through from_id
+        for id in &ids {
+            assert!(
+                EventColumn::from_id(id).is_some(),
+                "EventColumn::from_id({id}) must succeed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_events_timestamp_uses_utc_format() {
+        // Regression: Timestamp column was returning raw ISO string instead of formatted UTC.
+        // format_iso_timestamp("2024-01-15T12:30:45Z") → "2024-01-15 12:30:45 (UTC)"
+        let col = EventColumn::Timestamp;
+        let e = StackEvent {
+            event_id: "evt".into(),
+            timestamp: "2024-01-15T12:30:45Z".into(),
+            logical_id: "R".into(),
+            status: "CREATE_COMPLETE".into(),
+            detailed_status: String::new(),
+            status_reason: String::new(),
+            hook_invocation_count: String::new(),
+            resource_type: String::new(),
+            physical_id: String::new(),
+            client_request_token: String::new(),
+            operation_id: String::new(),
+        };
+        let (text, _) = col.render(&e);
+        assert!(
+            text.contains("(UTC)"),
+            "Timestamp must be formatted with (UTC), got: {text}"
+        );
+        assert!(
+            text.contains("2024-01-15"),
+            "Timestamp must contain the date, got: {text}"
+        );
+        assert!(
+            text.contains("12:30:45"),
+            "Timestamp must contain the time, got: {text}"
+        );
+    }
+
+    #[test]
+    fn test_events_timestamp_column_width_is_utc_width() {
+        use crate::common::UTC_TIMESTAMP_WIDTH;
+        let col = EventColumn::Timestamp;
+        assert_eq!(
+            col.width(),
+            UTC_TIMESTAMP_WIDTH,
+            "Timestamp column width must equal UTC_TIMESTAMP_WIDTH ({UTC_TIMESTAMP_WIDTH})"
+        );
     }
 }

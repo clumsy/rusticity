@@ -270,6 +270,95 @@ impl CloudFormationClient {
 
         Ok(resources)
     }
+
+    pub async fn list_stack_events(&self, stack_name: &str) -> Result<Vec<StackEvent>> {
+        let client = self.config.cloudformation_client();
+        let mut events = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let mut req = client.describe_stack_events().stack_name(stack_name);
+            if let Some(ref token) = next_token {
+                req = req.next_token(token);
+            }
+            let response = req.send().await?;
+
+            for e in response.stack_events() {
+                events.push(StackEvent {
+                    event_id: e.event_id().unwrap_or("").to_string(),
+                    timestamp: e
+                        .timestamp()
+                        .map(|t| {
+                            t.fmt(aws_smithy_types::date_time::Format::DateTime)
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default(),
+                    logical_id: e.logical_resource_id().unwrap_or("").to_string(),
+                    status: e
+                        .resource_status()
+                        .map(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    detailed_status: String::new(),
+                    status_reason: e.resource_status_reason().unwrap_or("").to_string(),
+                    hook_invocation_count: String::new(),
+                    resource_type: e.resource_type().unwrap_or("").to_string(),
+                    physical_id: e.physical_resource_id().unwrap_or("").to_string(),
+                    client_request_token: e.client_request_token().unwrap_or("").to_string(),
+                    operation_id: String::new(),
+                });
+            }
+
+            next_token = response.next_token().map(|s| s.to_string());
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        // Already sorted newest-first by the API, keep that order
+        Ok(events)
+    }
+
+    pub async fn list_change_sets(&self, stack_name: &str) -> Result<Vec<StackChangeSet>> {
+        let client = self.config.cloudformation_client();
+        let mut change_sets = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let mut req = client.list_change_sets().stack_name(stack_name);
+            if let Some(ref token) = next_token {
+                req = req.next_token(token);
+            }
+            let response = req.send().await?;
+
+            for cs in response.summaries() {
+                let created_time = cs
+                    .creation_time()
+                    .map(|t| {
+                        t.fmt(aws_smithy_types::date_time::Format::DateTime)
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
+
+                change_sets.push(StackChangeSet {
+                    name: cs.change_set_name().unwrap_or("").to_string(),
+                    change_set_id: cs.change_set_id().unwrap_or("").to_string(),
+                    created_time,
+                    status: cs.status().map(|s| s.as_str()).unwrap_or("").to_string(),
+                    description: cs.description().unwrap_or("").to_string(),
+                    root_change_set_id: cs.root_change_set_id().unwrap_or("").to_string(),
+                    parent_change_set_id: cs.parent_change_set_id().unwrap_or("").to_string(),
+                });
+            }
+
+            next_token = response.next_token().map(|s| s.to_string());
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(change_sets)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -294,4 +383,30 @@ pub struct StackResource {
     pub resource_type: String,
     pub status: String,
     pub module_info: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackEvent {
+    pub event_id: String,
+    pub timestamp: String,
+    pub logical_id: String,
+    pub status: String,
+    pub detailed_status: String,
+    pub status_reason: String,
+    pub hook_invocation_count: String,
+    pub resource_type: String,
+    pub physical_id: String,
+    pub client_request_token: String,
+    pub operation_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackChangeSet {
+    pub name: String,
+    pub change_set_id: String,
+    pub created_time: String,
+    pub status: String,
+    pub description: String,
+    pub root_change_set_id: String,
+    pub parent_change_set_id: String,
 }

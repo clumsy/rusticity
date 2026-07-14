@@ -20,3 +20,8 @@ nohup.out
 # Config
 config.toml
 .env
+
+# Kiro workspace files
+.kiro/
+ADDING_*.md
+SPEC_*.md

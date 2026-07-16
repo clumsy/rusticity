@@ -524,10 +524,11 @@ async fn main() -> Result<()> {
                             app.lambda_application_state.table.loading = false;
                         }
 
-                        // Load CloudFormation stacks when service is switched to and empty
+                        // Load CloudFormation stacks when service is switched to, empty, or explicitly reloading (e.g. view_nested toggled)
                         if app.service_selected && app.current_service == Service::CloudFormationStacks
-                            && (!prev_service_selected || prev_service != Service::CloudFormationStacks)
-                            && app.cfn_state.table.items.is_empty() {
+                            && (app.cfn_state.table.loading
+                                || ((!prev_service_selected || prev_service != Service::CloudFormationStacks)
+                                    && app.cfn_state.table.items.is_empty())) {
                             app.cfn_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_cloudformation_stacks().await {

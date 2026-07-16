@@ -7602,8 +7602,8 @@ impl App {
                 status_reason: s.status_reason,
                 description: s.description,
                 detailed_status: String::new(),
-                root_stack: String::new(),
-                parent_stack: String::new(),
+                root_stack: s.root_stack,
+                parent_stack: s.parent_stack,
                 termination_protection: false,
                 iam_role: String::new(),
                 tags: Vec::new(),
@@ -16552,8 +16552,116 @@ mod sqs_tests {
 
         app.handle_action(Action::ToggleFilterCheckbox);
 
-        assert!(app.cfn_state.view_nested);
-        assert_eq!(app.cfn_state.table.selected, 0);
+        assert!(app.cfn_state.view_nested, "view_nested must be toggled on");
+        assert_eq!(app.cfn_state.table.selected, 0, "selection must reset");
+        // Regression fix: toggling view_nested must clear items and set loading=true
+        // so main.rs triggers a reload with the new include_nested value.
+        // Items stay visible during reload (no flash of empty)
+        assert!(
+            app.cfn_state.table.loading,
+            "loading must be set to trigger reload in main.rs"
+        );
+        assert!(
+            app.cfn_state.table.loading,
+            "loading must be set to trigger reload in main.rs"
+        );
+    }
+
+    #[test]
+    fn test_cfn_view_nested_toggle_off_also_triggers_reload() {
+        // Toggling view_nested OFF must also reload (hides nested stacks).
+        use crate::ui::cfn::VIEW_NESTED;
+        let mut app = test_app();
+        app.service_selected = true;
+        app.current_service = Service::CloudFormationStacks;
+        app.mode = Mode::FilterInput;
+        app.cfn_state.input_focus = VIEW_NESTED;
+        app.cfn_state.view_nested = true; // already on, toggling off
+        app.cfn_state.table.items = vec![CfnStack {
+            name: "nested-stack".to_string(),
+            stack_id: "id2".to_string(),
+            status: "CREATE_COMPLETE".to_string(),
+            created_time: "2024-01-01".to_string(),
+            updated_time: String::new(),
+            deleted_time: String::new(),
+            drift_status: String::new(),
+            last_drift_check_time: String::new(),
+            status_reason: String::new(),
+            description: String::new(),
+            detailed_status: String::new(),
+            root_stack: String::new(),
+            parent_stack: String::new(),
+            termination_protection: false,
+            iam_role: String::new(),
+            tags: Vec::new(),
+            stack_policy: String::new(),
+            rollback_monitoring_time: String::new(),
+            rollback_alarms: Vec::new(),
+            notification_arns: Vec::new(),
+        }];
+
+        app.handle_action(Action::ToggleFilterCheckbox);
+
+        assert!(
+            !app.cfn_state.view_nested,
+            "view_nested must be toggled off"
+        );
+        // Items stay visible during reload
+        assert!(
+            !app.cfn_state.table.items.is_empty(),
+            "items must stay visible during reload (no flash)"
+        );
+        assert!(
+            app.cfn_state.table.loading,
+            "loading must be set to trigger reload"
+        );
+    }
+
+    #[test]
+    fn test_cfn_view_nested_hierarchical_shows_children_when_expanded() {
+        // When view_nested=true and a parent stack is expanded, its children
+        // must appear immediately after the parent in filtered_cloudformation_stacks.
+        use crate::ui::cfn::filtered_cloudformation_stacks;
+
+        let mut app = test_app();
+        app.current_service = Service::CloudFormationStacks;
+        app.service_selected = true;
+        app.cfn_state.view_nested = true;
+
+        let parent_id = "arn:aws:cloudformation:us-east-1:123:stack/parent/abc123".to_string();
+        let child_id =
+            "arn:aws:cloudformation:us-east-1:123:stack/parent-nested/def456".to_string();
+
+        app.cfn_state.table.items = vec![
+            CfnStack {
+                name: "parent-stack".to_string(),
+                stack_id: parent_id.clone(),
+                status: "CREATE_COMPLETE".to_string(),
+                parent_stack: String::new(), // no parent = root
+                root_stack: parent_id.clone(),
+                created_time: "2024-01-02".to_string(),
+                ..Default::default()
+            },
+            CfnStack {
+                name: "child-stack".to_string(),
+                stack_id: child_id.clone(),
+                status: "CREATE_COMPLETE".to_string(),
+                parent_stack: parent_id.clone(), // parent = root stack
+                root_stack: parent_id.clone(),
+                created_time: "2024-01-01".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        // With view_nested=true: both root and child visible (expand all by default)
+        let filtered = filtered_cloudformation_stacks(&app);
+        assert_eq!(
+            filtered.len(),
+            2,
+            "Root + child shown when view_nested=true"
+        );
+        assert_eq!(filtered[0].name, "parent-stack", "Root first");
+        assert_eq!(filtered[1].name, "child-stack", "Child after root");
     }
 
     #[test]

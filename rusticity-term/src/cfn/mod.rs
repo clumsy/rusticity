@@ -74,7 +74,7 @@ pub fn console_url_stack_detail_with_tab(region: &str, stack_id: &str, tab: &Det
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Stack {
     pub name: String,
     pub stack_id: String,
@@ -220,7 +220,18 @@ impl Column {
 
             fn render(&self, item: &&Stack) -> (String, Style) {
                 match self.variant {
-                    Column::Name => (item.name.clone(), Style::default()),
+                    Column::Name => {
+                        let is_nested =
+                            !item.parent_stack.is_empty() && item.parent_stack != item.stack_id;
+                        let name = if is_nested {
+                            // Child stack: 2-space indent — table component adds ► for the selected row
+                            format!("  {}", item.name)
+                        } else {
+                            // Root stack: plain name — table component adds ► or ▼ automatically
+                            item.name.clone()
+                        };
+                        (name, Style::default())
+                    }
                     Column::StackId => (item.stack_id.clone(), Style::default()),
                     Column::Status => {
                         let (formatted, color) = format_status(&item.status);

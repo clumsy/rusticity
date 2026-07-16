@@ -366,14 +366,48 @@ pub fn filtered_change_sets(app: &App) -> Vec<&StackChangeSet> {
 }
 
 pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
-    filter_by_fields(
-        &app.cfn_state.table.items,
-        &app.cfn_state.table.filter,
-        |s| vec![&s.name, &s.description],
-    )
-    .into_iter()
-    .filter(|s| app.cfn_state.status_filter.matches(&s.status))
-    .collect()
+    let items = &app.cfn_state.table.items;
+    let filter = &app.cfn_state.table.filter;
+    let status_filter = &app.cfn_state.status_filter;
+
+    let passes_filter = |s: &&CfnStack| -> bool {
+        let text_ok = if filter.is_empty() {
+            true
+        } else {
+            let q = filter.to_lowercase();
+            s.name.to_lowercase().contains(&q) || s.description.to_lowercase().contains(&q)
+        };
+        text_ok && status_filter.matches(&s.status)
+    };
+
+    if !app.cfn_state.view_nested {
+        return items.iter().filter(|s| passes_filter(s)).collect();
+    }
+
+    // Hierarchical order: roots first, each followed by all direct children.
+    // All children are always shown (expand-all by default).
+    let is_root =
+        |s: &CfnStack| -> bool { s.parent_stack.is_empty() || s.parent_stack == s.stack_id };
+
+    let roots: Vec<&CfnStack> = items.iter().filter(|s| is_root(s)).collect();
+    let nested: Vec<&CfnStack> = items.iter().filter(|s| !is_root(s)).collect();
+
+    let mut result: Vec<&CfnStack> = Vec::new();
+    for root in roots {
+        if passes_filter(&root) {
+            result.push(root);
+        }
+        for child in nested
+            .iter()
+            .copied()
+            .filter(|s| s.parent_stack == root.stack_id)
+        {
+            if passes_filter(&child) {
+                result.push(child);
+            }
+        }
+    }
+    result
 }
 
 pub fn parameter_column_ids() -> Vec<ColumnId> {
@@ -519,7 +553,7 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
 
     let config = TableConfig {
         items: page_stacks,
-        selected_index: app.cfn_state.table.selected % app.cfn_state.table.page_size.value(),
+        selected_index: app.cfn_state.table.selected.saturating_sub(scroll_offset),
         expanded_index,
         columns: &columns,
         sort_column: app.cfn_state.sort_column.default_name(),
@@ -527,7 +561,16 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         title: format_title(&format!("Stacks ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|stack: &&CfnStack| {
-            expanded_from_columns(&columns, stack)
+            let mut lines = expanded_from_columns(&columns, stack);
+            // Indent expanded content for nested stacks to match the 2-space name indent
+            let is_nested = !stack.parent_stack.is_empty() && stack.parent_stack != stack.stack_id;
+            if is_nested {
+                lines = lines
+                    .into_iter()
+                    .map(|(s, style)| (format!("  {}", s), style))
+                    .collect();
+            }
+            lines
         })),
         is_active: app.mode != Mode::FilterInput,
     };

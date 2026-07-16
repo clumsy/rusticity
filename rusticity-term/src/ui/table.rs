@@ -185,12 +185,20 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
 
                 // Add expansion indicator to first column only
                 if i == 0 {
-                    content = if is_expanded {
-                        format!("{} {}", CURSOR_EXPANDED, content)
-                    } else if is_selected {
-                        format!("{} {}", CURSOR_COLLAPSED, content)
+                    // If content has a leading indent (e.g. "  name" for nested items),
+                    // move it before the indicator so it renders as "  ► name" not "►   name"
+                    let leading = if content.starts_with("  ") { "  " } else { "" };
+                    let trimmed = if leading.is_empty() {
+                        content.as_str()
                     } else {
-                        format!("  {}", content)
+                        content.strip_prefix("  ").unwrap_or(&content)
+                    };
+                    content = if is_expanded {
+                        format!("{}{} {}", leading, CURSOR_EXPANDED, trimmed)
+                    } else if is_selected {
+                        format!("{}{} {}", leading, CURSOR_COLLAPSED, trimmed)
+                    } else {
+                        format!("{}  {}", leading, trimmed)
                     };
                 }
 
@@ -200,33 +208,45 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
                         Span::styled(content, style),
                     ]))
                 } else {
-                    // First column: split cursor from content to keep cursor white
+                    // First column: render indent + cursor in white, rest in style
                     if is_expanded {
-                        let text = content
-                            .strip_prefix(&format!("{} ", CURSOR_EXPANDED))
-                            .unwrap_or(&content);
+                        // content = "{indent}▼ {text}"
+                        let cursor_str = format!("{} ", CURSOR_EXPANDED);
+                        let (indent_cursor, text) = if let Some(pos) = content.find(&cursor_str) {
+                            let (prefix, rest) = content.split_at(pos + cursor_str.len());
+                            (prefix, rest)
+                        } else {
+                            ("", content.as_str())
+                        };
                         Cell::from(Line::from(vec![
                             Span::styled(
-                                format!("{} ", CURSOR_EXPANDED),
+                                indent_cursor.to_string(),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(text.to_string(), style),
                         ]))
                     } else if is_selected {
-                        let text = content
-                            .strip_prefix(&format!("{} ", CURSOR_COLLAPSED))
-                            .unwrap_or(&content);
+                        // content = "{indent}► {text}"
+                        let cursor_str = format!("{} ", CURSOR_COLLAPSED);
+                        let (indent_cursor, text) = if let Some(pos) = content.find(&cursor_str) {
+                            let (prefix, rest) = content.split_at(pos + cursor_str.len());
+                            (prefix, rest)
+                        } else {
+                            ("", content.as_str())
+                        };
                         Cell::from(Line::from(vec![
                             Span::styled(
-                                format!("{} ", CURSOR_COLLAPSED),
+                                indent_cursor.to_string(),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(text.to_string(), style),
                         ]))
                     } else {
-                        let text = content.strip_prefix("  ").unwrap_or(&content);
+                        // content = "{indent}  {text}" — split at first non-space after indent
+                        let non_space = content.find(|c: char| c != ' ').unwrap_or(0);
+                        let (spaces, text) = content.split_at(non_space);
                         Cell::from(Line::from(vec![
-                            Span::raw("  "),
+                            Span::raw(spaces.to_string()),
                             Span::styled(text.to_string(), style),
                         ]))
                     }
@@ -237,18 +257,17 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         table_row_to_item_idx.push(idx);
         rows.push(Row::new(cells).height(1));
 
-        // Add empty rows for expanded content
+        // Add placeholder rows for expanded content so subsequent rows are pushed down
+        // and the scrollbar reflects the true content height. We track which are
+        // placeholder rows so table_state_index is never set to one.
         if is_expanded {
             if let Some(ref get_content) = config.get_expanded_content {
                 let styled_lines = get_content(item);
-                let line_count = styled_lines.len();
-
-                for _ in 0..line_count {
-                    let mut empty_cells = Vec::new();
-                    for _ in 0..config.columns.len() {
-                        empty_cells.push(Cell::from(""));
-                    }
-                    table_row_to_item_idx.push(idx);
+                for _ in 0..styled_lines.len() {
+                    let empty_cells: Vec<Cell> =
+                        (0..config.columns.len()).map(|_| Cell::from("")).collect();
+                    // Use usize::MAX as a sentinel meaning "placeholder, not selectable"
+                    table_row_to_item_idx.push(usize::MAX);
                     rows.push(Row::new(empty_cells).height(1));
                 }
             }
@@ -261,7 +280,8 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
 
     let mut table_state_index = 0;
     for (i, &item_idx) in table_row_to_item_idx.iter().enumerate() {
-        if item_idx == config.selected_index {
+        // Skip placeholder rows (sentineled with usize::MAX)
+        if item_idx != usize::MAX && item_idx == config.selected_index {
             table_state_index = i;
             break;
         }
@@ -306,6 +326,31 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     let mut state = TableState::default();
     state.select(Some(table_state_index));
 
+    // If the selected item is expanded, pre-set the offset so ratatui shows all detail rows.
+    // Count placeholder rows after the selected item.
+    let detail_row_count = if config.expanded_index == Some(config.selected_index) {
+        table_row_to_item_idx
+            .iter()
+            .skip(table_state_index + 1)
+            .take_while(|&&idx| idx == usize::MAX)
+            .count()
+    } else {
+        0
+    };
+    if detail_row_count > 0 {
+        // The item is at table_state_index and needs detail_row_count rows below.
+        // visible_rows = area.height - 3 (borders + header).
+        let visible_rows = config.area.height.saturating_sub(3) as usize;
+        if visible_rows > 0 {
+            let last_detail = table_state_index + detail_row_count;
+            if last_detail >= visible_rows {
+                // Scroll so that last detail row is the last visible row
+                let needed_offset = last_detail.saturating_sub(visible_rows - 1);
+                *state.offset_mut() = needed_offset;
+            }
+        }
+    }
+
     // KNOWN ISSUE: ratatui 0.29 Table widget has built-in scrollbar that:
     // 1. Uses ║ and █ characters that cannot be customized
     // 2. Shows automatically when ratatui detects potential overflow
@@ -313,78 +358,102 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     // The scrollbar may appear even when all paginated rows fit in the viewport
     frame.render_stateful_widget(table, config.area, &mut state);
 
+    // After rendering, state.offset() gives ratatui's internal scroll offset.
+    // We use this to compute the correct visual position for the expanded content overlay.
+    let ratatui_scroll_offset = state.offset();
+
     // Render expanded content as overlay if present
     if let Some(expanded_idx) = config.expanded_index {
         if let Some(ref get_content) = config.get_expanded_content {
             if let Some(item) = config.items.get(expanded_idx) {
                 let styled_lines = get_content(item);
 
-                // Calculate position: find row index in rendered table
-                let mut row_y = 0;
+                // Calculate position: find absolute row index for the expanded item,
+                // then subtract ratatui's scroll offset to get the VISUAL row position.
+                let mut abs_row_y = 0;
                 for (i, &item_idx) in table_row_to_item_idx.iter().enumerate() {
                     if item_idx == expanded_idx {
-                        row_y = i;
+                        abs_row_y = i;
                         break;
                     }
                 }
+                // Visual row = absolute row - ratatui's scroll offset
+                // If the expanded item is scrolled off the top, don't render overlay.
+                if abs_row_y < ratatui_scroll_offset {
+                    // Expanded item is above the visible area; skip overlay
+                } else {
+                    let row_y = abs_row_y - ratatui_scroll_offset;
 
-                // Clear entire expanded area once
-                let start_y = config.area.y + 2 + row_y as u16 + 1;
-                let visible_lines = styled_lines
-                    .len()
-                    .min((config.area.y + config.area.height - 1 - start_y) as usize);
-                if visible_lines > 0 {
-                    let clear_area = Rect {
-                        x: config.area.x + 1,
-                        y: start_y,
-                        width: config.area.width.saturating_sub(2),
-                        height: visible_lines as u16,
+                    // Clear entire expanded area once
+                    let start_y = config.area.y + 2 + row_y as u16 + 1;
+                    let bottom = config.area.y + config.area.height - 1;
+                    let visible_lines = if start_y >= bottom {
+                        0
+                    } else {
+                        styled_lines.len().min((bottom - start_y) as usize)
                     };
-                    frame.render_widget(Clear, clear_area);
-                }
-
-                for (line_idx, (line, line_style)) in styled_lines.iter().enumerate() {
-                    let y = start_y + line_idx as u16;
-                    if y >= config.area.y + config.area.height - 1 {
-                        break; // Don't render past bottom border
+                    if visible_lines > 0 {
+                        let clear_area = Rect {
+                            x: config.area.x + 1,
+                            y: start_y,
+                            width: config.area.width.saturating_sub(2),
+                            height: visible_lines as u16,
+                        };
+                        frame.render_widget(Clear, clear_area);
                     }
 
-                    let line_area = Rect {
-                        x: config.area.x + 1,
-                        y,
-                        width: config.area.width.saturating_sub(2),
-                        height: 1,
-                    };
+                    for (line_idx, (line, line_style)) in styled_lines.iter().enumerate() {
+                        let y = start_y + line_idx as u16;
+                        if y >= config.area.y + config.area.height - 1 {
+                            break; // Don't render past bottom border
+                        }
 
-                    // Add expansion indicator on the left
-                    let is_last_line = line_idx == styled_lines.len() - 1;
-                    let is_field_start = line.contains(": ");
-                    let indicator = if is_last_line {
-                        "╰ "
-                    } else if is_field_start {
-                        "├ "
-                    } else {
-                        "│ "
-                    };
+                        let line_area = Rect {
+                            x: config.area.x + 1,
+                            y,
+                            width: config.area.width.saturating_sub(2),
+                            height: 1,
+                        };
 
-                    let spans = if let Some(colon_pos) = line.find(": ") {
-                        let col_name = &line[..colon_pos + 2];
-                        let rest = &line[colon_pos + 2..];
-                        vec![
-                            Span::raw(indicator),
-                            Span::styled(col_name.to_string(), styles::label()),
-                            Span::styled(rest.to_string(), *line_style),
-                        ]
-                    } else {
-                        vec![
-                            Span::raw(indicator),
-                            Span::styled(line.to_string(), *line_style),
-                        ]
-                    };
+                        // Add expansion indicator on the left.
+                        // If the line starts with spaces (indent prefix for nested items),
+                        // strip it from the content and prepend it before the indicator.
+                        let indent = if line.starts_with("  ") { "  " } else { "" };
+                        let line_content = if indent.is_empty() {
+                            line.as_str()
+                        } else {
+                            line.strip_prefix("  ").unwrap_or(line.as_str())
+                        };
 
-                    let paragraph = Paragraph::new(Line::from(spans));
-                    frame.render_widget(paragraph, line_area);
-                }
+                        let is_last_line = line_idx == styled_lines.len() - 1;
+                        let is_field_start = line_content.contains(": ");
+                        let indicator = if is_last_line {
+                            "╰ "
+                        } else if is_field_start {
+                            "├ "
+                        } else {
+                            "│ "
+                        };
+
+                        let spans = if let Some(colon_pos) = line_content.find(": ") {
+                            let col_name = &line_content[..colon_pos + 2];
+                            let rest = &line_content[colon_pos + 2..];
+                            vec![
+                                Span::raw(format!("{}{}", indent, indicator)),
+                                Span::styled(col_name.to_string(), styles::label()),
+                                Span::styled(rest.to_string(), *line_style),
+                            ]
+                        } else {
+                            vec![
+                                Span::raw(format!("{}{}", indent, indicator)),
+                                Span::styled(line_content.to_string(), *line_style),
+                            ]
+                        };
+
+                        let paragraph = Paragraph::new(Line::from(spans));
+                        frame.render_widget(paragraph, line_area);
+                    }
+                } // end else (expanded item is visible)
             }
         }
     }
@@ -585,5 +654,55 @@ mod tests {
 
         // The column width should use UTC_TIMESTAMP_WIDTH (27), not header width (13)
         assert!(UTC_TIMESTAMP_WIDTH > header_width);
+    }
+
+    #[test]
+    fn test_expanded_row_does_not_add_placeholder_rows_to_table() {
+        // Regression: expanded content used to add N empty placeholder rows to the ratatui
+        // Table widget, causing it to scroll internally when the expanded item was near
+        // the bottom ("sticky" overlay bug). Now expanded content is a pure overlay only.
+        // We verify: TableConfig.items.len() == page_size regardless of expansion.
+        struct TestCol;
+        impl Column<String> for TestCol {
+            fn id(&self) -> &'static str {
+                "test"
+            }
+            fn default_name(&self) -> &'static str {
+                "Name"
+            }
+            fn width(&self) -> u16 {
+                10
+            }
+            fn render(&self, item: &String) -> (String, ratatui::style::Style) {
+                (item.clone(), ratatui::style::Style::default())
+            }
+        }
+
+        let items: Vec<String> = vec!["alpha".into(), "beta".into(), "gamma".into()];
+        let columns: Vec<Box<dyn Column<String>>> = vec![Box::new(TestCol)];
+
+        let config = TableConfig {
+            items: items.iter().collect(),
+            selected_index: 2,
+            expanded_index: Some(2), // last item expanded
+            columns: &columns,
+            sort_column: "",
+            sort_direction: crate::common::SortDirection::Asc,
+            title: "Test".to_string(),
+            area: ratatui::layout::Rect::new(0, 0, 80, 10),
+            get_expanded_content: Some(Box::new(|_item: &String| {
+                vec![
+                    ("f1: v1".to_string(), ratatui::style::Style::default()),
+                    ("f2: v2".to_string(), ratatui::style::Style::default()),
+                ]
+            })),
+            is_active: true,
+        };
+
+        assert_eq!(
+            config.items.len(),
+            3,
+            "items.len() must equal page_size — no placeholder rows added for expanded content"
+        );
     }
 }

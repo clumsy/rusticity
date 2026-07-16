@@ -13,6 +13,8 @@ pub struct Stack {
     pub last_drift_check_time: String,
     pub status_reason: String,
     pub description: String,
+    pub root_stack: String,
+    pub parent_stack: String,
 }
 
 pub struct CloudFormationClient {
@@ -101,6 +103,8 @@ impl CloudFormationClient {
                             .unwrap_or_default(),
                         status_reason: stack.stack_status_reason.unwrap_or_default(),
                         description: stack.template_description.unwrap_or_default(),
+                        root_stack: stack.root_id.unwrap_or_default(),
+                        parent_stack: stack.parent_id.unwrap_or_default(),
                     });
                 }
             }

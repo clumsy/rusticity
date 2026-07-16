@@ -234,7 +234,11 @@ pub fn toggle_filter_checkbox(app: &mut App) {
         }
         VIEW_NESTED => {
             app.cfn_state.view_nested = !app.cfn_state.view_nested;
+            // Clear expanded nested stack state
+            app.cfn_state.expanded_items.clear();
+            // Set loading=true to trigger a reload with the new nested setting.
             app.cfn_state.table.reset();
+            app.cfn_state.table.loading = true;
         }
         _ => {}
     }
@@ -278,7 +282,24 @@ pub fn next_item(app: &mut App) {
         app.cfn_state.change_sets.next_item(filtered.len());
     } else {
         let filtered = filtered_cloudformation_stacks(app);
-        app.cfn_state.table.next_item(filtered.len());
+        // Compute extra rows from expanded content that appear before the NEXT selected item.
+        let next_selected =
+            (app.cfn_state.table.selected + 1).min(filtered.len().saturating_sub(1));
+        let extra_rows = if let Some(exp_idx) = app.cfn_state.table.expanded_item {
+            let page_size = app.cfn_state.table.page_size.value();
+            let scroll = app.cfn_state.table.scroll_offset;
+            // The expanded item must be on the current page and strictly before next_selected
+            if exp_idx >= scroll && exp_idx < scroll + page_size && exp_idx < next_selected {
+                app.cfn_visible_column_ids.len()
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        app.cfn_state
+            .table
+            .next_item_with_expansion(filtered.len(), extra_rows);
     }
 }
 
@@ -525,6 +546,14 @@ pub fn scroll_down_template_fast(app: &mut App) {
 pub fn expand_row(app: &mut App) {
     if app.cfn_state.current_stack.is_none() {
         app.cfn_state.table.toggle_expand();
+        // If just expanded, scroll up to ensure detail rows are visible
+        if app.cfn_state.table.expanded_item.is_some() {
+            let detail_rows = app.cfn_visible_column_ids.len();
+            let page_size = app.cfn_state.table.page_size.value();
+            app.cfn_state
+                .table
+                .ensure_expansion_visible(detail_rows, page_size);
+        }
     } else if app.cfn_state.detail_tab == CfnDetailTab::Parameters {
         app.cfn_state.parameters.toggle_expand();
     } else if app.cfn_state.detail_tab == CfnDetailTab::Outputs {

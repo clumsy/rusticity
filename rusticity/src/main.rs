@@ -300,6 +300,19 @@ async fn main() -> Result<()> {
                             app.cloudtrail_state.table.loading = false;
                         }
 
+                        // Reload CloudTrail events when filter is applied (items cleared + loading=true)
+                        if app.service_selected && app.current_service == Service::CloudTrailEvents
+                            && app.cloudtrail_state.table.loading
+                            && app.cloudtrail_state.table.items.is_empty() {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_cloudtrail_events().await {
+                                app.error_message = Some(format!("Failed to load CloudTrail events: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.cloudtrail_state.table.loading = false;
+                        }
+
                         // Load more events if navigated beyond loaded data
                         if app.service_selected && app.current_service == Service::CloudTrailEvents
                             && !app.cloudtrail_state.table.loading
@@ -371,27 +384,69 @@ async fn main() -> Result<()> {
                         {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Some(alarm_name) = &app.alarms_state.current_alarm.clone() {
-                                // Find the alarm to get its metric details
                                 if let Some(alarm) = app.alarms_state.table.items.iter().find(|a| &a.name == alarm_name) {
-                                    let end_time = chrono::Utc::now();
-                                    let start_time = end_time - chrono::TimeDelta::hours(24);
+                                    let is_metric_math = !alarm.sub_metrics.is_empty();
+                                    let has_simple_metric = !alarm.statistic.is_empty()
+                                        && !alarm.metric_name.is_empty()
+                                        && !alarm.namespace.is_empty();
 
-                                    match app.alarms_client.get_metric_statistics(
-                                        &alarm.namespace,
-                                        &alarm.metric_name,
-                                        &alarm.statistic,
-                                        alarm.period as i32,
-                                        start_time,
-                                        end_time,
-                                    ).await {
-                                        Ok(data) => {
-                                            app.alarms_state.metric_data = data;
+                                    if is_metric_math {
+                                        // Metric math alarm — use GetMetricData
+                                        match app.load_alarm_metric_math_data(alarm_name).await {
+                                            Ok(()) => {}
+                                            Err(_) => {
+                                                // Non-fatal: some alarms (e.g. Metrics Insights
+                                                // nested in metric math) can't be graphed this way.
+                                                // Show empty chart silently.
+                                                app.alarms_state.metric_data = Vec::new();
+                                            }
                                         }
-                                        Err(e) => {
-                                            app.error_message = Some(format!("Failed to load alarm metrics: {:#}", e));
-                                            app.error_scroll = 0;
-                                            app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                    } else if has_simple_metric {
+                                        let end_time = chrono::Utc::now();
+                                        let start_time = end_time - chrono::TimeDelta::hours(72);
+                                        let ns = alarm.namespace.clone();
+                                        let mn = alarm.metric_name.clone();
+                                        let stat = alarm.statistic.clone();
+                                        // Parse dimensions from "Key=Value, Key2=Value2" string
+                                        let dims: Vec<(String, String)> = alarm
+                                            .dimensions
+                                            .split(',')
+                                            .filter_map(|pair| {
+                                                let mut parts = pair.trim().splitn(2, '=');
+                                                let k = parts.next()?.trim().to_string();
+                                                let v = parts.next()?.trim().to_string();
+                                                if k.is_empty() { None } else { Some((k, v)) }
+                                            })
+                                            .collect();
+                                        // Ensure we don't exceed 1440 datapoints (AWS limit).
+                                        let window_secs = 72u32 * 3600;
+                                        let min_period = (window_secs as f64 / 1440.0).ceil() as u32;
+                                        let period = [60u32, 300, 900, 3600, 86400]
+                                            .iter()
+                                            .copied()
+                                            .find(|&p| p >= min_period)
+                                            .unwrap_or(3600)
+                                            .max(alarm.period) as i32;
+                                        match app.alarms_client.get_metric_statistics(
+                                            rusticity_core::MetricStatsRequest {
+                                                namespace: &ns,
+                                                metric_name: &mn,
+                                                statistic: &stat,
+                                                period,
+                                                dimensions: &dims,
+                                                start_time,
+                                                end_time,
+                                            },
+                                        ).await {
+                                            Ok(data) => { app.alarms_state.metric_data = data; }
+                                            Err(e) => {
+                                                app.error_message = Some(format!("Failed to load alarm metrics: {:#}", e));
+                                                app.error_scroll = 0;
+                                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                            }
                                         }
+                                    } else {
+                                        app.alarms_state.metric_data = Vec::new();
                                     }
                                 }
                             }

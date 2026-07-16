@@ -24,4 +24,5 @@ pub struct LogStream {
 pub struct LogEvent {
     pub timestamp: DateTime<Utc>,
     pub message: String,
+    pub ingestion_time: Option<DateTime<Utc>>,
 }

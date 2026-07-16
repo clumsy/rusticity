@@ -133,6 +133,7 @@ impl CloudWatchClient {
                 timestamp: DateTime::from_timestamp_millis(e.timestamp().unwrap_or(0))
                     .unwrap_or_default(),
                 message: e.message().unwrap_or("").to_string(),
+                ingestion_time: e.ingestion_time().and_then(DateTime::from_timestamp_millis),
             })
             .collect();
 

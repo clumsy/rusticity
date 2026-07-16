@@ -14,6 +14,7 @@ impl CloudTrailClient {
         &self,
         max_results: Option<i32>,
         next_token: Option<String>,
+        event_name_filter: Option<String>,
     ) -> Result<(
         Vec<(
             String,
@@ -42,6 +43,17 @@ impl CloudTrailClient {
         }
         if let Some(token) = next_token {
             request = request.next_token(token);
+        }
+        if let Some(filter) = event_name_filter {
+            if !filter.is_empty() {
+                request = request.lookup_attributes(
+                    aws_sdk_cloudtrail::types::LookupAttribute::builder()
+                        .attribute_key(aws_sdk_cloudtrail::types::LookupAttributeKey::EventName)
+                        .attribute_value(filter)
+                        .build()
+                        .expect("LookupAttribute build"),
+                );
+            }
         }
 
         let resp = request.send().await?;

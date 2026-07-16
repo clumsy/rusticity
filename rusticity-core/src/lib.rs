@@ -12,7 +12,7 @@ pub mod s3;
 pub mod sqs;
 pub mod types;
 
-pub use alarms::AlarmsClient;
+pub use alarms::{AlarmData, AlarmsClient, MetricStatsRequest, SubMetric};
 pub use apig::ApiGatewayClient;
 pub use cfn::CloudFormationClient;
 pub use cloudtrail::CloudTrailClient;

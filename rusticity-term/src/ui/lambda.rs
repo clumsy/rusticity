@@ -2102,6 +2102,7 @@ fn render_lambda_monitoring_charts(frame: &mut Frame, app: &App, area: Rect) {
             data: &app.lambda_state.metric_data_invocations,
             y_axis_label: "Count",
             x_axis_label: Some(invocations_label),
+            ..Default::default()
         }],
         &[MultiDatasetChart {
             title: "Duration",
@@ -2128,42 +2129,49 @@ fn render_lambda_monitoring_charts(frame: &mut Frame, app: &App, area: Rect) {
                 data: &app.lambda_state.metric_data_throttles,
                 y_axis_label: "Count",
                 x_axis_label: Some(throttles_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Total concurrent executions",
                 data: &app.lambda_state.metric_data_concurrent_executions,
                 y_axis_label: "Count",
                 x_axis_label: Some(concurrent_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Recursive invocations",
                 data: &app.lambda_state.metric_data_recursive_invocations_dropped,
                 y_axis_label: "Count",
                 x_axis_label: Some(recursive_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Async event age",
                 data: &app.lambda_state.metric_data_async_event_age_avg,
                 y_axis_label: "Milliseconds",
                 x_axis_label: Some(async_event_age_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Async events",
                 data: &app.lambda_state.metric_data_async_events_received,
                 y_axis_label: "Count",
                 x_axis_label: Some(async_events_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Async delivery failures",
                 data: &app.lambda_state.metric_data_destination_delivery_failures,
                 y_axis_label: "Count",
                 x_axis_label: Some(async_delivery_failures_label),
+                ..Default::default()
             },
             MetricChart {
                 title: "Iterator age",
                 data: &app.lambda_state.metric_data_iterator_age,
                 y_axis_label: "Milliseconds",
                 x_axis_label: Some(iterator_age_label),
+                ..Default::default()
             },
         ],
         app.lambda_state.monitoring_scroll,

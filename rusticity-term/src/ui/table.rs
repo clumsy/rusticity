@@ -267,6 +267,14 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         }
     }
 
+    // Find the widest column — it becomes the stretch column that absorbs remaining space.
+    let max_declared_width = config
+        .columns
+        .iter()
+        .map(|col| col.width())
+        .max()
+        .unwrap_or(0);
+
     let widths: Vec<Constraint> = config
         .columns
         .iter()
@@ -275,9 +283,13 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
             // Calculate the actual formatted header width
             let formatted_header = format_header_cell(col.name(), i);
             let header_width = formatted_header.chars().count() as u16;
-            // Column width must be at least as wide as the formatted header
             let width = col.width().max(header_width);
-            Constraint::Length(width)
+            // The widest column (typically Message) stretches to fill available space.
+            if col.width() == max_declared_width {
+                Constraint::Fill(1)
+            } else {
+                Constraint::Length(width)
+            }
         })
         .collect();
 

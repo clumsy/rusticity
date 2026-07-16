@@ -3,7 +3,10 @@ use crate::common::{ColumnId, CyclicEnum, InputFocus};
 use crate::cw::{Alarm, AlarmColumn};
 use crate::keymap::Mode;
 use crate::ui::table::{render_table, Column, TableConfig};
-use crate::ui::{format_title, vertical};
+use crate::ui::{
+    calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
+    render_json_highlighted, render_tabs, titled_block, vertical,
+};
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -80,6 +83,42 @@ pub enum AlarmViewMode {
     Cards,
 }
 
+/// Detail tabs shown in the alarm detail view (ribbon below chart).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum AlarmDetailTab {
+    #[default]
+    Details,
+    Tags,
+    MuteRules,
+    Actions,
+    History,
+    ParentAlarms,
+}
+
+impl CyclicEnum for AlarmDetailTab {
+    const ALL: &'static [Self] = &[
+        Self::Details,
+        Self::Tags,
+        Self::MuteRules,
+        Self::Actions,
+        Self::History,
+        Self::ParentAlarms,
+    ];
+}
+
+impl AlarmDetailTab {
+    pub fn name(&self) -> &'static str {
+        match self {
+            AlarmDetailTab::Details => "Details",
+            AlarmDetailTab::Tags => "Tags",
+            AlarmDetailTab::MuteRules => "Mute rules",
+            AlarmDetailTab::Actions => "Actions",
+            AlarmDetailTab::History => "History",
+            AlarmDetailTab::ParentAlarms => "Parent alarms",
+        }
+    }
+}
+
 const COLOR_ORANGE: Color = Color::Rgb(255, 165, 0);
 
 struct AlarmTableColumn {
@@ -147,90 +186,391 @@ impl Column<Alarm> for AlarmTableColumn {
     }
 }
 
+fn format_period(period_secs: u32) -> String {
+    match period_secs {
+        60 => "1 minute".to_string(),
+        300 => "5 minutes".to_string(),
+        900 => "15 minutes".to_string(),
+        3600 => "1 hour".to_string(),
+        86400 => "1 day".to_string(),
+        s if s < 60 => format!("{} seconds", s),
+        s if s % 3600 == 0 => format!("{} hours", s / 3600),
+        s if s % 60 == 0 => format!("{} minutes", s / 60),
+        s => format!("{} seconds", s),
+    }
+}
+
+fn format_treat_missing(raw: &str) -> &str {
+    match raw {
+        "notBreaching" => "Treat missing data as good (not breaching threshold)",
+        "breaching" => "Treat missing data as bad (breaching threshold)",
+        "ignore" => "Do not evaluate (maintain the alarm state)",
+        "missing" => "Treat missing data as missing",
+        other => other,
+    }
+}
+
+fn format_comparison(
+    op: &str,
+    threshold: f64,
+    statistic: &str,
+    eval_periods: u32,
+    datapoints: u32,
+    period: u32,
+) -> String {
+    let op_str = match op {
+        "GreaterThanOrEqualToThreshold" => ">=",
+        "GreaterThanThreshold" => ">",
+        "LessThanThreshold" => "<",
+        "LessThanOrEqualToThreshold" => "<=",
+        "LessThanLowerOrGreaterThanUpperThreshold" => "outside band",
+        other => other,
+    };
+    // window = eval_periods * period (e.g. 3 eval periods × 60s = 3 minutes)
+    let window_label = format_period(eval_periods * period);
+    format!(
+        "{} {} {} for {} datapoints within {}",
+        statistic, op_str, threshold, datapoints, window_label
+    )
+}
+
 fn render_alarm_detail(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::AlarmDetailTab;
+
     let alarm_name = app.alarms_state.current_alarm.as_ref().unwrap();
-    let alarm = app
+    let Some(alarm) = app
         .alarms_state
         .table
         .items
         .iter()
-        .find(|a| &a.name == alarm_name);
+        .find(|a| &a.name == alarm_name)
+    else {
+        return;
+    };
 
-    if let Some(alarm) = alarm {
-        let chunks = vertical([Constraint::Length(8), Constraint::Min(0)], area);
+    // ── Layout ────────────────────────────────────────────────────────────────
+    // Row 0: metric name (1 line)
+    // Row 1: state tabs + threshold condition (1 line)
+    // Row 2: chart
+    // Row 3: detail tab ribbon (1 line)
+    // Row 4: detail content
+    let total_height = area.height as usize;
+    // render_monitoring_tab renders each chart at max 20 lines.
+    // Cap chart_height to 20 to avoid blank space below the chart.
+    let chart_height = total_height.saturating_sub(20).clamp(14, 20) as u16;
+    let detail_height = total_height
+        .saturating_sub(3 + chart_height as usize)
+        .max(8) as u16;
 
-        // Details section
-        let title = format_title(&format!("Alarm: {}", alarm.name));
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .border_style(Style::default().fg(Color::Cyan));
+    let chunks = vertical(
+        [
+            Constraint::Length(1),             // header: metric name
+            Constraint::Length(1),             // state tabs + threshold
+            Constraint::Length(chart_height),  // chart
+            Constraint::Length(1),             // detail tab ribbon
+            Constraint::Length(detail_height), // detail content
+        ],
+        area,
+    );
 
-        let inner = block.inner(chunks[0]);
-        frame.render_widget(block, chunks[0]);
+    // ── Header: metric name + threshold condition ─────────────────────────────
+    // For metric math alarms use the visible expression's label (e.g. "Unschedulable nodes %")
+    // or fall back to the alarm name. For standard alarms use metric_name.
+    let header_text = if !alarm.metric_name.is_empty() {
+        alarm.metric_name.clone()
+    } else {
+        // Find the visible expression's label
+        let visible_label = alarm
+            .sub_metrics
+            .iter()
+            .find(|sm| sm.return_data && sm.expression.is_some() && !sm.label.is_empty())
+            .map(|sm| sm.label.as_str())
+            .unwrap_or("");
+        if !visible_label.is_empty() {
+            visible_label.to_string()
+        } else {
+            alarm.name.clone()
+        }
+    };
 
-        let text = vec![
-            Line::from(vec![
-                Span::styled("State: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(&alarm.state),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "Description: ",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(&alarm.description),
-            ]),
-            Line::from(vec![
-                Span::styled("Metric: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(&alarm.metric_name),
-            ]),
-            Line::from(vec![
-                Span::styled("Namespace: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(&alarm.namespace),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "Conditions: ",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(
-                    "{} {} {}",
-                    alarm.statistic, alarm.comparison_operator, alarm.threshold
-                )),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "State Reason: ",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(&alarm.state_reason),
-            ]),
-        ];
+    // For metric math alarms alarm.period = 0 (period lives on each sub-metric).
+    // Use the period from the first raw sub-metric as the effective period.
+    let effective_period = if alarm.period > 0 {
+        alarm.period
+    } else {
+        alarm
+            .sub_metrics
+            .iter()
+            .filter(|sm| sm.expression.is_none() && sm.period > 0)
+            .map(|sm| sm.period as u32)
+            .next()
+            .unwrap_or(60)
+    };
 
-        let paragraph = Paragraph::new(text);
-        frame.render_widget(paragraph, inner);
+    // Header: metric name (bold, single line)
+    let header = Paragraph::new(Line::from(Span::styled(
+        &header_text,
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    frame.render_widget(header, chunks[0]);
 
-        // Graph section - only render when data is available
-        if !app.alarms_state.metric_data.is_empty() {
-            // Render chart using common monitoring component
-            let chart = crate::ui::monitoring::MetricChart {
-                title: &alarm.metric_name,
-                data: &app.alarms_state.metric_data,
-                y_axis_label: "",
-                x_axis_label: None,
+    // ── State indicator tabs (no threshold — it's shown as red line in chart) ─
+    let state_upper = alarm.state.to_uppercase();
+    let state_tabs = [
+        ("In alarm", "ALARM"),
+        ("OK", "OK"),
+        ("Insufficient data", "INSUFFICIENT_DATA"),
+        ("Disabled/Muted", "DISABLED"),
+    ];
+    let state_spans: Vec<Span> = state_tabs
+        .iter()
+        .enumerate()
+        .flat_map(|(i, (label, key))| {
+            let mut spans = Vec::new();
+            if i > 0 {
+                spans.push(Span::raw(" ⋮ "));
+            }
+            let is_active = state_upper == *key;
+            let style = if is_active {
+                let color = match *key {
+                    "ALARM" => Color::Red,
+                    "OK" => Color::Green,
+                    "INSUFFICIENT_DATA" => COLOR_ORANGE,
+                    _ => Color::DarkGray,
+                };
+                Style::default()
+                    .fg(color)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            } else {
+                Style::default().fg(Color::DarkGray)
             };
-            crate::ui::monitoring::render_monitoring_tab(
-                frame,
-                chunks[1],
-                &[chart],
-                &[],
-                &[],
-                &[],
-                0,
-            );
+            spans.push(Span::styled(*label, style));
+            spans
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(Line::from(state_spans)), chunks[1]);
+
+    // ── Chart ─────────────────────────────────────────────────────────────────
+    // For metric math alarms metric_data is empty (we skip GetMetricStatistics);
+    // show the chart area regardless — the component handles empty data gracefully.
+    let chart_title = if alarm.metric_name.is_empty() {
+        alarm.name.as_str()
+    } else {
+        alarm.metric_name.as_str()
+    };
+    if app.alarms_state.metrics_loading {
+        frame.render_widget(
+            Paragraph::new("Loading metric data…")
+                .block(Block::default().borders(Borders::ALL))
+                .alignment(Alignment::Center),
+            chunks[2],
+        );
+    } else {
+        let chart_threshold = if alarm.comparison_operator.is_empty() {
+            None
+        } else {
+            Some(alarm.threshold)
+        };
+        let chart = crate::ui::monitoring::MetricChart {
+            title: chart_title,
+            data: &app.alarms_state.metric_data,
+            y_axis_label: "",
+            x_axis_label: None,
+            threshold: chart_threshold,
+        };
+        crate::ui::monitoring::render_monitoring_tab(frame, chunks[2], &[chart], &[], &[], &[], 0);
+    }
+
+    // ── Detail tab ribbon ─────────────────────────────────────────────────────
+    let detail_tabs: Vec<(&str, AlarmDetailTab)> =
+        AlarmDetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
+    // Indent by 1 to avoid being clipped by adjacent block borders
+    let ribbon_area = Rect {
+        x: chunks[3].x + 1,
+        width: chunks[3].width.saturating_sub(1),
+        ..chunks[3]
+    };
+    render_tabs(
+        frame,
+        ribbon_area,
+        &detail_tabs,
+        &app.alarms_state.detail_tab,
+    );
+
+    // ── Detail content ────────────────────────────────────────────────────────
+    match app.alarms_state.detail_tab {
+        AlarmDetailTab::Details => {
+            render_alarm_details_tab(frame, alarm, effective_period, chunks[4])
+        }
+        _ => {
+            let paragraph = Paragraph::new(format!(
+                "{} — coming soon",
+                app.alarms_state.detail_tab.name()
+            ))
+            .block(titled_block(app.alarms_state.detail_tab.name()))
+            .alignment(Alignment::Center);
+            frame.render_widget(paragraph, chunks[4]);
         }
     }
+}
+
+fn render_alarm_details_tab(frame: &mut Frame, alarm: &Alarm, effective_period: u32, area: Rect) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+
+    // ── Details fields ────────────────────────────────────────────────────────
+    let detail_fields = vec![
+        labeled_field("Name", &alarm.name),
+        labeled_field("Type", format!("Metric alarm ({})", alarm.alarm_type)),
+        labeled_field(
+            "Description",
+            if alarm.description.is_empty() {
+                "-"
+            } else {
+                &alarm.description
+            },
+        ),
+        labeled_field("State", &alarm.state),
+        labeled_field(
+            "Threshold",
+            if alarm.statistic.is_empty() {
+                // Metric math alarm — use expression label as "statistic"
+                let label = alarm
+                    .sub_metrics
+                    .iter()
+                    .find(|sm| sm.return_data && sm.expression.is_some() && !sm.label.is_empty())
+                    .map(|sm| sm.label.as_str())
+                    .unwrap_or(&alarm.name);
+                let window_label = format_period(alarm.evaluation_periods * effective_period);
+                let op_str = match alarm.comparison_operator.as_str() {
+                    "GreaterThanOrEqualToThreshold" => ">=",
+                    "GreaterThanThreshold" => ">",
+                    "LessThanThreshold" => "<",
+                    "LessThanOrEqualToThreshold" => "<=",
+                    other => other,
+                };
+                format!(
+                    "{} {} {} for {} datapoints within {}",
+                    label, op_str, alarm.threshold, alarm.datapoints_to_alarm, window_label
+                )
+            } else {
+                format_comparison(
+                    &alarm.comparison_operator,
+                    alarm.threshold,
+                    &alarm.statistic,
+                    alarm.evaluation_periods,
+                    alarm.datapoints_to_alarm,
+                    effective_period,
+                )
+            },
+        ),
+        labeled_field(
+            "Actions",
+            if alarm.actions_enabled {
+                "Actions enabled"
+            } else {
+                "Actions disabled"
+            },
+        ),
+        labeled_field("Last state update", &alarm.state_updated_timestamp),
+        labeled_field(
+            "Namespace",
+            if alarm.namespace.is_empty() {
+                "-"
+            } else {
+                &alarm.namespace
+            },
+        ),
+        labeled_field(
+            "Metric name",
+            if alarm.metric_name.is_empty() {
+                "-"
+            } else {
+                &alarm.metric_name
+            },
+        ),
+        labeled_field(
+            "Dimensions",
+            if alarm.dimensions.is_empty() {
+                "-"
+            } else {
+                &alarm.dimensions
+            },
+        ),
+        labeled_field(
+            "Statistic",
+            if alarm.statistic.is_empty() {
+                "-"
+            } else {
+                &alarm.statistic
+            },
+        ),
+        labeled_field("Period", format_period(effective_period)),
+        labeled_field(
+            "Datapoints to alarm",
+            format!(
+                "{} out of {}",
+                alarm.datapoints_to_alarm, alarm.evaluation_periods
+            ),
+        ),
+        labeled_field(
+            "Missing data treatment",
+            format_treat_missing(&alarm.treat_missing_data),
+        ),
+        labeled_field(
+            "Percentiles with low samples",
+            if alarm.evaluate_low_sample_percentile.is_empty() {
+                "-"
+            } else {
+                &alarm.evaluate_low_sample_percentile
+            },
+        ),
+        labeled_field(
+            "ARN",
+            if alarm.alarm_arn.is_empty() {
+                "-"
+            } else {
+                &alarm.alarm_arn
+            },
+        ),
+    ];
+
+    let detail_height = calculate_dynamic_height(&detail_fields, area.width.saturating_sub(4)) + 2;
+
+    // ── EventBridge section ───────────────────────────────────────────────────
+    let eventbridge_json = if alarm.alarm_arn.is_empty() {
+        "{}".to_string()
+    } else {
+        format!(
+            "{{\n  \"source\": [\"aws.cloudwatch\"],\n  \"detail-type\": [\"CloudWatch Alarm State Change\"],\n  \"resources\": [\"{}\"]  \n}}",
+            alarm.alarm_arn
+        )
+    };
+    let eventbridge_lines = eventbridge_json.lines().count() as u16 + 4; // +2 header +2 borders
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(detail_height),
+            Constraint::Length(eventbridge_lines),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    // Render details pane
+    let details_block = titled_block("Details");
+    let details_inner = details_block.inner(sections[0]);
+    frame.render_widget(details_block, sections[0]);
+    render_fields_with_dynamic_columns(frame, details_inner, detail_fields);
+
+    // Render EventBridge rule pane
+    render_json_highlighted(
+        frame,
+        sections[1],
+        &eventbridge_json,
+        0,
+        " View EventBridge rule ",
+        false,
+    );
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
@@ -305,6 +645,15 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let count = filtered_alarms.len();
     let title = format_title(&format!("Alarms ({})", count));
 
+    // Slice to current page
+    let start_idx = current_page * page_size;
+    let end_idx = (start_idx + page_size).min(filtered_alarms.len());
+    let page_alarms: Vec<&Alarm> = if start_idx < filtered_alarms.len() {
+        filtered_alarms[start_idx..end_idx].to_vec()
+    } else {
+        Vec::new()
+    };
+
     let columns: Vec<Box<dyn Column<Alarm>>> = app
         .cw_alarm_visible_column_ids
         .iter()
@@ -316,9 +665,15 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let config = TableConfig {
-        items: filtered_alarms,
-        selected_index: app.alarms_state.table.selected,
-        expanded_index: app.alarms_state.table.expanded_item,
+        items: page_alarms,
+        selected_index: app.alarms_state.table.selected % page_size,
+        expanded_index: app.alarms_state.table.expanded_item.and_then(|idx| {
+            if idx >= start_idx && idx < end_idx {
+                Some(idx - start_idx)
+            } else {
+                None
+            }
+        }),
         columns: &columns,
         sort_column: &app.alarms_state.sort_column,
         sort_direction: app.alarms_state.sort_direction,
@@ -385,6 +740,7 @@ mod tests {
             expression: String::new(),
             alarm_type: "MetricAlarm".to_string(),
             cross_account: String::new(),
+            ..Default::default()
         }
     }
 
@@ -460,5 +816,105 @@ mod tests {
         let width = AlarmColumn::LastStateUpdate.width() as usize;
         assert!(width >= ts.len());
         assert!(width >= "Last state update ↑".to_string().len());
+    }
+
+    #[test]
+    fn test_alarm_detail_tab_cycles_with_tab_key() {
+        use crate::common::CyclicEnum;
+        let mut tab = AlarmDetailTab::Details;
+        tab = tab.next();
+        assert_eq!(tab, AlarmDetailTab::Tags);
+        tab = tab.next();
+        assert_eq!(tab, AlarmDetailTab::MuteRules);
+        tab = tab.prev();
+        assert_eq!(tab, AlarmDetailTab::Tags);
+        tab = tab.prev();
+        assert_eq!(tab, AlarmDetailTab::Details);
+    }
+
+    #[test]
+    fn test_alarm_detail_tab_wraps_around() {
+        use crate::common::CyclicEnum;
+        let last = AlarmDetailTab::ParentAlarms;
+        assert_eq!(
+            last.next(),
+            AlarmDetailTab::Details,
+            "Last tab wraps to first"
+        );
+        let first = AlarmDetailTab::Details;
+        assert_eq!(
+            first.prev(),
+            AlarmDetailTab::ParentAlarms,
+            "First tab wraps to last"
+        );
+    }
+
+    #[test]
+    fn test_format_period_produces_human_readable() {
+        assert_eq!(format_period(60), "1 minute");
+        assert_eq!(format_period(300), "5 minutes");
+        assert_eq!(format_period(3600), "1 hour");
+        assert_eq!(format_period(86400), "1 day");
+        assert_eq!(format_period(120), "2 minutes");
+    }
+
+    #[test]
+    fn test_format_treat_missing_known_values() {
+        assert!(format_treat_missing("notBreaching").contains("good"));
+        assert!(format_treat_missing("breaching").contains("bad"));
+        assert!(format_treat_missing("ignore").contains("maintain"));
+        assert!(format_treat_missing("missing").contains("missing"));
+    }
+
+    #[test]
+    fn test_format_comparison_builds_readable_threshold() {
+        let result = format_comparison("GreaterThanOrEqualToThreshold", 90.0, "Average", 3, 3, 60);
+        assert!(result.contains(">="), "must contain >= operator");
+        assert!(result.contains("90"), "must contain threshold");
+        assert!(result.contains("Average"), "must contain statistic");
+        assert!(
+            result.contains("3 datapoints"),
+            "must contain datapoints count"
+        );
+    }
+
+    #[test]
+    fn test_alarms_next_detail_tab_cycles_detail_tabs_in_detail_view() {
+        use crate::app::{App, Service};
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.alarms_state.current_alarm = Some("my-alarm".to_string());
+        app.alarms_state.detail_tab = AlarmDetailTab::Details;
+
+        crate::cw::actions::alarms_next_detail_tab(&mut app);
+        assert_eq!(
+            app.alarms_state.detail_tab,
+            AlarmDetailTab::Tags,
+            "Tab in detail view must cycle detail tabs, not list tabs"
+        );
+    }
+
+    #[test]
+    fn test_alarms_next_detail_tab_cycles_list_tabs_in_list_view() {
+        use crate::app::AlarmTab;
+        use crate::app::{App, Service};
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        // No alarm selected — list view
+        app.alarms_state.alarm_tab = AlarmTab::AllAlarms;
+
+        crate::cw::actions::alarms_next_detail_tab(&mut app);
+        assert_eq!(
+            app.alarms_state.alarm_tab,
+            AlarmTab::InAlarm,
+            "Tab in list view must cycle list tabs"
+        );
+        assert_eq!(
+            app.alarms_state.detail_tab,
+            AlarmDetailTab::Details,
+            "detail_tab must be unaffected when in list view"
+        );
     }
 }

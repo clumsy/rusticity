@@ -521,54 +521,63 @@ fn render_queue_detail(frame: &mut ratatui::Frame, app: &App, area: ratatui::pre
                         data: &app.sqs_state.metric_data,
                         y_axis_label: "Seconds",
                         x_axis_label: Some(age_label),
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Approximate number of messages delayed",
                         data: &app.sqs_state.metric_data_delayed,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Approximate number of messages not visible",
                         data: &app.sqs_state.metric_data_not_visible,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Approximate number of messages visible",
                         data: &app.sqs_state.metric_data_visible,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Number of empty receives",
                         data: &app.sqs_state.metric_data_empty_receives,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Number of messages deleted",
                         data: &app.sqs_state.metric_data_messages_deleted,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Number of messages received",
                         data: &app.sqs_state.metric_data_messages_received,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Number of messages sent",
                         data: &app.sqs_state.metric_data_messages_sent,
                         y_axis_label: "Count",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                     MetricChart {
                         title: "Sent message size",
                         data: &app.sqs_state.metric_data_sent_message_size,
                         y_axis_label: "Bytes",
                         x_axis_label: None,
+                        ..Default::default()
                     },
                 ],
                 &[],

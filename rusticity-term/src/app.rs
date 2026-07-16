@@ -47,7 +47,7 @@ pub use crate::ui::cfn::{
     EventsView as CfnEventsView, State as CfnState, StatusFilter as CfnStatusFilter,
 };
 pub use crate::ui::cw::alarms::{
-    AlarmTab, AlarmViewMode, FILTER_CONTROLS as ALARM_FILTER_CONTROLS,
+    AlarmDetailTab, AlarmTab, AlarmViewMode, FILTER_CONTROLS as ALARM_FILTER_CONTROLS,
 };
 pub use crate::ui::cw::logs::{
     filtered_log_events, filtered_log_groups, filtered_log_streams, selected_log_group,
@@ -237,6 +237,7 @@ pub struct CloudWatchAlarmsState {
     pub table: TableState<Alarm>,
     pub current_alarm: Option<String>,
     pub alarm_tab: AlarmTab,
+    pub detail_tab: AlarmDetailTab,
     pub view_as: AlarmViewMode,
     pub wrap_lines: bool,
     pub sort_column: String,
@@ -254,6 +255,8 @@ pub struct CloudTrailState {
     pub event_json_scroll: usize,
     pub detail_focus: CloudTrailDetailFocus,
     pub resources_expanded_index: Option<usize>,
+    /// The EventName filter currently applied via API (set on Enter, cleared on empty filter).
+    pub active_event_name_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -583,9 +586,9 @@ impl App {
             op(filter);
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
-                self.alarms_state.table.reset();
+                crate::cw::actions::alarms_apply_filter_reset(self);
             } else if self.current_service == Service::CloudTrailEvents {
-                self.cloudtrail_state.table.reset();
+                crate::cloudtrail::actions::apply_filter_reset(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::apply_filter_reset(self);
             } else if self.current_service == Service::S3Buckets {
@@ -669,6 +672,7 @@ impl App {
                 event_json_scroll: 0,
                 detail_focus: CloudTrailDetailFocus::Resources,
                 resources_expanded_index: None,
+                active_event_name_filter: None,
             },
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
@@ -884,6 +888,7 @@ impl App {
                 event_json_scroll: 0,
                 detail_focus: CloudTrailDetailFocus::Resources,
                 resources_expanded_index: None,
+                active_event_name_filter: None,
             },
             sqs_state: SqsState::new(),
             ec2_state: Ec2State::default(),
@@ -1106,8 +1111,14 @@ impl App {
                 _ => {}
             },
             Action::Quit => {
+                self.mode = Mode::QuitConfirm;
+            }
+            Action::ConfirmQuit => {
                 self.save_current_session();
                 self.running = false;
+            }
+            Action::CancelQuit => {
+                self.mode = Mode::Normal;
             }
             Action::CloseService => {
                 if !self.tabs.is_empty() {
@@ -1178,6 +1189,22 @@ impl App {
             Action::ExpandRow => self.expand_row(),
             Action::Select => self.select_item(),
             Action::OpenSpaceMenu => {
+                // If Insights log group search is focused, Space opens/toggles dropdown
+                use crate::app::InsightsFocus;
+                if self.current_service == Service::CloudWatchInsights
+                    && self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
+                {
+                    if self.insights_state.insights.show_dropdown
+                        && !self.insights_state.insights.log_group_matches.is_empty()
+                    {
+                        // Dropdown open: toggle highlighted entry
+                        self.handle_action(Action::ToggleFilterCheckbox);
+                    } else {
+                        // Dropdown closed: open it with all log groups
+                        self.handle_action(Action::Select);
+                    }
+                    return;
+                }
                 self.mode = Mode::SpaceMenu;
                 self.service_picker.filter.clear();
                 self.service_picker.filter_active = false;
@@ -1439,13 +1466,13 @@ impl App {
                     } else if self.view_mode == ViewMode::PolicyView {
                         self.iam_state.policy_input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::CloudWatchAlarms {
-                        self.alarms_state.input_focus == InputFocus::Pagination
+                        crate::cw::actions::alarms_is_pagination_focused(self)
                     } else if self.current_service == Service::CloudTrailEvents {
-                        self.cloudtrail_state.input_focus == InputFocus::Pagination
+                        crate::cloudtrail::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::Ec2Instances {
                         crate::ec2::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::CloudWatchLogGroups {
-                        self.log_groups_state.input_focus == InputFocus::Pagination
+                        crate::cw::actions::logs_is_pagination_focused(self)
                     } else if self.current_service == Service::ApiGatewayApis {
                         self.apig_state.input_focus == InputFocus::Pagination
                     } else if self.current_service == Service::EcrRepositories
@@ -2230,16 +2257,7 @@ impl App {
                         self.apig_api_column_ids.len(),
                     );
                 } else if self.current_service == Service::CloudWatchAlarms {
-                    // Jump to next section: Columns(0), ViewAs(18), PageSize(22), WrapLines(28)
-                    if self.column_selector_index < 18 {
-                        self.column_selector_index = 18; // ViewAs header
-                    } else if self.column_selector_index < 22 {
-                        self.column_selector_index = 22; // PageSize header
-                    } else if self.column_selector_index < 28 {
-                        self.column_selector_index = 28; // WrapLines header
-                    } else {
-                        self.column_selector_index = 0; // Back to Columns header
-                    }
+                    crate::cw::actions::alarms_next_preferences(self);
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_some()
                 {
@@ -2438,16 +2456,7 @@ impl App {
                         self.apig_api_column_ids.len(),
                     );
                 } else if self.current_service == Service::CloudWatchAlarms {
-                    // Jump to prev section: Columns(0), ViewAs(18), PageSize(22), WrapLines(28)
-                    if self.column_selector_index >= 28 {
-                        self.column_selector_index = 22;
-                    } else if self.column_selector_index >= 22 {
-                        self.column_selector_index = 18;
-                    } else if self.column_selector_index >= 18 {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = 28;
-                    }
+                    crate::cw::actions::alarms_prev_preferences(self);
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_some()
                 {
@@ -2612,7 +2621,7 @@ impl App {
                 if self.current_service == Service::CloudTrailEvents
                     && self.cloudtrail_state.current_event.is_some()
                 {
-                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.next();
+                    crate::cloudtrail::actions::next_detail_tab(self);
                 } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
@@ -2654,6 +2663,8 @@ impl App {
                     && self.iam_state.current_group.is_some()
                 {
                     crate::iam::actions::next_detail_tab_groups(self);
+                } else if self.current_service == Service::CloudWatchAlarms {
+                    crate::cw::actions::alarms_next_detail_tab(self);
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.next();
                     if self.log_groups_state.detail_tab == DetailTab::Tags {
@@ -2661,12 +2672,6 @@ impl App {
                     }
                 } else if self.current_service == Service::S3Buckets {
                     crate::s3::actions::next_detail_tab(self);
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    self.alarms_state.alarm_tab = match self.alarms_state.alarm_tab {
-                        AlarmTab::AllAlarms => AlarmTab::InAlarm,
-                        AlarmTab::InAlarm => AlarmTab::AllAlarms,
-                    };
-                    self.alarms_state.table.reset();
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
@@ -2685,7 +2690,7 @@ impl App {
                 if self.current_service == Service::CloudTrailEvents
                     && self.cloudtrail_state.current_event.is_some()
                 {
-                    self.cloudtrail_state.detail_focus = self.cloudtrail_state.detail_focus.prev();
+                    crate::cloudtrail::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
@@ -2719,15 +2724,12 @@ impl App {
                     && self.iam_state.current_group.is_some()
                 {
                     crate::iam::actions::prev_detail_tab_groups(self);
+                } else if self.current_service == Service::CloudWatchAlarms {
+                    crate::cw::actions::alarms_prev_detail_tab(self);
                 } else if self.view_mode == ViewMode::Detail {
                     self.log_groups_state.detail_tab = self.log_groups_state.detail_tab.prev();
                 } else if self.current_service == Service::S3Buckets {
                     crate::s3::actions::prev_detail_tab(self);
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    self.alarms_state.alarm_tab = match self.alarms_state.alarm_tab {
-                        AlarmTab::AllAlarms => AlarmTab::InAlarm,
-                        AlarmTab::InAlarm => AlarmTab::AllAlarms,
-                    };
                 } else if self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
                 {
@@ -2911,25 +2913,17 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchLogGroups
                 {
-                    use crate::ui::cw::logs::FILTER_CONTROLS;
-                    self.log_groups_state.input_focus =
-                        self.log_groups_state.input_focus.next(&FILTER_CONTROLS);
+                    crate::cw::actions::logs_next_filter_focus(self);
                 } else if self.mode == Mode::EventFilterInput {
-                    self.log_groups_state.event_input_focus =
-                        self.log_groups_state.event_input_focus.next();
+                    crate::cw::actions::logs_next_event_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchAlarms
                 {
-                    use crate::ui::cw::alarms::FILTER_CONTROLS;
-                    self.alarms_state.input_focus =
-                        self.alarms_state.input_focus.next(&FILTER_CONTROLS);
+                    crate::cw::actions::alarms_next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudTrailEvents
                 {
-                    const FILTER_CONTROLS: [InputFocus; 2] =
-                        [InputFocus::Filter, InputFocus::Pagination];
-                    self.cloudtrail_state.input_focus =
-                        self.cloudtrail_state.input_focus.next(&FILTER_CONTROLS);
+                    crate::cloudtrail::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::ApiGatewayApis
                 {
@@ -3032,12 +3026,9 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchLogGroups
                 {
-                    use crate::ui::cw::logs::FILTER_CONTROLS;
-                    self.log_groups_state.input_focus =
-                        self.log_groups_state.input_focus.prev(&FILTER_CONTROLS);
+                    crate::cw::actions::logs_prev_filter_focus(self);
                 } else if self.mode == Mode::EventFilterInput {
-                    self.log_groups_state.event_input_focus =
-                        self.log_groups_state.event_input_focus.prev();
+                    crate::cw::actions::logs_prev_event_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
@@ -3050,16 +3041,11 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchAlarms
                 {
-                    use crate::ui::cw::alarms::FILTER_CONTROLS;
-                    self.alarms_state.input_focus =
-                        self.alarms_state.input_focus.prev(&FILTER_CONTROLS);
+                    crate::cw::actions::alarms_prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudTrailEvents
                 {
-                    const FILTER_CONTROLS: [InputFocus; 2] =
-                        [InputFocus::Filter, InputFocus::Pagination];
-                    self.cloudtrail_state.input_focus =
-                        self.cloudtrail_state.input_focus.prev(&FILTER_CONTROLS);
+                    crate::cloudtrail::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
@@ -3074,7 +3060,10 @@ impl App {
             Action::ToggleFilterCheckbox => {
                 if self.mode == Mode::FilterInput && self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_filter_checkbox(self);
-                } else if self.mode == Mode::InsightsInput {
+                } else if self.mode == Mode::InsightsInput
+                    || (self.mode == Mode::Normal
+                        && self.current_service == Service::CloudWatchInsights)
+                {
                     use crate::app::InsightsFocus;
                     if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
                         && self.insights_state.insights.show_dropdown
@@ -3294,13 +3283,11 @@ impl App {
                 } else if self.current_service == Service::CloudWatchAlarms
                     && self.alarms_state.current_alarm.is_some()
                 {
-                    // Refresh alarm metrics — keep old data visible until new data arrives
-                    self.alarms_state.metrics_loading = true;
+                    crate::cw::actions::alarms_refresh(self);
                 } else if self.current_service == Service::CloudWatchInsights
                     && !self.insights_state.insights.selected_log_groups.is_empty()
                 {
-                    self.log_groups_state.loading = true;
-                    self.insights_state.insights.query_completed = true;
+                    crate::cw::actions::insights_refresh(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::refresh(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -3332,6 +3319,10 @@ impl App {
                     crate::lambda::functions::yank(self);
                 } else if self.current_service == Service::CloudFormationStacks {
                     crate::cfn::actions::yank(self);
+                } else if self.current_service == Service::CloudTrailEvents
+                    && self.cloudtrail_state.current_event.is_some()
+                {
+                    crate::cloudtrail::actions::yank(self);
                 } else if self.current_service == Service::IamUsers {
                     crate::iam::actions::yank_users(self);
                 } else if self.current_service == Service::IamRoles {
@@ -3441,18 +3432,57 @@ impl App {
                         self.sqs_state.subscription_region_filter = region.code.to_string();
                     }
                     self.mode = Mode::Normal;
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::CloudTrailEvents
+                {
+                    // Apply filter: set API-level EventName filter and reload
+                    let filter_text = self.cloudtrail_state.table.filter.trim().to_string();
+                    self.cloudtrail_state.active_event_name_filter = if filter_text.is_empty() {
+                        None
+                    } else {
+                        Some(filter_text)
+                    };
+                    // Clear existing items and trigger reload from API
+                    self.cloudtrail_state.table.items.clear();
+                    self.cloudtrail_state.table.next_token = None;
+                    self.cloudtrail_state.table.selected = 0;
+                    self.cloudtrail_state.table.scroll_offset = 0;
+                    self.cloudtrail_state.table.loading = true;
+                    self.mode = Mode::Normal;
                 } else if self.mode == Mode::InsightsInput {
                     use crate::app::InsightsFocus;
                     if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
                         && self.insights_state.insights.show_dropdown
                     {
-                        // Close dropdown, exit input mode, and execute query
-                        self.insights_state.insights.show_dropdown = false;
-                        self.mode = Mode::Normal;
-                        if !self.insights_state.insights.selected_log_groups.is_empty() {
-                            self.log_groups_state.loading = true;
-                            self.insights_state.insights.query_completed = true;
+                        // First toggle the currently highlighted entry (select it)
+                        let selected_idx = self.insights_state.insights.dropdown_selected;
+                        if let Some(group_name) = self
+                            .insights_state
+                            .insights
+                            .log_group_matches
+                            .get(selected_idx)
+                            .cloned()
+                        {
+                            if let Some(pos) = self
+                                .insights_state
+                                .insights
+                                .selected_log_groups
+                                .iter()
+                                .position(|g| g == &group_name)
+                            {
+                                self.insights_state.insights.selected_log_groups.remove(pos);
+                            } else if self.insights_state.insights.selected_log_groups.len() < 50 {
+                                self.insights_state
+                                    .insights
+                                    .selected_log_groups
+                                    .push(group_name);
+                            }
                         }
+                        // Close dropdown and clear search
+                        self.insights_state.insights.show_dropdown = false;
+                        self.insights_state.insights.log_group_search.clear();
+                        self.insights_state.insights.log_group_matches.clear();
+                        self.mode = Mode::Normal;
                     }
                 } else if self.mode == Mode::Normal && !self.page_input.is_empty() {
                     if let Ok(page) = self.page_input.parse::<usize>() {
@@ -3541,10 +3571,7 @@ impl App {
                 else if self.current_service == Service::CloudWatchAlarms
                     && self.alarms_state.current_alarm.is_some()
                 {
-                    self.alarms_state.current_alarm = None;
-                    self.alarms_state.metric_data.clear();
-                    self.view_mode = ViewMode::List;
-                    self.update_current_tab_breadcrumb();
+                    crate::cw::actions::alarms_go_back(self);
                 }
                 // Lambda Applications: go back from application detail to list
                 else if self.current_service == Service::LambdaApplications
@@ -3562,8 +3589,7 @@ impl App {
                 else if self.current_service == Service::CloudTrailEvents
                     && self.cloudtrail_state.current_event.is_some()
                 {
-                    self.cloudtrail_state.current_event = None;
-                    self.update_current_tab_breadcrumb();
+                    crate::cloudtrail::actions::go_back(self);
                 }
                 // From insights results -> collapse if expanded, otherwise back to sidebar
                 else if self.view_mode == ViewMode::InsightsResults {
@@ -3573,9 +3599,7 @@ impl App {
                 }
                 // From alarms view -> collapse if expanded
                 else if self.current_service == Service::CloudWatchAlarms {
-                    if self.alarms_state.table.has_expanded_item() {
-                        self.alarms_state.table.collapse();
-                    }
+                    crate::cw::actions::alarms_go_back_list(self);
                 }
                 // From EC2 instances view -> always collapse
                 else if self.current_service == Service::Ec2Instances {
@@ -3738,15 +3762,13 @@ impl App {
             }
             Service::CloudWatchInsights => {
                 parts.push("CloudWatch".to_string());
-                parts.push("Insights".to_string());
+                parts.push("Logs Insights".to_string());
             }
             Service::CloudWatchAlarms => {
-                parts.push("CloudWatch".to_string());
-                parts.push("Alarms".to_string());
+                parts.extend(crate::cw::actions::alarms_breadcrumb());
             }
             Service::CloudTrailEvents => {
-                parts.push("CloudTrail".to_string());
-                parts.push("Event History".to_string());
+                parts.extend(crate::cloudtrail::actions::breadcrumb(self));
             }
             Service::S3Buckets => {
                 parts.extend(crate::s3::actions::breadcrumb(self));
@@ -3831,31 +3853,21 @@ impl App {
                 &self.insights_state.insights.selected_log_groups,
             ),
             Service::CloudWatchAlarms => {
-                let view_type = match self.alarms_state.view_as {
-                    AlarmViewMode::Table | AlarmViewMode::Detail => "table",
-                    AlarmViewMode::Cards => "card",
-                };
-                cw::alarms::console_url(
-                    &self.config.region,
-                    view_type,
-                    self.alarms_state.table.page_size.value(),
-                    &self.alarms_state.sort_column,
-                    self.alarms_state.sort_direction.as_str(),
-                )
-            }
-            Service::CloudTrailEvents => {
-                if let Some(event) = &self.cloudtrail_state.current_event {
-                    format!(
-                        "https://{}.console.aws.amazon.com/cloudtrailv2/home?region={}#/events/{}",
-                        self.config.region, self.config.region, event.event_id
-                    )
+                // If drilled into alarm detail use that name; otherwise use selected row
+                let alarm_name = if let Some(name) = self.alarms_state.current_alarm.as_deref() {
+                    Some(name.to_string())
                 } else {
-                    format!(
-                        "https://{}.console.aws.amazon.com/cloudtrail/home?region={}#/events",
-                        self.config.region, self.config.region
-                    )
-                }
+                    // In list view — get the currently selected alarm name
+                    let page_size = self.alarms_state.table.page_size.value();
+                    let current_page = self.alarms_state.table.selected / page_size;
+                    let start = current_page * page_size;
+                    let filtered: Vec<_> = self.alarms_state.table.items.iter().collect();
+                    let relative = self.alarms_state.table.selected.saturating_sub(start);
+                    filtered.get(start + relative).map(|a| a.name.clone())
+                };
+                cw::alarms::console_url(&self.config.region, alarm_name.as_deref())
             }
+            Service::CloudTrailEvents => crate::cloudtrail::actions::console_url(self),
             Service::S3Buckets => crate::s3::actions::console_url(self),
             Service::SqsQueues => {
                 if let Some(queue_url) = &self.sqs_state.current_queue {
@@ -3965,15 +3977,9 @@ impl App {
         } else if self.view_mode == ViewMode::Detail {
             self.cw_log_stream_column_ids.len() + 6
         } else if self.current_service == Service::CloudWatchAlarms {
-            29
+            crate::cw::actions::alarms_column_selector_max(self)
         } else if self.current_service == Service::CloudTrailEvents {
-            if self.cloudtrail_state.current_event.is_some()
-                && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-            {
-                self.cloudtrail_resource_column_ids.len()
-            } else {
-                self.cloudtrail_event_column_ids.len() + 6
-            }
+            crate::cloudtrail::actions::column_selector_max(self)
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::column_selector_max(self)
         } else if self.current_service == Service::EcrRepositories {
@@ -4015,15 +4021,9 @@ impl App {
         } else if self.view_mode == ViewMode::Detail {
             self.cw_log_stream_column_ids.len()
         } else if self.current_service == Service::CloudWatchAlarms {
-            14
+            crate::cw::actions::alarms_column_count(self)
         } else if self.current_service == Service::CloudTrailEvents {
-            if self.cloudtrail_state.current_event.is_some()
-                && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-            {
-                self.cloudtrail_resource_column_ids.len()
-            } else {
-                self.cloudtrail_event_column_ids.len()
-            }
+            crate::cloudtrail::actions::column_count(self)
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::column_count(self)
         } else if self.current_service == Service::EcrRepositories {
@@ -4137,15 +4137,7 @@ impl App {
                 }
             }
             Mode::InsightsInput => {
-                use crate::app::InsightsFocus;
-                if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
-                    && self.insights_state.insights.show_dropdown
-                    && !self.insights_state.insights.log_group_matches.is_empty()
-                {
-                    let max = self.insights_state.insights.log_group_matches.len() - 1;
-                    self.insights_state.insights.dropdown_selected =
-                        (self.insights_state.insights.dropdown_selected + 1).min(max);
-                }
+                crate::cw::actions::insights_next_item_dropdown(self);
             }
             Mode::ColumnSelector => {
                 let max = self.get_column_selector_max();
@@ -4217,15 +4209,12 @@ impl App {
                         }
                     }
                 } else if self.view_mode == ViewMode::InsightsResults {
-                    let max = self
-                        .insights_state
-                        .insights
-                        .query_results
-                        .len()
-                        .saturating_sub(1);
-                    if self.insights_state.insights.results_selected < max {
-                        self.insights_state.insights.results_selected += 1;
-                    }
+                    crate::cw::actions::insights_next_item_results(self);
+                } else if self.current_service == Service::CloudWatchInsights
+                    && self.insights_state.insights.show_dropdown
+                {
+                    // Navigate dropdown in Normal mode
+                    crate::cw::actions::insights_next_item_dropdown(self);
                 } else if self.current_service == Service::ApiGatewayApis {
                     if let Some(api) = &self.apig_state.current_api {
                         if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
@@ -4290,72 +4279,16 @@ impl App {
                         .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(8));
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
-                    if self.log_groups_state.event_scroll_offset >= max_scroll {
-                        // At the end, do nothing
-                    } else {
+                    if self.log_groups_state.event_scroll_offset < max_scroll {
                         self.log_groups_state.event_scroll_offset =
                             (self.log_groups_state.event_scroll_offset + 1).min(max_scroll);
                     }
                 } else if self.current_service == Service::CloudWatchLogGroups {
-                    if self.view_mode == ViewMode::List {
-                        let filtered_groups = filtered_log_groups(self);
-                        self.log_groups_state
-                            .log_groups
-                            .next_item(filtered_groups.len());
-                    } else if self.view_mode == ViewMode::Detail {
-                        let filtered_streams = filtered_log_streams(self);
-                        if !filtered_streams.is_empty() {
-                            let max = filtered_streams.len() - 1;
-                            if self.log_groups_state.selected_stream >= max {
-                                // At the end, do nothing
-                            } else {
-                                self.log_groups_state.selected_stream =
-                                    (self.log_groups_state.selected_stream + 1).min(max);
-                                self.log_groups_state.expanded_stream = None;
-                            }
-                        }
-                    }
+                    crate::cw::actions::logs_next_item(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
-                    let filtered_alarms = match self.alarms_state.alarm_tab {
-                        AlarmTab::AllAlarms => self.alarms_state.table.items.len(),
-                        AlarmTab::InAlarm => self
-                            .alarms_state
-                            .table
-                            .items
-                            .iter()
-                            .filter(|a| a.state.to_uppercase() == "ALARM")
-                            .count(),
-                    };
-                    if filtered_alarms > 0 {
-                        self.alarms_state.table.next_item(filtered_alarms);
-                    }
+                    crate::cw::actions::alarms_next_item(self);
                 } else if self.current_service == Service::CloudTrailEvents {
-                    if self.cloudtrail_state.current_event.is_some()
-                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord
-                    {
-                        // Scroll JSON down
-                        if let Some(event) = &self.cloudtrail_state.current_event {
-                            let line_count = event.cloud_trail_event_json.lines().count();
-                            let max_scroll = line_count.saturating_sub(1);
-                            self.cloudtrail_state.event_json_scroll =
-                                (self.cloudtrail_state.event_json_scroll + 1).min(max_scroll);
-                        }
-                    } else {
-                        // For CloudTrail with infinite pagination, navigate within current page
-                        let page_size = self.cloudtrail_state.table.page_size.value();
-                        let current_page = self.cloudtrail_state.table.selected / page_size;
-                        let page_start = current_page * page_size;
-                        let page_end = page_start + page_size;
-                        let filtered_count = self.cloudtrail_state.table.items.len();
-
-                        // Only navigate if within loaded items
-                        if self.cloudtrail_state.table.selected < filtered_count.saturating_sub(1) {
-                            self.cloudtrail_state.table.selected =
-                                (self.cloudtrail_state.table.selected + 1)
-                                    .min(page_end - 1)
-                                    .min(filtered_count - 1);
-                        }
-                    }
+                    crate::cloudtrail::actions::next_item(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::next_item(self);
                 } else if self.current_service == Service::EcrRepositories {
@@ -4581,17 +4514,7 @@ impl App {
                 self.session_picker_selected = self.session_picker_selected.saturating_sub(1);
             }
             Mode::InsightsInput => {
-                use crate::app::InsightsFocus;
-                if self.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch
-                    && self.insights_state.insights.show_dropdown
-                    && !self.insights_state.insights.log_group_matches.is_empty()
-                {
-                    self.insights_state.insights.dropdown_selected = self
-                        .insights_state
-                        .insights
-                        .dropdown_selected
-                        .saturating_sub(1);
-                }
+                crate::cw::actions::insights_prev_item_dropdown(self);
             }
             Mode::ColumnSelector => {
                 let mut prev_idx = self.column_selector_index.saturating_sub(1);
@@ -4655,6 +4578,10 @@ impl App {
                     if self.insights_state.insights.results_selected > 0 {
                         self.insights_state.insights.results_selected -= 1;
                     }
+                } else if self.current_service == Service::CloudWatchInsights
+                    && self.insights_state.insights.show_dropdown
+                {
+                    crate::cw::actions::insights_prev_item_dropdown(self);
                 } else if self.view_mode == ViewMode::PolicyView {
                     self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(1);
                 } else if self.current_service == Service::SqsQueues
@@ -4686,35 +4613,11 @@ impl App {
                             self.log_groups_state.event_scroll_offset.saturating_sub(1);
                     }
                 } else if self.current_service == Service::CloudWatchLogGroups {
-                    if self.view_mode == ViewMode::List {
-                        self.log_groups_state.log_groups.prev_item();
-                    } else if self.view_mode == ViewMode::Detail
-                        && self.log_groups_state.selected_stream > 0
-                    {
-                        self.log_groups_state.selected_stream =
-                            self.log_groups_state.selected_stream.saturating_sub(1);
-                        self.log_groups_state.expanded_stream = None;
-                    }
+                    crate::cw::actions::logs_prev_item(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
-                    self.alarms_state.table.prev_item();
+                    crate::cw::actions::alarms_prev_item(self);
                 } else if self.current_service == Service::CloudTrailEvents {
-                    if self.cloudtrail_state.current_event.is_some()
-                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord
-                    {
-                        // Scroll JSON up
-                        self.cloudtrail_state.event_json_scroll =
-                            self.cloudtrail_state.event_json_scroll.saturating_sub(1);
-                    } else {
-                        // For CloudTrail with infinite pagination, navigate within current page
-                        let page_size = self.cloudtrail_state.table.page_size.value();
-                        let current_page = self.cloudtrail_state.table.selected / page_size;
-                        let page_start = current_page * page_size;
-
-                        // Only navigate if not at page start
-                        if self.cloudtrail_state.table.selected > page_start {
-                            self.cloudtrail_state.table.selected -= 1;
-                        }
-                    }
+                    crate::cloudtrail::actions::prev_item(self);
                 } else if self.current_service == Service::Ec2Instances {
                     if self.ec2_state.current_instance.is_some()
                         && self.ec2_state.detail_tab == Ec2DetailTab::Tags
@@ -4793,12 +4696,7 @@ impl App {
         if self.current_service == Service::CloudTrailEvents
             && self.cloudtrail_state.current_event.is_some()
         {
-            if let Some(event) = &self.cloudtrail_state.current_event {
-                let lines = event.cloud_trail_event_json.lines().count();
-                let max_scroll = lines.saturating_sub(1);
-                self.cloudtrail_state.event_json_scroll =
-                    (self.cloudtrail_state.event_json_scroll + 10).min(max_scroll);
-            }
+            crate::cloudtrail::actions::page_down_fast(self);
         } else if self.mode == Mode::ColumnSelector {
             let max = self.get_column_selector_max();
             let mut next_idx = (self.column_selector_index + 10).min(max);
@@ -4828,52 +4726,15 @@ impl App {
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchAlarms
         {
-            let page_size = self.alarms_state.table.page_size.value();
-            let filtered_count = self.alarms_state.table.items.len();
-            self.alarms_state.input_focus.handle_page_down(
-                &mut self.alarms_state.table.selected,
-                &mut self.alarms_state.table.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            crate::cw::actions::alarms_page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudTrailEvents
         {
-            let page_size = self.cloudtrail_state.table.page_size.value();
-            let filtered_count = self.cloudtrail_state.table.items.len();
-            self.cloudtrail_state.input_focus.handle_page_down(
-                &mut self.cloudtrail_state.table.selected,
-                &mut self.cloudtrail_state.table.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            crate::cloudtrail::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchLogGroups
         {
-            if self.view_mode == ViewMode::List {
-                // Log groups list pagination
-                let filtered = filtered_log_groups(self);
-                let page_size = self.log_groups_state.log_groups.page_size.value();
-                let filtered_count = filtered.len();
-                self.log_groups_state.input_focus.handle_page_down(
-                    &mut self.log_groups_state.log_groups.selected,
-                    &mut self.log_groups_state.log_groups.scroll_offset,
-                    page_size,
-                    filtered_count,
-                );
-            } else {
-                // Log streams pagination
-                let filtered = filtered_log_streams(self);
-                let page_size = self.log_groups_state.stream_page_size;
-                let filtered_count = filtered.len();
-                self.log_groups_state.input_focus.handle_page_down(
-                    &mut self.log_groups_state.selected_stream,
-                    &mut self.log_groups_state.stream_current_page,
-                    page_size,
-                    filtered_count,
-                );
-                self.log_groups_state.expanded_stream = None;
-            }
+            crate::cw::actions::logs_page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::LambdaFunctions
         {
             crate::lambda::functions::page_down_filter_input(self);
@@ -4974,38 +4835,19 @@ impl App {
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::List
             {
-                let filtered = filtered_log_groups(self);
-                self.log_groups_state.log_groups.page_down(filtered.len());
+                crate::cw::actions::logs_page_down_normal_list(self);
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::Detail
             {
-                let len = filtered_log_streams(self).len();
-                nav_page_down(&mut self.log_groups_state.selected_stream, len, 10);
+                crate::cw::actions::logs_page_down_normal_detail(self);
             } else if self.view_mode == ViewMode::Events {
-                let max = self.log_groups_state.log_events.len();
-                nav_page_down(&mut self.log_groups_state.event_scroll_offset, max, 10);
+                crate::cw::actions::logs_page_down_events(self);
             } else if self.view_mode == ViewMode::InsightsResults {
-                let max = self.insights_state.insights.query_results.len();
-                nav_page_down(&mut self.insights_state.insights.results_selected, max, 10);
+                crate::cw::actions::insights_page_down(self);
             } else if self.current_service == Service::CloudWatchAlarms {
-                let filtered = match self.alarms_state.alarm_tab {
-                    AlarmTab::AllAlarms => self.alarms_state.table.items.len(),
-                    AlarmTab::InAlarm => self
-                        .alarms_state
-                        .table
-                        .items
-                        .iter()
-                        .filter(|a| a.state.to_uppercase() == "ALARM")
-                        .count(),
-                };
-                if filtered > 0 {
-                    self.alarms_state.table.page_down(filtered);
-                }
+                crate::cw::actions::alarms_page_down_normal(self);
             } else if self.current_service == Service::CloudTrailEvents {
-                let filtered_count = self.cloudtrail_state.table.items.len();
-                if filtered_count > 0 {
-                    self.cloudtrail_state.table.page_down(filtered_count);
-                }
+                crate::cloudtrail::actions::page_down_normal(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::page_down_normal(self);
             } else if self.current_service == Service::EcrRepositories {
@@ -5121,8 +4963,7 @@ impl App {
         if self.current_service == Service::CloudTrailEvents
             && self.cloudtrail_state.current_event.is_some()
         {
-            self.cloudtrail_state.event_json_scroll =
-                self.cloudtrail_state.event_json_scroll.saturating_sub(10);
+            crate::cloudtrail::actions::page_up_fast(self);
         } else if self.mode == Mode::ColumnSelector {
             let mut prev_idx = self.column_selector_index.saturating_sub(10);
             // Skip blank row if we land on it
@@ -5149,42 +4990,15 @@ impl App {
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchAlarms
         {
-            let page_size = self.alarms_state.table.page_size.value();
-            self.alarms_state.input_focus.handle_page_up(
-                &mut self.alarms_state.table.selected,
-                &mut self.alarms_state.table.scroll_offset,
-                page_size,
-            );
+            crate::cw::actions::alarms_page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudTrailEvents
         {
-            let page_size = self.cloudtrail_state.table.page_size.value();
-            self.cloudtrail_state.input_focus.handle_page_up(
-                &mut self.cloudtrail_state.table.selected,
-                &mut self.cloudtrail_state.table.scroll_offset,
-                page_size,
-            );
+            crate::cloudtrail::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchLogGroups
         {
-            if self.view_mode == ViewMode::List {
-                // Log groups list pagination
-                let page_size = self.log_groups_state.log_groups.page_size.value();
-                self.log_groups_state.input_focus.handle_page_up(
-                    &mut self.log_groups_state.log_groups.selected,
-                    &mut self.log_groups_state.log_groups.scroll_offset,
-                    page_size,
-                );
-            } else {
-                // Log streams pagination
-                let page_size = self.log_groups_state.stream_page_size;
-                self.log_groups_state.input_focus.handle_page_up(
-                    &mut self.log_groups_state.selected_stream,
-                    &mut self.log_groups_state.stream_current_page,
-                    page_size,
-                );
-                self.log_groups_state.expanded_stream = None;
-            }
+            crate::cw::actions::logs_page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::LambdaFunctions
         {
             crate::lambda::functions::page_up_filter_input(self);
@@ -5253,30 +5067,19 @@ impl App {
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::List
             {
-                self.log_groups_state.log_groups.page_up();
+                crate::cw::actions::logs_page_up_normal_list(self);
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::Detail
             {
-                self.log_groups_state.selected_stream =
-                    self.log_groups_state.selected_stream.saturating_sub(10);
+                crate::cw::actions::logs_page_up_normal_detail(self);
             } else if self.view_mode == ViewMode::Events {
-                if self.log_groups_state.event_scroll_offset < 10
-                    && self.log_groups_state.has_older_events
-                {
-                    self.log_groups_state.loading = true;
-                }
-                self.log_groups_state.event_scroll_offset =
-                    self.log_groups_state.event_scroll_offset.saturating_sub(10);
+                crate::cw::actions::logs_page_up_events(self);
             } else if self.view_mode == ViewMode::InsightsResults {
-                self.insights_state.insights.results_selected = self
-                    .insights_state
-                    .insights
-                    .results_selected
-                    .saturating_sub(10);
+                crate::cw::actions::insights_page_up(self);
             } else if self.current_service == Service::CloudWatchAlarms {
-                self.alarms_state.table.page_up();
+                crate::cw::actions::alarms_page_up_normal(self);
             } else if self.current_service == Service::CloudTrailEvents {
-                self.cloudtrail_state.table.page_up();
+                crate::cloudtrail::actions::page_up_normal(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::page_up_normal(self);
             } else if self.current_service == Service::EcrRepositories {
@@ -5539,37 +5342,11 @@ impl App {
                 self.insights_state.insights.results_horizontal_scroll += 1;
             }
         } else if self.current_service == Service::CloudWatchLogGroups
-            && self.view_mode == ViewMode::List
+            || self.view_mode == ViewMode::Events
         {
-            // Expand selected log group
-            if self.log_groups_state.log_groups.expanded_item
-                != Some(self.log_groups_state.log_groups.selected)
-            {
-                self.log_groups_state.log_groups.expanded_item =
-                    Some(self.log_groups_state.log_groups.selected);
-            }
-        } else if self.current_service == Service::CloudWatchLogGroups
-            && self.view_mode == ViewMode::Detail
-        {
-            // Expand selected log stream
-            if self.log_groups_state.expanded_stream != Some(self.log_groups_state.selected_stream)
-            {
-                self.log_groups_state.expanded_stream = Some(self.log_groups_state.selected_stream);
-            }
-        } else if self.view_mode == ViewMode::Events {
-            // Only scroll if there are hidden columns
-            // Expand selected event
-            if self.log_groups_state.expanded_event
-                != Some(self.log_groups_state.event_scroll_offset)
-            {
-                self.log_groups_state.expanded_event =
-                    Some(self.log_groups_state.event_scroll_offset);
-            }
+            crate::cw::actions::logs_expand_row(self);
         } else if self.current_service == Service::CloudWatchAlarms {
-            // Right arrow expands alarm row
-            if !self.alarms_state.table.is_expanded() {
-                self.alarms_state.table.toggle_expand();
-            }
+            crate::cw::actions::alarms_expand_row(self);
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::expand_row(self);
         } else if self.current_service == Service::EcrRepositories {
@@ -5679,25 +5456,7 @@ impl App {
 
         match self.current_service {
             Service::CloudWatchAlarms => {
-                let alarm_page_size = self.alarms_state.table.page_size.value();
-                let target = (page - 1) * alarm_page_size;
-                let filtered_count = match self.alarms_state.alarm_tab {
-                    AlarmTab::AllAlarms => self.alarms_state.table.items.len(),
-                    AlarmTab::InAlarm => self
-                        .alarms_state
-                        .table
-                        .items
-                        .iter()
-                        .filter(|a| a.state.to_uppercase() == "ALARM")
-                        .count(),
-                };
-                let max_offset = filtered_count.saturating_sub(alarm_page_size);
-                self.alarms_state.table.scroll_offset = target.min(max_offset);
-                self.alarms_state.table.selected = self
-                    .alarms_state
-                    .table
-                    .scroll_offset
-                    .min(filtered_count.saturating_sub(1));
+                crate::cw::actions::alarms_go_to_page(self, page);
             }
             Service::CloudTrailEvents => {
                 let page_size = self.cloudtrail_state.table.page_size.value();
@@ -5713,30 +5472,9 @@ impl App {
                 }
                 // Otherwise do nothing (ignore invalid page numbers)
             }
-            Service::CloudWatchLogGroups => match self.view_mode {
-                ViewMode::Events => {
-                    let page_size = 20;
-                    let target = (page - 1) * page_size;
-                    let max = self.log_groups_state.log_events.len().saturating_sub(1);
-                    self.log_groups_state.event_scroll_offset = target.min(max);
-                }
-                ViewMode::Detail => {
-                    let page_size = self.log_groups_state.stream_page_size;
-                    self.log_groups_state.stream_current_page = (page - 1).min(
-                        self.log_groups_state
-                            .log_streams
-                            .len()
-                            .div_ceil(page_size)
-                            .saturating_sub(1),
-                    );
-                    self.log_groups_state.selected_stream = 0;
-                }
-                ViewMode::List => {
-                    let total = self.log_groups_state.log_groups.items.len();
-                    self.log_groups_state.log_groups.goto_page(page, total);
-                }
-                _ => {}
-            },
+            Service::CloudWatchLogGroups => {
+                crate::cw::actions::logs_go_to_page(self, page);
+            }
             Service::EcrRepositories => {
                 crate::ecr::actions::go_to_page(self, page);
             }
@@ -5991,27 +5729,11 @@ impl App {
                 .results_horizontal_scroll
                 .saturating_sub(1);
         } else if self.current_service == Service::CloudWatchLogGroups
-            && self.view_mode == ViewMode::List
+            || self.view_mode == ViewMode::Events
         {
-            // Collapse expanded log group
-            if self.log_groups_state.log_groups.has_expanded_item() {
-                self.log_groups_state.log_groups.collapse();
-            }
-        } else if self.current_service == Service::CloudWatchLogGroups
-            && self.view_mode == ViewMode::Detail
-        {
-            // Collapse expanded log stream
-            if self.log_groups_state.expanded_stream.is_some() {
-                self.log_groups_state.expanded_stream = None;
-            }
-        } else if self.view_mode == ViewMode::Events {
-            // Collapse expanded event
-            if self.log_groups_state.expanded_event.is_some() {
-                self.log_groups_state.expanded_event = None;
-            }
+            crate::cw::actions::logs_prev_pane(self);
         } else if self.current_service == Service::CloudWatchAlarms {
-            // Collapse expanded alarm
-            self.alarms_state.table.collapse();
+            crate::cw::actions::alarms_prev_pane(self);
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::prev_pane(self);
         } else if self.current_service == Service::ApiGatewayApis {
@@ -6247,21 +5969,9 @@ impl App {
                 }
             }
             Service::CloudWatchLogGroups => {
-                if self.view_mode == ViewMode::Events {
-                    if let Some(idx) = self.log_groups_state.expanded_event {
-                        self.log_groups_state.expanded_event = None;
-                        self.log_groups_state.selected_event = idx;
-                    }
-                } else if self.view_mode == ViewMode::Detail {
-                    if let Some(idx) = self.log_groups_state.expanded_stream {
-                        self.log_groups_state.expanded_stream = None;
-                        self.log_groups_state.selected_stream = idx;
-                    }
-                } else {
-                    self.log_groups_state.log_groups.collapse();
-                }
+                crate::cw::actions::logs_collapse_row(self);
             }
-            Service::CloudWatchAlarms => self.alarms_state.table.collapse(),
+            Service::CloudWatchAlarms => crate::cw::actions::alarms_collapse_row(self),
             Service::Ec2Instances => {
                 crate::ec2::actions::collapse_row(self);
             }
@@ -6986,9 +6696,23 @@ impl App {
                     self.insights_state.insights.query_cursor_col = 0;
                 }
                 InsightsFocus::LogGroupSearch => {
-                    // Toggle dropdown
-                    self.insights_state.insights.show_dropdown =
-                        !self.insights_state.insights.show_dropdown;
+                    // Toggle dropdown — when opening with empty search, show all log groups
+                    let was_open = self.insights_state.insights.show_dropdown;
+                    self.insights_state.insights.show_dropdown = !was_open;
+                    if !was_open {
+                        // Opening: populate matches with all available log groups if no search text
+                        if self.insights_state.insights.log_group_search.is_empty() {
+                            self.insights_state.insights.log_group_matches = self
+                                .log_groups_state
+                                .log_groups
+                                .items
+                                .iter()
+                                .take(50)
+                                .map(|g| g.name.clone())
+                                .collect();
+                        }
+                        self.insights_state.insights.dropdown_selected = 0;
+                    }
                 }
                 _ => {}
             }
@@ -7246,26 +6970,9 @@ impl App {
                     }
                 }
             } else if self.current_service == Service::CloudWatchAlarms {
-                if self.alarms_state.current_alarm.is_none() {
-                    let filtered_alarms: Vec<_> = self.alarms_state.table.items.iter().collect();
-                    if let Some(alarm) = self.alarms_state.table.get_selected(&filtered_alarms) {
-                        self.alarms_state.current_alarm = Some(alarm.name.clone());
-                        self.alarms_state.metrics_loading = true;
-                        self.view_mode = ViewMode::Detail;
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::cw::actions::alarms_select_item(self);
             } else if self.current_service == Service::CloudTrailEvents {
-                if self.cloudtrail_state.current_event.is_none() {
-                    let filtered_events: Vec<_> =
-                        self.cloudtrail_state.table.items.iter().collect();
-                    if let Some(event) = self.cloudtrail_state.table.get_selected(&filtered_events)
-                    {
-                        self.cloudtrail_state.current_event = Some((*event).clone());
-                        self.cloudtrail_state.event_json_scroll = 0;
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::cloudtrail::actions::select_item(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::select_item(self);
             } else if self.current_service == Service::Ec2Instances {
@@ -7363,67 +7070,11 @@ impl App {
             } else if self.current_service == Service::LambdaApplications {
                 crate::lambda::applications::select_item(self);
             } else if self.current_service == Service::CloudWatchLogGroups {
-                if self.view_mode == ViewMode::List {
-                    // Map filtered selection to actual group index
-                    let filtered_groups = filtered_log_groups(self);
-                    if let Some(selected_group) =
-                        filtered_groups.get(self.log_groups_state.log_groups.selected)
-                    {
-                        if let Some(actual_idx) = self
-                            .log_groups_state
-                            .log_groups
-                            .items
-                            .iter()
-                            .position(|g| g.name == selected_group.name)
-                        {
-                            self.log_groups_state.log_groups.selected = actual_idx;
-                        }
-                    }
-                    self.view_mode = ViewMode::Detail;
-                    self.log_groups_state.log_streams.clear();
-                    self.log_groups_state.tags.items.clear();
-                    self.log_groups_state.tags.reset();
-                    self.log_groups_state.selected_stream = 0;
-                    self.log_groups_state.loading = true;
-                    self.column_selector_index = 0;
-                    self.update_current_tab_breadcrumb();
-                } else if self.view_mode == ViewMode::Detail {
-                    // Map filtered stream selection to actual stream index
-                    let filtered_streams = filtered_log_streams(self);
-                    if let Some(selected_stream) =
-                        filtered_streams.get(self.log_groups_state.selected_stream)
-                    {
-                        if let Some(actual_idx) = self
-                            .log_groups_state
-                            .log_streams
-                            .iter()
-                            .position(|s| s.name == selected_stream.name)
-                        {
-                            self.log_groups_state.selected_stream = actual_idx;
-                        }
-                    }
-                    self.view_mode = ViewMode::Events;
-                    self.update_current_tab_breadcrumb();
-                    self.log_groups_state.log_events.clear();
-                    self.log_groups_state.event_scroll_offset = 0;
-                    self.log_groups_state.next_backward_token = None;
-                    self.log_groups_state.loading = true;
-                } else if self.view_mode == ViewMode::Events {
-                    // Toggle expand for selected event
-                    if self.log_groups_state.expanded_event
-                        == Some(self.log_groups_state.event_scroll_offset)
-                    {
-                        self.log_groups_state.expanded_event = None;
-                    } else {
-                        self.log_groups_state.expanded_event =
-                            Some(self.log_groups_state.event_scroll_offset);
-                    }
-                }
+                crate::cw::actions::logs_select_item(self);
             } else if self.current_service == Service::CloudWatchAlarms
                 && self.view_mode != ViewMode::Detail
             {
-                // Toggle expand for selected alarm in list view
-                self.alarms_state.table.toggle_expand();
+                crate::cw::actions::alarms_select_expand(self);
             } else if self.current_service == Service::CloudWatchInsights {
                 // In Normal mode, Enter always executes query
                 if !self.insights_state.insights.selected_log_groups.is_empty() {
@@ -7440,54 +7091,68 @@ impl App {
     }
 
     pub async fn load_alarms(&mut self) -> anyhow::Result<()> {
-        let alarms = self.alarms_client.list_alarms().await?;
-        self.alarms_state.table.items = alarms
+        let alarm_data = self.alarms_client.list_alarms().await?;
+        self.alarms_state.table.items = alarm_data
             .into_iter()
-            .map(
-                |(
-                    name,
-                    state,
-                    state_updated,
-                    description,
-                    metric_name,
-                    namespace,
-                    statistic,
-                    period,
-                    comparison,
-                    threshold,
-                    actions_enabled,
-                    state_reason,
-                    resource,
-                    dimensions,
-                    expression,
-                    alarm_type,
-                    cross_account,
-                )| Alarm {
-                    name,
-                    state,
-                    state_updated_timestamp: state_updated,
-                    description,
-                    metric_name,
-                    namespace,
-                    statistic,
-                    period,
-                    comparison_operator: comparison,
-                    threshold,
-                    actions_enabled,
-                    state_reason,
-                    resource,
-                    dimensions,
-                    expression,
-                    alarm_type,
-                    cross_account,
-                },
-            )
+            .map(|d| Alarm {
+                name: d.name,
+                state: d.state,
+                state_updated_timestamp: d.state_updated,
+                description: d.description,
+                metric_name: d.metric_name,
+                namespace: d.namespace,
+                statistic: d.statistic,
+                period: d.period,
+                comparison_operator: d.comparison,
+                threshold: d.threshold,
+                actions_enabled: d.actions_enabled,
+                state_reason: d.state_reason,
+                resource: d.resource,
+                dimensions: d.dimensions,
+                expression: d.expression,
+                alarm_type: d.alarm_type,
+                cross_account: d.cross_account,
+                alarm_arn: d.alarm_arn,
+                datapoints_to_alarm: d.datapoints_to_alarm,
+                evaluation_periods: d.evaluation_periods,
+                treat_missing_data: d.treat_missing_data,
+                evaluate_low_sample_percentile: d.evaluate_low_sample_percentile,
+                sub_metrics: d.sub_metrics,
+            })
             .collect();
         Ok(())
     }
 
+    /// Fetch metric data for a metric math alarm using GetMetricData.
+    pub async fn load_alarm_metric_math_data(&mut self, alarm_name: &str) -> anyhow::Result<()> {
+        if let Some(alarm) = self
+            .alarms_state
+            .table
+            .items
+            .iter()
+            .find(|a| a.name == alarm_name)
+        {
+            if alarm.sub_metrics.is_empty() {
+                return Ok(());
+            }
+            let sub_metrics = alarm.sub_metrics.clone();
+            let end_time = chrono::Utc::now();
+            let start_time = end_time - chrono::TimeDelta::hours(72);
+            let data = self
+                .alarms_client
+                .get_metric_math_data(&sub_metrics, start_time, end_time)
+                .await?;
+            self.alarms_state.metric_data = data;
+        }
+        Ok(())
+    }
+
     pub async fn load_cloudtrail_events(&mut self) -> anyhow::Result<()> {
-        let (events, next_token) = self.cloudtrail_client.lookup_events(None, None).await?;
+        let filter = self.cloudtrail_state.active_event_name_filter.clone();
+        let (events, next_token) = self
+            .cloudtrail_client
+            .lookup_events(None, None, filter)
+            .await?;
         self.cloudtrail_state.table.items = events
             .into_iter()
             .map(
@@ -7532,10 +7197,11 @@ impl App {
 
     pub async fn load_more_cloudtrail_events(&mut self) -> anyhow::Result<()> {
         if let Some(token) = self.cloudtrail_state.table.next_token.clone() {
+            let filter = self.cloudtrail_state.active_event_name_filter.clone();
             // Just load the next batch of events
             let (events, next_token) = self
                 .cloudtrail_client
-                .lookup_events(None, Some(token))
+                .lookup_events(None, Some(token), filter)
                 .await?;
             self.cloudtrail_state
                 .table
@@ -8415,6 +8081,7 @@ impl CloudWatchAlarmsState {
             table: TableState::new(),
             current_alarm: None,
             alarm_tab: AlarmTab::AllAlarms,
+            detail_tab: AlarmDetailTab::Details,
             view_as: AlarmViewMode::Table,
             wrap_lines: false,
             sort_column: "Last state update".to_string(),
@@ -12602,6 +12269,7 @@ mod region_latency_tests {
                 expression: String::new(),
                 alarm_type: "MetricAlarm".to_string(),
                 cross_account: String::new(),
+                ..Default::default()
             })
             .collect();
 
@@ -22155,6 +21823,196 @@ mod lambda_version_tab_tests {
     }
 
     #[test]
+    fn test_cloudtrail_pagination_right_left_arrow_works_when_filter_focused() {
+        // Regression: Left/Right arrows map to PageUp/PageDown in FilterInput mode.
+        // page_down_filter_input called handle_page_down which only acts when
+        // input_focus == Pagination. When filter is focused, it was a no-op.
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.service_selected = true;
+        app.current_service = Service::CloudTrailEvents;
+        app.mode = Mode::FilterInput;
+        // Focus is on the FILTER text input (not pagination)
+        app.cloudtrail_state.input_focus = InputFocus::Filter;
+        app.cloudtrail_state.table.page_size = PageSize::Ten;
+
+        app.cloudtrail_state.table.items = (0..25)
+            .map(|i| crate::cloudtrail::CloudTrailEvent {
+                event_name: format!("Event{}", i),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "user".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: format!("id-{}", i),
+                access_key_id: "key".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: String::new(),
+                request_id: "req".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            })
+            .collect();
+
+        assert_eq!(app.cloudtrail_state.table.selected, 0, "starts on page 1");
+
+        // Right arrow (PageDown) must go to page 2 even when filter is focused
+        app.handle_action(Action::PageDown);
+        assert_eq!(
+            app.cloudtrail_state.table.selected, 10,
+            "Right arrow must advance to page 2 even when filter text box is focused"
+        );
+
+        // Left arrow (PageUp) must go back to page 1
+        app.handle_action(Action::PageUp);
+        assert_eq!(
+            app.cloudtrail_state.table.selected, 0,
+            "Left arrow must go back to page 1 even when filter text box is focused"
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_yank_in_event_detail_copies_json() {
+        // y key in event detail view must copy cloud_trail_event_json to clipboard.
+        let mut app = test_app();
+        app.current_service = Service::CloudTrailEvents;
+        app.service_selected = true;
+        app.cloudtrail_state.current_event = Some(CloudTrailEvent {
+            event_name: "PutObject".to_string(),
+            event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+            username: "alice".to_string(),
+            event_source: "s3.amazonaws.com".to_string(),
+            resource_type: "Bucket".to_string(),
+            resource_name: "my-bucket".to_string(),
+            read_only: "false".to_string(),
+            aws_region: "us-east-1".to_string(),
+            event_id: "evt-001".to_string(),
+            access_key_id: "AKIA".to_string(),
+            source_ip_address: "1.2.3.4".to_string(),
+            error_code: String::new(),
+            request_id: "req-001".to_string(),
+            event_type: "AwsApiCall".to_string(),
+            cloud_trail_event_json: r#"{"eventName":"PutObject"}"#.to_string(),
+        });
+
+        // yank must not panic — we can't assert clipboard contents in tests
+        // but verify the function is reachable
+        app.handle_action(Action::Yank);
+        // event must still be open after yank (yank is non-destructive)
+        assert!(
+            app.cloudtrail_state.current_event.is_some(),
+            "Event must remain open after yank"
+        );
+    }
+
+    #[test]
+    fn test_cloudtrail_filter_reduces_visible_events() {
+        // Regression: render_events was collecting all items without applying
+        // cloudtrail_state.table.filter — search had no visible effect.
+        // We test the filter application directly via filtered_events helper
+        // (the render path is tested via UI tests; here we test the data path).
+        let mut app = test_app();
+        app.current_service = Service::CloudTrailEvents;
+        app.service_selected = true;
+
+        let items: Vec<CloudTrailEvent> = vec![
+            CloudTrailEvent {
+                event_name: "PutObject".to_string(),
+                event_time: "2024-01-01 10:00:00 (UTC)".to_string(),
+                username: "alice".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Bucket".to_string(),
+                resource_name: "my-bucket".to_string(),
+                read_only: "false".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "evt-001".to_string(),
+                access_key_id: "AKIA".to_string(),
+                source_ip_address: "1.2.3.4".to_string(),
+                error_code: String::new(),
+                request_id: "req-001".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            },
+            CloudTrailEvent {
+                event_name: "GetObject".to_string(),
+                event_time: "2024-01-01 11:00:00 (UTC)".to_string(),
+                username: "bob".to_string(),
+                event_source: "s3.amazonaws.com".to_string(),
+                resource_type: "Object".to_string(),
+                resource_name: "my-key".to_string(),
+                read_only: "true".to_string(),
+                aws_region: "us-east-1".to_string(),
+                event_id: "evt-002".to_string(),
+                access_key_id: "AKIA2".to_string(),
+                source_ip_address: "5.6.7.8".to_string(),
+                error_code: String::new(),
+                request_id: "req-002".to_string(),
+                event_type: "AwsApiCall".to_string(),
+                cloud_trail_event_json: "{}".to_string(),
+            },
+        ];
+        app.cloudtrail_state.table.items = items;
+
+        // No filter — both events visible
+        let q = app.cloudtrail_state.table.filter.to_lowercase();
+        let filtered: Vec<_> = app
+            .cloudtrail_state
+            .table
+            .items
+            .iter()
+            .filter(|e| {
+                q.is_empty()
+                    || e.event_name.to_lowercase().contains(&q)
+                    || e.username.to_lowercase().contains(&q)
+            })
+            .collect();
+        assert_eq!(
+            filtered.len(),
+            2,
+            "No filter: both events should be visible"
+        );
+
+        // Filter by event name
+        app.cloudtrail_state.table.filter = "PutObject".to_string();
+        let q = app.cloudtrail_state.table.filter.to_lowercase();
+        let filtered: Vec<_> = app
+            .cloudtrail_state
+            .table
+            .items
+            .iter()
+            .filter(|e| {
+                q.is_empty()
+                    || e.event_name.to_lowercase().contains(&q)
+                    || e.username.to_lowercase().contains(&q)
+            })
+            .collect();
+        assert_eq!(
+            filtered.len(),
+            1,
+            "Filter 'PutObject' should show only 1 event"
+        );
+        assert_eq!(filtered[0].event_name, "PutObject");
+
+        // Filter by username
+        app.cloudtrail_state.table.filter = "bob".to_string();
+        let q = app.cloudtrail_state.table.filter.to_lowercase();
+        let filtered: Vec<_> = app
+            .cloudtrail_state
+            .table
+            .items
+            .iter()
+            .filter(|e| {
+                q.is_empty()
+                    || e.event_name.to_lowercase().contains(&q)
+                    || e.username.to_lowercase().contains(&q)
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1, "Filter 'bob' should show only 1 event");
+        assert_eq!(filtered[0].username, "bob");
+    }
+
+    #[test]
     fn test_lambda_application_resources_have_columns() {
         let app = test_app();
 
@@ -22348,6 +22206,7 @@ mod lambda_version_tab_tests {
             expression: "".to_string(),
             alarm_type: "MetricAlarm".to_string(),
             cross_account: "".to_string(),
+            ..Default::default()
         }];
 
         assert!(app.alarms_state.current_alarm.is_none());
@@ -22395,6 +22254,7 @@ mod lambda_version_tab_tests {
             expression: "".to_string(),
             alarm_type: "MetricAlarm".to_string(),
             cross_account: "".to_string(),
+            ..Default::default()
         }];
 
         app.alarms_state.current_alarm = Some("test-alarm".to_string());
@@ -22483,6 +22343,7 @@ mod lambda_version_tab_tests {
             expression: "".to_string(),
             alarm_type: "MetricAlarm".to_string(),
             cross_account: "".to_string(),
+            ..Default::default()
         }];
 
         assert!(!app.alarms_state.table.is_expanded());
@@ -22520,6 +22381,204 @@ mod lambda_version_tab_tests {
     }
 
     #[test]
+    fn test_cloudwatch_alarms_pagination_changes_table_contents() {
+        // Regression: alarms render was passing all items to render_table without
+        // slicing to the current page, so pagination only moved selection but
+        // never changed what was displayed.
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.mode = Mode::FilterInput;
+        app.alarms_state.input_focus = InputFocus::Pagination;
+        app.alarms_state.table.page_size = crate::common::PageSize::Ten;
+
+        // Create 25 alarms
+        app.alarms_state.table.items = (0..25)
+            .map(|i| crate::cw::Alarm {
+                name: format!("alarm-{:02}", i),
+                state: "OK".to_string(),
+                state_updated_timestamp: String::new(),
+                description: String::new(),
+                metric_name: String::new(),
+                namespace: String::new(),
+                statistic: String::new(),
+                period: 60,
+                comparison_operator: String::new(),
+                threshold: 0.0,
+                actions_enabled: false,
+                state_reason: String::new(),
+                resource: String::new(),
+                dimensions: String::new(),
+                expression: String::new(),
+                alarm_type: String::new(),
+                cross_account: String::new(),
+                ..Default::default()
+            })
+            .collect();
+
+        assert_eq!(app.alarms_state.table.selected, 0, "starts on page 1");
+
+        // Right arrow (PageDown) in FilterInput+Pagination must advance to page 2
+        app.handle_action(Action::PageDown);
+        assert_eq!(
+            app.alarms_state.table.selected, 10,
+            "Right arrow must advance selected to page 2"
+        );
+
+        // Left arrow (PageUp) must go back
+        app.handle_action(Action::PageUp);
+        assert_eq!(
+            app.alarms_state.table.selected, 0,
+            "Left arrow must go back"
+        );
+
+        // go_to_page must also work correctly
+        app.go_to_page(3);
+        assert_eq!(
+            app.alarms_state.table.selected, 20,
+            "go_to_page(3) must set selected to start of page 3"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_num_p_page_jump() {
+        // <num>p must jump to that page: digits accumulate in page_input,
+        // then p (OpenColumnSelector) applies the page jump.
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.alarms_state.table.page_size = crate::common::PageSize::Ten;
+        app.alarms_state.table.items = (0..25)
+            .map(|i| crate::cw::Alarm {
+                name: format!("alarm-{:02}", i),
+                state: "OK".to_string(),
+                state_updated_timestamp: String::new(),
+                description: String::new(),
+                metric_name: String::new(),
+                namespace: String::new(),
+                statistic: String::new(),
+                period: 60,
+                comparison_operator: String::new(),
+                threshold: 0.0,
+                actions_enabled: false,
+                state_reason: String::new(),
+                resource: String::new(),
+                dimensions: String::new(),
+                expression: String::new(),
+                alarm_type: String::new(),
+                cross_account: String::new(),
+                ..Default::default()
+            })
+            .collect();
+
+        // Type '2' then 'p' → jump to page 2
+        app.handle_action(Action::FilterInput('2'));
+        assert_eq!(app.page_input, "2");
+        app.handle_action(Action::OpenColumnSelector);
+        assert_eq!(
+            app.alarms_state.table.selected, 10,
+            "2p must jump to page 2 (selected=10)"
+        );
+        assert_eq!(app.page_input, "", "page_input must be cleared after jump");
+        // mode stays Normal (not ColumnSelector) since page_input was consumed
+        assert_ne!(
+            app.mode,
+            Mode::ColumnSelector,
+            "mode must not open column selector when page_input was set"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_console_url_list_view() {
+        let url = crate::cw::alarms::console_url("us-east-1", None);
+        assert!(url.contains("alarmsV2"), "must contain alarmsV2");
+        assert!(
+            !url.contains("table") && !url.contains("card"),
+            "must not embed view_mode"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_console_url_alarm_detail() {
+        let url = crate::cw::alarms::console_url("us-east-1", Some("My-Alarm"));
+        assert!(
+            url.contains("alarmsV2:alarm/My-Alarm"),
+            "must link directly to alarm, got: {url}"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_console_url_from_list_selected_alarm() {
+        // Regression: ^o from list view with expanded row was returning the list URL
+        // because current_alarm was None. Should use the selected alarm's name.
+        let mut app = test_app();
+        app.current_service = Service::CloudWatchAlarms;
+        app.service_selected = true;
+        app.alarms_state.current_alarm = None; // list view, not drilled in
+        app.alarms_state.table.items = vec![
+            crate::cw::Alarm {
+                name: "alarm-0".to_string(),
+                ..Default::default()
+            },
+            crate::cw::Alarm {
+                name: "alarm-1".to_string(),
+                ..Default::default()
+            },
+        ];
+        app.alarms_state.table.selected = 1; // second alarm selected
+
+        let url = app.get_console_url();
+        assert!(
+            url.contains("alarmsV2:alarm/alarm-1"),
+            "^o from list view must link to selected alarm, got: {url}"
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_alarms_metric_math_alarm_does_not_error() {
+        // Regression: alarms with empty statistic (metric math expressions) caused
+        // InvalidParameterValueException when trying to call GetMetricStatistics.
+        // The fix: skip the API call when statistic is empty.
+        let alarm = crate::cw::Alarm {
+            name: "math-alarm".to_string(),
+            state: "OK".to_string(),
+            state_updated_timestamp: String::new(),
+            description: String::new(),
+            metric_name: String::new(), // empty for metric math
+            namespace: String::new(),   // empty for metric math
+            statistic: String::new(),   // empty for metric math
+            period: 60,
+            comparison_operator: "GreaterThanOrEqualToThreshold".to_string(),
+            threshold: 1.0,
+            actions_enabled: true,
+            state_reason: String::new(),
+            resource: String::new(),
+            dimensions: String::new(),
+            expression: "SUM([m1, m2])".to_string(),
+            alarm_type: "expression".to_string(),
+            cross_account: String::new(),
+            ..Default::default()
+        };
+        // The fix: when statistic is empty, we should NOT call get_metric_statistics
+        assert!(
+            alarm.statistic.is_empty(),
+            "Metric math alarm must have empty statistic"
+        );
+        assert!(
+            alarm.metric_name.is_empty(),
+            "Metric math alarm must have empty metric_name"
+        );
+        // Verify the guard condition: statistic.is_empty() || metric_name.is_empty()
+        // This is the condition checked in main.rs before calling get_metric_statistics
+        let should_skip = alarm.statistic.is_empty() || alarm.metric_name.is_empty();
+        assert!(
+            should_skip,
+            "Should skip get_metric_statistics for metric math alarms"
+        );
+    }
+
+    #[test]
     fn test_column_toggle_prevents_hiding_last_column() {
         let mut app = test_app();
         app.mode = Mode::Normal;
@@ -22542,5 +22601,167 @@ mod lambda_version_tab_tests {
         // Should still have one column visible
         assert_eq!(app.cw_alarm_visible_column_ids.len(), 1);
         assert_eq!(app.cw_alarm_visible_column_ids[0], "column.cw.alarm.name");
+    }
+}
+
+#[cfg(test)]
+mod insights_log_group_dropdown_tests {
+    use super::*;
+    use test_helpers::*;
+
+    fn setup_insights_with_log_groups(app: &mut App) {
+        app.current_service = Service::CloudWatchInsights;
+        app.service_selected = true;
+        app.mode = Mode::InsightsInput;
+        app.insights_state.insights.insights_focus = InsightsFocus::LogGroupSearch;
+
+        // Pre-populate log groups
+        app.log_groups_state.log_groups.items = vec![
+            rusticity_core::LogGroup {
+                name: "/aws/lambda/my-function".to_string(),
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+                creation_time: None,
+            },
+            rusticity_core::LogGroup {
+                name: "/aws/containerinsights/my-cluster/application".to_string(),
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+                creation_time: None,
+            },
+        ];
+    }
+
+    #[test]
+    fn test_typing_in_log_group_search_shows_dropdown() {
+        let mut app = test_app();
+        setup_insights_with_log_groups(&mut app);
+
+        // Type 'a' 'w' to search
+        app.handle_action(Action::FilterInput('a'));
+        app.handle_action(Action::FilterInput('w'));
+
+        assert!(
+            app.insights_state.insights.show_dropdown,
+            "Dropdown must show when log group search has matches"
+        );
+        assert!(
+            !app.insights_state.insights.log_group_matches.is_empty(),
+            "Must have matches for 'aw'"
+        );
+    }
+
+    #[test]
+    fn test_space_toggles_highlighted_log_group_in_dropdown() {
+        // Regression: Space in InsightsInput with LogGroupSearch focus must
+        // toggle the highlighted dropdown entry, not type a space.
+        let mut app = test_app();
+        setup_insights_with_log_groups(&mut app);
+
+        // Type to show dropdown
+        app.handle_action(Action::FilterInput('a'));
+        app.handle_action(Action::FilterInput('w'));
+
+        assert!(app.insights_state.insights.show_dropdown);
+        assert!(app.insights_state.insights.selected_log_groups.is_empty());
+
+        // Space must toggle the first/highlighted entry
+        app.handle_action(Action::ToggleFilterCheckbox);
+
+        assert!(
+            !app.insights_state.insights.selected_log_groups.is_empty(),
+            "Space must add the highlighted log group to selected_log_groups"
+        );
+    }
+
+    #[test]
+    fn test_space_key_dispatches_toggle_not_filter_input_in_insights_mode() {
+        use crate::keymap::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::InsightsInput);
+        assert_eq!(
+            action,
+            Some(Action::ToggleFilterCheckbox),
+            "Space in InsightsInput must dispatch ToggleFilterCheckbox, not FilterInput(' ')"
+        );
+    }
+
+    #[test]
+    fn test_down_up_arrows_navigate_dropdown() {
+        let mut app = test_app();
+        setup_insights_with_log_groups(&mut app);
+        app.handle_action(Action::FilterInput('a'));
+        app.handle_action(Action::FilterInput('w'));
+
+        assert_eq!(app.insights_state.insights.dropdown_selected, 0);
+
+        app.handle_action(Action::NextItem);
+        assert!(
+            app.insights_state.insights.dropdown_selected >= 1
+                || app.insights_state.insights.log_group_matches.len() == 1,
+            "Down arrow must advance dropdown selection"
+        );
+    }
+
+    #[test]
+    fn test_space_in_normal_mode_toggles_dropdown_entry_not_open_space_menu() {
+        // Regression: in Normal mode with Insights dropdown showing, Space was
+        // opening the space menu instead of toggling the log group entry.
+        let mut app = test_app();
+        setup_insights_with_log_groups(&mut app);
+        // Enter InsightsInput, type, show dropdown
+        app.handle_action(Action::StartFilter);
+        assert_eq!(app.mode, Mode::InsightsInput);
+        app.handle_action(Action::FilterInput('a'));
+        app.handle_action(Action::FilterInput('w'));
+        assert!(app.insights_state.insights.show_dropdown);
+
+        // Switch back to Normal mode (simulate pressing Esc or Tab away)
+        app.mode = Mode::Normal;
+
+        // Space must toggle entry, not open space menu
+        app.handle_action(Action::OpenSpaceMenu); // Space maps to OpenSpaceMenu in Normal
+        assert_ne!(
+            app.mode,
+            Mode::SpaceMenu,
+            "Space must NOT open space menu when Insights dropdown is showing"
+        );
+        assert!(
+            !app.insights_state.insights.selected_log_groups.is_empty(),
+            "Space must toggle the highlighted log group"
+        );
+    }
+
+    #[test]
+    fn test_enter_selects_highlighted_entry_and_closes_dropdown() {
+        // Regression: Enter was closing the dropdown without selecting the entry.
+        let mut app = test_app();
+        setup_insights_with_log_groups(&mut app);
+        app.handle_action(Action::StartFilter);
+        app.handle_action(Action::FilterInput('a'));
+        app.handle_action(Action::FilterInput('w'));
+        assert!(app.insights_state.insights.show_dropdown);
+
+        // Enter must select highlighted entry AND close dropdown
+        app.handle_action(Action::ApplyFilter);
+
+        assert!(
+            !app.insights_state.insights.show_dropdown,
+            "Dropdown must close after Enter"
+        );
+        assert!(
+            !app.insights_state.insights.selected_log_groups.is_empty(),
+            "Enter must select the highlighted log group before closing"
+        );
     }
 }

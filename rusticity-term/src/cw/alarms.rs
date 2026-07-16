@@ -26,7 +26,7 @@ pub fn init(i18n: &mut HashMap<String, String>) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Alarm {
     pub name: String,
     pub state: String,
@@ -45,6 +45,14 @@ pub struct Alarm {
     pub expression: String,
     pub alarm_type: String,
     pub cross_account: String,
+    // Extended detail fields
+    pub alarm_arn: String,
+    pub datapoints_to_alarm: u32,
+    pub evaluation_periods: u32,
+    pub treat_missing_data: String,
+    pub evaluate_low_sample_percentile: String,
+    /// Non-empty for metric math alarms.
+    pub sub_metrics: Vec<rusticity_core::SubMetric>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -200,17 +208,22 @@ impl AlarmColumn {
     }
 }
 
-pub fn console_url(
-    region: &str,
-    view_mode: &str,
-    page_size: usize,
-    sort_col: &str,
-    sort_dir: &str,
-) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarms/{}/{}?~(sortingColumn~'{}~sortingDirection~'{})",
-        region, region, view_mode, page_size, sort_col, sort_dir
-    )
+pub fn console_url(region: &str, alarm_name: Option<&str>) -> String {
+    match alarm_name {
+        Some(name) => {
+            let encoded = urlencoding::encode(name);
+            format!(
+                "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarm/{}?~(sortingColumn~'Last*2520state*2520update~sortingDirection~'ASC~timeRange~(startDate~'PT3H~endDate~'PT0S))",
+                region, region, encoded
+            )
+        }
+        None => {
+            format!(
+                "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarms?~(sortingColumn~'Last*2520state*2520update~sortingDirection~'ASC~timeRange~(startDate~'PT3H~endDate~'PT0S))",
+                region, region
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +239,36 @@ mod tests {
                 col.id()
             );
         }
+    }
+
+    #[test]
+    fn test_console_url_list_view_points_to_alarms_list() {
+        let url = console_url("us-east-1", None);
+        assert!(
+            url.contains("alarmsV2"),
+            "URL must contain alarmsV2, got: {url}"
+        );
+        assert!(
+            !url.contains("table") && !url.contains("50"),
+            "List URL must not contain view_mode or page_size, got: {url}"
+        );
+    }
+
+    #[test]
+    fn test_console_url_with_alarm_name_links_directly_to_alarm() {
+        let url = console_url("us-east-1", Some("MyAlarm"));
+        assert!(
+            url.contains("alarmsV2:alarm/MyAlarm"),
+            "URL must contain 'alarmsV2:alarm/MyAlarm', got: {url}"
+        );
+    }
+
+    #[test]
+    fn test_console_url_alarm_name_is_url_encoded() {
+        let url = console_url("us-east-1", Some("My Alarm With Spaces"));
+        assert!(
+            !url.contains("My Alarm With Spaces"),
+            "Alarm name must be URL-encoded, got: {url}"
+        );
     }
 }

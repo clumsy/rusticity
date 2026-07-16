@@ -88,7 +88,12 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let help = if app.mode == Mode::ColumnSelector {
+    let help = if app.mode == Mode::QuitConfirm {
+        let mut hints = vec![];
+        hints.extend(first_hint("y", "confirm quit"));
+        hints.extend(last_hint("n / Esc", "cancel"));
+        hints
+    } else if app.mode == Mode::ColumnSelector {
         let mut hints = vec![];
         hints.extend(hint("↑↓", "scroll"));
         hints.extend(hint("␣", "toggle"));
@@ -154,6 +159,19 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^r", "refresh"));
         hints.extend(hint("p", "preferences"));
         hints.extend(hint("^p", "print"));
+        hints.extend(hint("^w", "close"));
+        hints.extend(last_hint("q", "quit"));
+        hints
+    } else if app.current_service == Service::CloudWatchAlarms
+        && app.alarms_state.current_alarm.is_some()
+    {
+        let mut hints = vec![];
+        hints.extend(first_hint("↑↓", "scroll"));
+        hints.extend(hint("⇤⇥", "switch tab"));
+        hints.extend(hint("⎋", "back"));
+        hints.extend(hint("y", "copy JSON"));
+        hints.extend(hint("^o", "console"));
+        hints.extend(hint("^r", "refresh"));
         hints.extend(hint("^w", "close"));
         hints.extend(last_hint("q", "quit"));
         hints

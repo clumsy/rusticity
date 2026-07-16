@@ -233,7 +233,7 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
     frame.render_widget(combo_para, row2_chunks[0]);
 
     // Log group search input
-    let search_focused = app.mode == Mode::InsightsInput
+    let search_focused = (app.mode == Mode::InsightsInput || app.mode == Mode::Normal)
         && app.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch;
     let search_style = if search_focused {
         Style::default().fg(Color::Green)
@@ -318,11 +318,13 @@ fn render_input_pane(frame: &mut Frame, app: &App, area: Rect, query_height: u16
     let query_para = Paragraph::new(query_lines);
     frame.render_widget(query_para, query_chunks[1]);
 
-    // Render dropdown if active
-    if app.mode == Mode::InsightsInput
-        && app.insights_state.insights.show_dropdown
+    // Render dropdown if active (works in both InsightsInput and Normal mode)
+    let dropdown_visible = app.insights_state.insights.show_dropdown
         && !app.insights_state.insights.log_group_matches.is_empty()
-    {
+        && (app.mode == Mode::InsightsInput
+            || (app.mode == Mode::Normal
+                && app.insights_state.insights.insights_focus == InsightsFocus::LogGroupSearch));
+    if dropdown_visible {
         let row2_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])

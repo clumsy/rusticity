@@ -797,36 +797,42 @@ fn render_ec2_monitoring_charts(frame: &mut Frame, app: &crate::app::App, area: 
                 data: &app.ec2_state.metric_data_cpu,
                 y_axis_label: "%",
                 x_axis_label: None,
+                ..Default::default()
             },
             crate::ui::monitoring::MetricChart {
                 title: &network_in_label,
                 data: &app.ec2_state.metric_data_network_in,
                 y_axis_label: "bytes",
                 x_axis_label: None,
+                ..Default::default()
             },
             crate::ui::monitoring::MetricChart {
                 title: &network_out_label,
                 data: &app.ec2_state.metric_data_network_out,
                 y_axis_label: "bytes",
                 x_axis_label: None,
+                ..Default::default()
             },
             crate::ui::monitoring::MetricChart {
                 title: &network_packets_in_label,
                 data: &app.ec2_state.metric_data_network_packets_in,
                 y_axis_label: "count",
                 x_axis_label: None,
+                ..Default::default()
             },
             crate::ui::monitoring::MetricChart {
                 title: &network_packets_out_label,
                 data: &app.ec2_state.metric_data_network_packets_out,
                 y_axis_label: "count",
                 x_axis_label: None,
+                ..Default::default()
             },
             crate::ui::monitoring::MetricChart {
                 title: &metadata_no_token_label,
                 data: &app.ec2_state.metric_data_metadata_no_token,
                 y_axis_label: "count",
                 x_axis_label: None,
+                ..Default::default()
             },
         ],
         &[],

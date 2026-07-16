@@ -12,11 +12,14 @@ pub trait MonitoringState {
     fn clear_metrics(&mut self);
 }
 
+#[derive(Default)]
 pub struct MetricChart<'a> {
     pub title: &'a str,
     pub data: &'a [(i64, f64)],
     pub y_axis_label: &'a str,
     pub x_axis_label: Option<String>,
+    /// Optional threshold to draw as a red horizontal line.
+    pub threshold: Option<f64>,
 }
 
 pub struct MultiDatasetChart<'a> {
@@ -134,7 +137,10 @@ pub fn render_monitoring_tab(
 
     let total_height = total_charts * 20;
     let scroll_offset = scroll_position * 20;
-    render_vertical_scrollbar(frame, area, total_height, scroll_offset);
+    // Only show scrollbar when content doesn't fully fit
+    if total_height > available_height {
+        render_vertical_scrollbar(frame, area, total_height, scroll_offset);
+    }
 }
 
 fn x_axis_labels(min_x: f64, max_x: f64) -> Vec<Span<'static>> {
@@ -165,7 +171,9 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
     if chart.data.is_empty() {
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let paragraph = Paragraph::new("--");
+        let paragraph = Paragraph::new("No data in selected time range")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(paragraph, inner);
         return;
     }
@@ -185,6 +193,7 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
         .iter()
         .map(|(_, y)| *y)
         .fold(0.0_f64, f64::max)
+        .max(chart.threshold.unwrap_or(0.0))
         .max(1.0);
 
     let dataset = Dataset::default()
@@ -193,6 +202,21 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
         .graph_type(GraphType::Line)
         .style(Style::default().fg(Color::Cyan))
         .data(&data);
+
+    // Build datasets — metric data + optional red threshold line
+    let threshold_data: Vec<(f64, f64)>;
+    let mut datasets = vec![dataset];
+    if let Some(thresh) = chart.threshold {
+        threshold_data = vec![(min_x, thresh), (max_x, thresh)];
+        datasets.push(
+            Dataset::default()
+                .name(format!("threshold: {}", thresh))
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Color::Red))
+                .data(&threshold_data),
+        );
+    }
 
     let x_labels = x_axis_labels(min_x, max_x);
 
@@ -227,7 +251,7 @@ fn render_chart(frame: &mut Frame, chart: &MetricChart, area: Rect) {
         .bounds([0.0, max_y * 1.1])
         .labels(y_labels);
 
-    let chart_widget = Chart::new(vec![dataset])
+    let chart_widget = Chart::new(datasets)
         .block(block)
         .x_axis(x_axis)
         .y_axis(y_axis);
@@ -484,6 +508,7 @@ mod tests {
             data: &data,
             y_axis_label: "Count",
             x_axis_label: None,
+            ..Default::default()
         };
         assert_eq!(chart.title, "Test Metric");
         assert_eq!(chart.data.len(), 2);
@@ -499,6 +524,7 @@ mod tests {
             data: &data,
             y_axis_label: "Value",
             x_axis_label: None,
+            ..Default::default()
         };
         assert!(chart.data.is_empty());
     }
@@ -511,11 +537,63 @@ mod tests {
             data: &data,
             y_axis_label: "Count",
             x_axis_label: Some("Invocations [sum: 15]".to_string()),
+            ..Default::default()
         };
         assert_eq!(
             chart.x_axis_label,
             Some("Invocations [sum: 15]".to_string())
         );
+    }
+
+    #[test]
+    fn test_metric_chart_threshold_field() {
+        // MetricChart accepts an optional threshold for the red alarm line.
+        let data = vec![(1700000000, 50.0), (1700000060, 95.0)];
+
+        // No threshold
+        let chart_no_thresh = MetricChart {
+            title: "StorageCapacityUtilization",
+            data: &data,
+            y_axis_label: "%",
+            x_axis_label: None,
+            ..Default::default()
+        };
+        assert!(chart_no_thresh.threshold.is_none());
+
+        // With threshold
+        let chart_with_thresh = MetricChart {
+            title: "StorageCapacityUtilization",
+            data: &data,
+            y_axis_label: "%",
+            x_axis_label: None,
+            threshold: Some(90.0),
+        };
+        assert_eq!(chart_with_thresh.threshold, Some(90.0));
+    }
+
+    #[test]
+    fn test_metric_chart_threshold_affects_y_axis_scale() {
+        // When threshold > max data value, the y-axis must scale to include the threshold.
+        // We verify this by checking threshold is stored correctly — actual rendering
+        // uses max(data_max, threshold) for y bounds.
+        let data = vec![(1700000000, 30.0)]; // data max = 30
+        let chart = MetricChart {
+            title: "Test",
+            data: &data,
+            y_axis_label: "",
+            x_axis_label: None,
+            threshold: Some(90.0), // threshold > data max
+        };
+        assert_eq!(chart.threshold, Some(90.0));
+        // The render_chart function uses: max_y = data_max.max(threshold).max(1.0)
+        // so y-axis extends to at least 90.0 * 1.1
+        let effective_max = data
+            .iter()
+            .map(|(_, y)| *y)
+            .fold(0.0_f64, f64::max)
+            .max(chart.threshold.unwrap_or(0.0))
+            .max(1.0);
+        assert!(effective_max >= 90.0);
     }
 
     #[test]

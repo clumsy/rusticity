@@ -16,6 +16,7 @@ pub enum Mode {
     CalendarPicker,
     TabPicker,
     SessionPicker,
+    QuitConfirm,
 }
 
 pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
@@ -23,7 +24,7 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
         Mode::Normal => match key.code {
             KeyCode::Char('q') => Some(Action::Quit),
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Quit)
+                Some(Action::ConfirmQuit)
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::CloseService)
@@ -95,12 +96,13 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
+            KeyCode::Char('q') if key.modifiers.is_empty() => Some(Action::Quit),
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::DeleteWord)
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordLeft),
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordRight),
-            KeyCode::Char(c) if c != 'i' => Some(Action::FilterInput(c)),
+            KeyCode::Char(c) if c != 'i' && c != 'q' => Some(Action::FilterInput(c)),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             _ => None,
         },
@@ -192,6 +194,11 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             }
             _ => None,
         },
+        Mode::QuitConfirm => match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => Some(Action::ConfirmQuit),
+            KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => Some(Action::CancelQuit),
+            _ => None,
+        },
         Mode::RegionPicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
             KeyCode::Char('i') => Some(Action::EnterFilterMode),
@@ -254,6 +261,8 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     Quit,
+    ConfirmQuit,
+    CancelQuit,
     CloseService,
     NextItem,
     PrevItem,
@@ -521,5 +530,114 @@ mod tests {
             Some(Action::FilterInput(' ')),
             "Space should not be added to filter text"
         );
+    }
+
+    #[test]
+    fn test_q_in_normal_mode_shows_quit_confirmation() {
+        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::Normal);
+        assert_eq!(
+            action,
+            Some(Action::Quit),
+            "q in Normal mode must trigger Quit (shows confirmation dialog)"
+        );
+    }
+
+    #[test]
+    fn test_ctrl_c_quits_immediately_without_confirmation() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let action = handle_key(key, Mode::Normal);
+        assert_eq!(
+            action,
+            Some(Action::ConfirmQuit),
+            "Ctrl+C must quit immediately (ConfirmQuit, not Quit)"
+        );
+    }
+
+    #[test]
+    fn test_q_in_service_picker_shows_quit_confirmation() {
+        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::ServicePicker);
+        assert_eq!(
+            action,
+            Some(Action::Quit),
+            "q in ServicePicker must trigger quit confirmation, not filter input"
+        );
+    }
+
+    #[test]
+    fn test_quit_confirm_mode_y_confirms() {
+        let key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::QuitConfirm);
+        assert_eq!(action, Some(Action::ConfirmQuit));
+    }
+
+    #[test]
+    fn test_quit_confirm_mode_enter_confirms() {
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let action = handle_key(key, Mode::QuitConfirm);
+        assert_eq!(action, Some(Action::ConfirmQuit));
+    }
+
+    #[test]
+    fn test_quit_confirm_mode_n_cancels() {
+        let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::QuitConfirm);
+        assert_eq!(action, Some(Action::CancelQuit));
+    }
+
+    #[test]
+    fn test_quit_confirm_mode_esc_cancels() {
+        let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let action = handle_key(key, Mode::QuitConfirm);
+        assert_eq!(action, Some(Action::CancelQuit));
+    }
+
+    #[test]
+    fn test_quit_shows_confirmation_dialog_not_immediate_quit() {
+        use crate::app::{App, Service};
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        app.handle_action(Action::Quit);
+
+        assert_eq!(
+            app.mode,
+            Mode::QuitConfirm,
+            "q must show confirmation dialog"
+        );
+        assert!(
+            app.running,
+            "app must still be running after q (before confirmation)"
+        );
+    }
+
+    #[test]
+    fn test_confirm_quit_actually_quits() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::QuitConfirm;
+
+        app.handle_action(Action::ConfirmQuit);
+
+        assert!(!app.running, "ConfirmQuit must set running=false");
+    }
+
+    #[test]
+    fn test_cancel_quit_returns_to_normal() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::QuitConfirm;
+
+        app.handle_action(Action::CancelQuit);
+
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "CancelQuit must return to Normal mode"
+        );
+        assert!(app.running, "app must still be running after cancel");
     }
 }

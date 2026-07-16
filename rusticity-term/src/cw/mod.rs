@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod alarms;
 pub mod insights;
 pub mod logs;

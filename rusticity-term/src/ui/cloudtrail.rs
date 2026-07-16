@@ -53,8 +53,8 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
 
     // Filter
     let page_size = app.cloudtrail_state.table.page_size.value();
-    let filtered_count = app.cloudtrail_state.table.items.len();
-    let loaded_pages = filtered_count.div_ceil(page_size);
+    let total_items = app.cloudtrail_state.table.items.len();
+    let loaded_pages = total_items.div_ceil(page_size);
     let current_page = app.cloudtrail_state.table.selected / page_size;
 
     // Show loaded pages + 1 if more data available
@@ -93,7 +93,25 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let filtered_events: Vec<&CloudTrailEvent> = app.cloudtrail_state.table.items.iter().collect();
+    let filtered_events: Vec<&CloudTrailEvent> = if app.cloudtrail_state.table.filter.is_empty() {
+        app.cloudtrail_state.table.items.iter().collect()
+    } else {
+        let q = app.cloudtrail_state.table.filter.to_lowercase();
+        app.cloudtrail_state
+            .table
+            .items
+            .iter()
+            .filter(|e| {
+                e.event_name.to_lowercase().contains(&q)
+                    || e.username.to_lowercase().contains(&q)
+                    || e.event_source.to_lowercase().contains(&q)
+                    || e.resource_type.to_lowercase().contains(&q)
+                    || e.resource_name.to_lowercase().contains(&q)
+                    || e.source_ip_address.to_lowercase().contains(&q)
+                    || e.error_code.to_lowercase().contains(&q)
+            })
+            .collect()
+    };
 
     // Apply pagination
     let page_size = app.cloudtrail_state.table.page_size.value();

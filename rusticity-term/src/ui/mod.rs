@@ -674,6 +674,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Mode::CalendarPicker => render_calendar_picker(frame, app, area),
         Mode::TabPicker => render_tab_picker(frame, app, area),
         Mode::SessionPicker => render_session_picker(frame, app, area),
+        Mode::QuitConfirm => render_quit_confirm(frame, area),
         _ => {}
     }
 }
@@ -2129,6 +2130,48 @@ fn render_error_modal(frame: &mut Frame, app: &App, area: Rect) {
     let help = Paragraph::new(Line::from(help_spans)).alignment(Alignment::Center);
 
     frame.render_widget(help, chunks[2]);
+}
+
+fn render_quit_confirm(frame: &mut Frame, area: Rect) {
+    let width = 36u16;
+    let height = 5u16;
+    let popup_area = centered_rect_absolute(width, height, area);
+
+    let paragraph = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" confirm  "),
+            Span::styled(
+                "n",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" / "),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" cancel"),
+        ]),
+        Line::from(""),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .title(format_title("Quit?"))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Yellow))
+            .style(Style::default().bg(Color::Black)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(paragraph, popup_area);
 }
 
 fn render_space_menu(frame: &mut Frame, area: Rect) {
@@ -4111,6 +4154,7 @@ mod tests {
         app.log_groups_state.log_events = vec![rusticity_core::LogEvent {
             timestamp: chrono::Utc::now(),
             message: "Test log message".to_string(),
+            ingestion_time: None,
         }];
         app.log_groups_state.event_scroll_offset = 0;
 
@@ -4131,6 +4175,7 @@ mod tests {
         app.log_groups_state.log_events = vec![rusticity_core::LogEvent {
             timestamp: chrono::Utc::now(),
             message: "Test log message".to_string(),
+            ingestion_time: None,
         }];
         app.log_groups_state.event_scroll_offset = 0;
         app.log_groups_state.expanded_event = Some(0);

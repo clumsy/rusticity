@@ -111,6 +111,9 @@ pub const FILTER_CONTROLS: [InputFocus; 4] = [
     InputFocus::Pagination,
 ];
 
+/// Simplified controls for the log groups list view (no checkboxes).
+pub const LIST_FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EventFilterFocus {
     Filter,
@@ -272,7 +275,7 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
     let filtered_count = filtered_groups.len();
     let page_size = app.log_groups_state.log_groups.page_size.value();
     let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.log_groups_state.log_groups.selected / page_size;
+    let current_page = app.log_groups_state.log_groups.scroll_offset / page_size;
     let pagination = render_pagination_text(current_page, total_pages);
 
     crate::ui::filter::render_simple_filter(
@@ -316,7 +319,11 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let config = TableConfig {
         items: paginated,
-        selected_index: app.log_groups_state.log_groups.selected % page_size,
+        selected_index: app
+            .log_groups_state
+            .log_groups
+            .selected
+            .saturating_sub(start_idx),
         expanded_index,
         columns: &columns,
         sort_column: "",
@@ -793,9 +800,17 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
                         msg
                     }
                 }
-                EventColumn::IngestionTime => "-".to_string(),
+                EventColumn::IngestionTime => event
+                    .ingestion_time
+                    .map(|t| format_timestamp(&t))
+                    .unwrap_or_else(|| "-".to_string()),
                 EventColumn::EventId => "-".to_string(),
-                EventColumn::LogStreamName => "-".to_string(),
+                EventColumn::LogStreamName => app
+                    .log_groups_state
+                    .log_streams
+                    .get(app.log_groups_state.selected_stream)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| "-".to_string()),
             };
 
             let cell_content = if i > 0 {
@@ -917,9 +932,17 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
                 let value = match col {
                     EventColumn::Timestamp => format_timestamp(&event.timestamp),
                     EventColumn::Message => event.message.replace('\t', "    "),
-                    EventColumn::IngestionTime => "-".to_string(),
+                    EventColumn::IngestionTime => event
+                        .ingestion_time
+                        .map(|t| format_timestamp(&t))
+                        .unwrap_or_else(|| "-".to_string()),
                     EventColumn::EventId => "-".to_string(),
-                    EventColumn::LogStreamName => "-".to_string(),
+                    EventColumn::LogStreamName => app
+                        .log_groups_state
+                        .log_streams
+                        .get(app.log_groups_state.selected_stream)
+                        .map(|s| s.name.clone())
+                        .unwrap_or_else(|| "-".to_string()),
                 };
                 let col_name = format!("{}: ", col.name());
                 let full_line = format!("{}{}", col_name, value);
@@ -1528,5 +1551,140 @@ mod tests {
         app.log_groups_state.show_expired = false;
         let filtered = filtered_log_streams(&app);
         assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_log_streams_pagination_right_arrow_increments_by_one_page() {
+        // Regression: handle_page_down was adding page_size (20) to stream_current_page
+        // which is a PAGE INDEX, not an item offset. Result: page 1 → page 21 instead of page 2.
+        use crate::app::ViewMode;
+        use crate::app::{App, Service};
+        use crate::common::InputFocus;
+        use crate::keymap::Mode;
+
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::Detail;
+        app.mode = Mode::FilterInput;
+        app.log_groups_state.input_focus = InputFocus::Pagination;
+        app.log_groups_state.stream_page_size = 20;
+        app.log_groups_state.stream_current_page = 0;
+        app.log_groups_state.selected_stream = 0;
+
+        // Create 60 streams (3 pages of 20)
+        app.log_groups_state.log_streams = (0..60)
+            .map(|i| rusticity_core::types::LogStream {
+                name: format!("stream-{}", i),
+                creation_time: None,
+                last_event_time: None,
+            })
+            .collect();
+
+        crate::cw::actions::logs_page_down_filter_input(&mut app);
+
+        assert_eq!(
+            app.log_groups_state.stream_current_page, 1,
+            "Right arrow must advance to page 2 (index 1), not page 21"
+        );
+        assert_eq!(app.log_groups_state.selected_stream, 20);
+
+        crate::cw::actions::logs_page_up_filter_input(&mut app);
+        assert_eq!(
+            app.log_groups_state.stream_current_page, 0,
+            "Left arrow must go back to page 1 (index 0)"
+        );
+        assert_eq!(app.log_groups_state.selected_stream, 0);
+    }
+
+    #[test]
+    fn test_log_groups_list_tab_cycles_only_filter_and_pagination() {
+        // Regression: FILTER_CONTROLS had 4 entries (Filter, ExactMatch, ShowExpired, Pagination).
+        // In list view, Tab was cycling through ExactMatch/ShowExpired which are
+        // only relevant in the streams detail view and not visible in the list filter bar.
+        use crate::app::ViewMode;
+        use crate::app::{App, Service};
+        use crate::common::InputFocus;
+        use crate::keymap::Mode;
+
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::List;
+        app.mode = Mode::FilterInput;
+        app.log_groups_state.input_focus = InputFocus::Filter;
+
+        crate::cw::actions::logs_next_filter_focus(&mut app);
+        assert_eq!(
+            app.log_groups_state.input_focus,
+            InputFocus::Pagination,
+            "In list view, Tab from Filter must go directly to Pagination (skip ExactMatch/ShowExpired)"
+        );
+
+        crate::cw::actions::logs_next_filter_focus(&mut app);
+        assert_eq!(
+            app.log_groups_state.input_focus,
+            InputFocus::Filter,
+            "Tab from Pagination must wrap back to Filter"
+        );
+    }
+
+    #[test]
+    fn test_log_groups_down_arrow_stays_within_page_and_updates_selection() {
+        // Regression: next_item adjusted scroll_offset by 1 (not page-aligned), causing
+        // selected_index = selected % page_size to point to the wrong visible row.
+        // After the fix, scroll_offset is snapped to page boundary so selected_index
+        // equals selected - scroll_offset correctly.
+        use crate::app::ViewMode;
+        use crate::app::{App, Service};
+        use crate::common::PageSize;
+        use rusticity_core::types::LogGroup;
+
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.current_service = Service::CloudWatchLogGroups;
+        app.service_selected = true;
+        app.view_mode = ViewMode::List;
+        app.log_groups_state.log_groups.page_size = PageSize::Ten;
+
+        // Create 21 log groups
+        app.log_groups_state.log_groups.items = (0..21)
+            .map(|i| LogGroup {
+                name: format!("/aws/group/{}", i),
+                stored_bytes: Some(0),
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+                creation_time: None,
+            })
+            .collect();
+
+        // Simulate page jump to page 3 (selected=20, scroll_offset=20)
+        app.log_groups_state.log_groups.selected = 20;
+        app.log_groups_state.log_groups.scroll_offset = 20;
+
+        // Down arrow — already at last item, should stay
+        crate::cw::actions::logs_next_item(&mut app);
+        assert_eq!(
+            app.log_groups_state.log_groups.selected, 20,
+            "Can't go past last item"
+        );
+        assert_eq!(
+            app.log_groups_state.log_groups.scroll_offset, 20,
+            "scroll_offset must stay page-aligned"
+        );
+
+        // Navigate back to page 2 via up arrow from item 20 to item 19
+        app.log_groups_state.log_groups.selected = 20;
+        app.log_groups_state.log_groups.scroll_offset = 20;
+        crate::cw::actions::logs_prev_item(&mut app);
+        assert_eq!(app.log_groups_state.log_groups.selected, 19);
+        // scroll_offset follows selection (non-page-aligned viewport scrolling is OK)
+        let scroll = app.log_groups_state.log_groups.scroll_offset;
+        assert!(
+            scroll <= 19,
+            "scroll_offset {scroll} must be <= selected 19"
+        );
     }
 }

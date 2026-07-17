@@ -1,8 +1,6 @@
 use crate::apig::api::Column as ApigColumn;
 use crate::apig::resource::Column as ResourceColumn;
-use crate::apig::resource::Resource as ApigResource;
 use crate::apig::route::Column as RouteColumn;
-use crate::apig::route::Route;
 pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::cloudtrail::{CloudTrailEvent, CloudTrailEventColumn, EventResourceColumn};
@@ -81,7 +79,6 @@ pub use crate::ui::sqs::{
     State as SqsState, FILTER_CONTROLS as SQS_FILTER_CONTROLS,
     SUBSCRIPTION_FILTER_CONTROLS as SQS_SUBSCRIPTION_FILTER_CONTROLS, SUBSCRIPTION_REGION,
 };
-use crate::ui::tree::TreeItem;
 pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
     StreamColumn, StreamSort, TimeUnit,
@@ -92,7 +89,6 @@ use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
     CloudWatchClient, Ec2Client, EcrClient, IamClient, LambdaClient, S3Client, SqsClient,
 };
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct Tab {
@@ -451,13 +447,7 @@ impl App {
 
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
         if self.current_service == Service::ApiGatewayApis {
-            if self.apig_state.current_api.is_some()
-                && self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes
-            {
-                Some(&mut self.apig_state.route_filter)
-            } else {
-                Some(&mut self.apig_state.apis.filter)
-            }
+            crate::apig::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudWatchAlarms {
             Some(&mut self.alarms_state.table.filter)
         } else if self.current_service == Service::CloudTrailEvents {
@@ -597,7 +587,7 @@ impl App {
                     self.log_groups_state.selected_stream = 0;
                 }
             } else if self.current_service == Service::ApiGatewayApis {
-                self.apig_state.apis.reset();
+                crate::apig::actions::apply_filter_reset(self);
             }
         }
     }
@@ -1227,7 +1217,7 @@ impl App {
                         crate::ecr::actions::apply_filter_reset(self);
                     }
                     Service::ApiGatewayApis => {
-                        self.apig_state.apis.reset();
+                        crate::apig::actions::apply_filter_reset(self);
                     }
                     Service::LambdaApplications => {
                         crate::lambda::applications::apply_filter_reset(self);
@@ -1458,7 +1448,7 @@ impl App {
                     } else if self.current_service == Service::CloudWatchLogGroups {
                         crate::cw::actions::logs_is_pagination_focused(self)
                     } else if self.current_service == Service::ApiGatewayApis {
-                        self.apig_state.input_focus == InputFocus::Pagination
+                        crate::apig::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::EcrRepositories
                         && self.ecr_state.current_repository.is_none()
                     {
@@ -1509,7 +1499,7 @@ impl App {
                         && self.apig_state.current_api.is_some()
                         && self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes
                     {
-                        if self.apig_state.input_focus == InputFocus::Filter {
+                        if crate::apig::actions::filter_char_allowed(self) {
                             self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::LambdaFunctions {
@@ -1840,70 +1830,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
-                    if let Some(api) = &self.apig_state.current_api {
-                        use crate::ui::apig::ApiDetailTab;
-                        if self.apig_state.detail_tab == ApiDetailTab::Routes {
-                            // Check if REST API (shows resources) or HTTP/WebSocket (shows routes)
-                            if api.protocol_type.to_uppercase() == "REST" {
-                                // REST API - toggle resource columns (skip first column - it's locked)
-                                let idx = self.column_selector_index;
-                                if idx > 1 && idx <= self.apig_resource_column_ids.len() {
-                                    if let Some(col) = self.apig_resource_column_ids.get(idx - 1) {
-                                        if let Some(pos) = self
-                                            .apig_resource_visible_column_ids
-                                            .iter()
-                                            .position(|c| c == col)
-                                        {
-                                            self.apig_resource_visible_column_ids.remove(pos);
-                                        } else {
-                                            self.apig_resource_visible_column_ids.push(*col);
-                                        }
-                                    }
-                                }
-                            } else {
-                                // HTTP/WebSocket API - toggle route columns (skip first column - it's locked)
-                                let idx = self.column_selector_index;
-                                if idx > 1 && idx <= self.apig_route_column_ids.len() {
-                                    if let Some(col) = self.apig_route_column_ids.get(idx - 1) {
-                                        if let Some(pos) = self
-                                            .apig_route_visible_column_ids
-                                            .iter()
-                                            .position(|c| c == col)
-                                        {
-                                            self.apig_route_visible_column_ids.remove(pos);
-                                        } else {
-                                            self.apig_route_visible_column_ids.push(*col);
-                                        }
-                                    }
-                                }
-                            }
-                            // idx == 1 is the locked first column, do nothing
-                        }
-                    } else {
-                        // API list view - toggle API columns
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.apig_api_column_ids.len() {
-                            if let Some(col) = self.apig_api_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .apig_api_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.apig_api_visible_column_ids.remove(pos);
-                                } else {
-                                    self.apig_api_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.apig_api_column_ids.len() + 3 {
-                            self.apig_state.apis.page_size = PageSize::Ten;
-                        } else if idx == self.apig_api_column_ids.len() + 4 {
-                            self.apig_state.apis.page_size = PageSize::TwentyFive;
-                        } else if idx == self.apig_api_column_ids.len() + 5 {
-                            self.apig_state.apis.page_size = PageSize::Fifty;
-                        } else if idx == self.apig_api_column_ids.len() + 6 {
-                            self.apig_state.apis.page_size = PageSize::OneHundred;
-                        }
-                    }
+                    crate::apig::actions::toggle_column(self);
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
@@ -2106,10 +2033,7 @@ impl App {
             }
             Action::NextPreferences => {
                 if self.current_service == Service::ApiGatewayApis {
-                    cycle_preference_next(
-                        &mut self.column_selector_index,
-                        self.apig_api_column_ids.len(),
-                    );
+                    crate::apig::actions::next_preferences(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     crate::cw::actions::alarms_next_preferences(self);
                 } else if self.current_service == Service::EcrRepositories
@@ -2305,10 +2229,7 @@ impl App {
             }
             Action::PrevPreferences => {
                 if self.current_service == Service::ApiGatewayApis {
-                    cycle_preference_prev(
-                        &mut self.column_selector_index,
-                        self.apig_api_column_ids.len(),
-                    );
+                    crate::apig::actions::prev_preferences(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     crate::cw::actions::alarms_prev_preferences(self);
                 } else if self.current_service == Service::EcrRepositories
@@ -2479,7 +2400,7 @@ impl App {
                 } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
-                    self.apig_state.detail_tab = self.apig_state.detail_tab.next();
+                    crate::apig::actions::next_detail_tab(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                 {
@@ -2535,7 +2456,7 @@ impl App {
                 } else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
-                    self.apig_state.detail_tab = self.apig_state.detail_tab.prev();
+                    crate::apig::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                 {
@@ -2603,7 +2524,7 @@ impl App {
                 {
                     self.mode = Mode::FilterInput;
                     if self.current_service == Service::ApiGatewayApis {
-                        self.apig_state.input_focus = InputFocus::Filter;
+                        crate::apig::actions::start_filter(self);
                     } else if self.current_service == Service::EcrRepositories
                         && self.ecr_state.current_repository.is_none()
                     {
@@ -2751,9 +2672,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::ApiGatewayApis
                 {
-                    use crate::ui::apig::FILTER_CONTROLS;
-                    self.apig_state.input_focus =
-                        self.apig_state.input_focus.next(&FILTER_CONTROLS);
+                    crate::apig::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::EcrRepositories
                     && self.ecr_state.current_repository.is_none()
@@ -2773,9 +2692,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::ApiGatewayApis
                 {
-                    use crate::ui::apig::FILTER_CONTROLS;
-                    self.apig_state.input_focus =
-                        self.apig_state.input_focus.prev(&FILTER_CONTROLS);
+                    crate::apig::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::S3Buckets
                 {
@@ -3205,24 +3122,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
-                    if let Some(_api) = &self.apig_state.current_api {
-                        use crate::ui::apig::ApiDetailTab;
-                        if self.apig_state.detail_tab == ApiDetailTab::Routes {
-                            // In routes view - copy selected route ARN
-                            let (filtered_routes, _) = crate::ui::apig::filter_tree_items(
-                                &self.apig_state.routes.items,
-                                &self.apig_state.route_children,
-                                &self.apig_state.route_filter,
-                            );
-                            let filtered_refs: Vec<&Route> = filtered_routes.iter().collect();
-                            if let Some(route) = self.apig_state.routes.get_selected(&filtered_refs)
-                            {
-                                if !route.arn.is_empty() {
-                                    copy_to_clipboard(&route.arn);
-                                }
-                            }
-                        }
-                    }
+                    crate::apig::actions::yank(self);
                 }
             }
             Action::CopyToClipboard => {
@@ -3330,10 +3230,7 @@ impl App {
                 else if self.current_service == Service::ApiGatewayApis
                     && self.apig_state.current_api.is_some()
                 {
-                    self.apig_state.current_api = None;
-                    self.apig_state.routes.items.clear();
-                    self.apig_state.detail_tab = crate::ui::apig::ApiDetailTab::Routes;
-                    self.update_current_tab_breadcrumb();
+                    crate::apig::actions::go_back(self);
                 }
                 // S3: pop navigation stack first, then exit bucket
                 else if self.current_service == Service::S3Buckets
@@ -3613,12 +3510,7 @@ impl App {
                 parts.extend(crate::ec2::actions::breadcrumb(self));
             }
             Service::ApiGatewayApis => {
-                parts.push("API Gateway".to_string());
-                if let Some(api) = &self.apig_state.current_api {
-                    parts.push(api.name.clone());
-                } else {
-                    parts.push("APIs".to_string());
-                }
+                parts.extend(crate::apig::actions::breadcrumb(self));
             }
         }
 
@@ -3689,76 +3581,7 @@ impl App {
             Service::IamRoles => crate::iam::actions::console_url_roles(self),
             Service::IamUserGroups => crate::iam::actions::console_url_groups(self),
             Service::Ec2Instances => crate::ec2::actions::console_url(self),
-            Service::ApiGatewayApis => {
-                use crate::apig;
-                if let Some(api) = &self.apig_state.current_api {
-                    if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
-                        let protocol = api.protocol_type.to_uppercase();
-                        if protocol == "REST" {
-                            // Resources view - use filtered items to get correct resource_id
-                            let (filtered_items, _) = crate::ui::apig::filter_tree_items(
-                                &self.apig_state.resources.items,
-                                &self.apig_state.resource_children,
-                                &self.apig_state.route_filter,
-                            );
-
-                            let resource_id =
-                                if self.apig_state.resources.selected < filtered_items.len() {
-                                    // Find the actual resource at this row in the filtered tree
-                                    let mut current_row = 0;
-                                    self.find_resource_at_row(
-                                        &filtered_items,
-                                        self.apig_state.resources.selected,
-                                        &mut current_row,
-                                    )
-                                } else {
-                                    None
-                                };
-                            apig::console_url_resources(
-                                &self.config.region,
-                                &api.id,
-                                resource_id.as_deref(),
-                            )
-                        } else {
-                            // Routes view - use filtered items to get correct route_id
-                            let (filtered_items, filtered_children) =
-                                crate::ui::apig::filter_tree_items(
-                                    &self.apig_state.routes.items,
-                                    &self.apig_state.route_children,
-                                    &self.apig_state.route_filter,
-                                );
-
-                            let total_rows = crate::ui::tree::TreeRenderer::count_visible_rows(
-                                &filtered_items,
-                                &self.apig_state.expanded_routes,
-                                &filtered_children,
-                            );
-
-                            let route_id = if self.apig_state.routes.selected < total_rows {
-                                // Find the actual route_id at this row in the filtered tree
-                                let mut current_row = 0;
-                                self.find_route_id_at_row_with_children(
-                                    &filtered_items,
-                                    &filtered_children,
-                                    self.apig_state.routes.selected,
-                                    &mut current_row,
-                                )
-                            } else {
-                                None
-                            };
-                            apig::console_url_routes(
-                                &self.config.region,
-                                &api.id,
-                                route_id.as_deref(),
-                            )
-                        }
-                    } else {
-                        apig::console_url_api(&self.config.region, &api.id)
-                    }
-                } else {
-                    apig::console_url_apis(&self.config.region)
-                }
-            }
+            Service::ApiGatewayApis => crate::apig::actions::console_url(self),
         }
     }
 
@@ -3772,7 +3595,7 @@ impl App {
 
     fn get_column_selector_max(&self) -> usize {
         if self.current_service == Service::ApiGatewayApis {
-            self.apig_api_column_ids.len() + 6
+            crate::apig::actions::column_selector_max(self)
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
         {
@@ -3816,7 +3639,7 @@ impl App {
 
     fn get_column_count(&self) -> usize {
         if self.current_service == Service::ApiGatewayApis {
-            self.apig_api_column_ids.len()
+            crate::apig::actions::column_count(self)
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
         {
@@ -4014,45 +3837,7 @@ impl App {
                     // Navigate dropdown in Normal mode
                     crate::cw::actions::insights_next_item_dropdown(self);
                 } else if self.current_service == Service::ApiGatewayApis {
-                    if let Some(api) = &self.apig_state.current_api {
-                        if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
-                            let protocol = api.protocol_type.to_uppercase();
-                            if protocol == "REST" {
-                                // Navigate resources tree
-                                let total_rows = crate::ui::tree::TreeRenderer::count_visible_rows(
-                                    &self.apig_state.resources.items,
-                                    &self.apig_state.expanded_resources,
-                                    &self.apig_state.resource_children,
-                                );
-                                if total_rows > 0 {
-                                    self.apig_state.resources.selected =
-                                        (self.apig_state.resources.selected + 1)
-                                            .min(total_rows - 1);
-                                }
-                            } else {
-                                // Navigate routes tree
-                                let total_rows = crate::ui::tree::TreeRenderer::count_visible_rows(
-                                    &self.apig_state.routes.items,
-                                    &self.apig_state.expanded_routes,
-                                    &self.apig_state.route_children,
-                                );
-                                if total_rows > 0 {
-                                    self.apig_state.routes.selected =
-                                        (self.apig_state.routes.selected + 1).min(total_rows - 1);
-                                }
-                            }
-                        }
-                    } else {
-                        let filtered = crate::ui::apig::filtered_apis(self);
-                        if !filtered.is_empty() {
-                            self.apig_state.apis.next_item(filtered.len());
-                        }
-                    }
-                } else if self.view_mode == ViewMode::PolicyView {
-                    let lines = self.iam_state.policy_document.lines().count();
-                    let max_scroll = lines.saturating_sub(1);
-                    self.iam_state.policy_scroll =
-                        (self.iam_state.policy_scroll + 1).min(max_scroll);
+                    crate::apig::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
@@ -4314,24 +4099,7 @@ impl App {
                         }
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
-                    if let Some(api) = &self.apig_state.current_api {
-                        if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
-                            let protocol = api.protocol_type.to_uppercase();
-                            if protocol == "REST" {
-                                // Navigate resources tree
-                                if self.apig_state.resources.selected > 0 {
-                                    self.apig_state.resources.selected -= 1;
-                                }
-                            } else {
-                                // Navigate routes tree
-                                if self.apig_state.routes.selected > 0 {
-                                    self.apig_state.routes.selected -= 1;
-                                }
-                            }
-                        }
-                    } else {
-                        self.apig_state.apis.prev_item();
-                    }
+                    crate::apig::actions::prev_item(self);
                 } else if self.view_mode == ViewMode::InsightsResults {
                     if self.insights_state.insights.results_selected > 0 {
                         self.insights_state.insights.results_selected -= 1;
@@ -5442,7 +5210,7 @@ impl App {
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::prev_pane(self);
         } else if self.current_service == Service::ApiGatewayApis {
-            self.apig_state.apis.collapse();
+            crate::apig::actions::prev_pane(self);
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
@@ -5706,62 +5474,7 @@ impl App {
             }
             Service::IamUserGroups => self.iam_state.groups.collapse(),
             Service::ApiGatewayApis => {
-                if let Some(api) = &self.apig_state.current_api {
-                    if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
-                        let protocol = api.protocol_type.to_uppercase();
-                        if protocol == "REST" {
-                            // Handle resources tree - use filtered items
-                            let (filtered_items, _filtered_children) =
-                                crate::ui::apig::filter_tree_items(
-                                    &self.apig_state.resources.items,
-                                    &self.apig_state.resource_children,
-                                    &self.apig_state.route_filter,
-                                );
-
-                            let selected_row = self.apig_state.resources.selected;
-                            let mut current_row = 0;
-                            if let Some(resource_id) = self.find_resource_at_row(
-                                &filtered_items,
-                                selected_row,
-                                &mut current_row,
-                            ) {
-                                if self.apig_state.expanded_resources.contains(&resource_id) {
-                                    self.apig_state.expanded_resources.remove(&resource_id);
-                                } else if let Some(parent_row) =
-                                    self.find_resource_parent_row(&filtered_items, &resource_id)
-                                {
-                                    self.apig_state.resources.selected = parent_row;
-                                }
-                            }
-                        } else {
-                            // Handle routes tree - use filtered items
-                            let (filtered_items, _filtered_children) =
-                                crate::ui::apig::filter_tree_items(
-                                    &self.apig_state.routes.items,
-                                    &self.apig_state.route_children,
-                                    &self.apig_state.route_filter,
-                                );
-
-                            let selected_row = self.apig_state.routes.selected;
-                            let mut current_row = 0;
-                            if let Some(route_key) = self.find_route_at_row(
-                                &filtered_items,
-                                selected_row,
-                                &mut current_row,
-                            ) {
-                                if self.apig_state.expanded_routes.contains(&route_key) {
-                                    self.apig_state.expanded_routes.remove(&route_key);
-                                } else if let Some(parent_row) =
-                                    self.find_parent_row(&filtered_items, &route_key)
-                                {
-                                    self.apig_state.routes.selected = parent_row;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    self.apig_state.apis.collapse();
-                }
+                crate::apig::actions::collapse_row(self);
             }
             Service::CloudTrailEvents => {
                 if self.cloudtrail_state.current_event.is_some()
@@ -5980,74 +5693,7 @@ impl App {
                 }
             }
             Service::ApiGatewayApis => {
-                if let Some(api) = &self.apig_state.current_api {
-                    if self.apig_state.detail_tab == crate::ui::apig::ApiDetailTab::Routes {
-                        let protocol = api.protocol_type.to_uppercase();
-                        if protocol == "REST" {
-                            // Handle resources tree - use filtered items
-                            let (filtered_items, filtered_children) =
-                                crate::ui::apig::filter_tree_items(
-                                    &self.apig_state.resources.items,
-                                    &self.apig_state.resource_children,
-                                    &self.apig_state.route_filter,
-                                );
-
-                            let selected_row = self.apig_state.resources.selected;
-                            let mut current_row = 0;
-                            if let Some(resource_id) = self.find_resource_at_row(
-                                &filtered_items,
-                                selected_row,
-                                &mut current_row,
-                            ) {
-                                if self.apig_state.expanded_resources.contains(&resource_id) {
-                                    let total_rows =
-                                        crate::ui::tree::TreeRenderer::count_visible_rows(
-                                            &filtered_items,
-                                            &self.apig_state.expanded_resources,
-                                            &filtered_children,
-                                        );
-                                    if selected_row + 1 < total_rows {
-                                        self.apig_state.resources.selected = selected_row + 1;
-                                    }
-                                } else {
-                                    self.apig_state.expanded_resources.insert(resource_id);
-                                }
-                            }
-                        } else {
-                            // Handle routes tree - use filtered items
-                            let (filtered_items, filtered_children) =
-                                crate::ui::apig::filter_tree_items(
-                                    &self.apig_state.routes.items,
-                                    &self.apig_state.route_children,
-                                    &self.apig_state.route_filter,
-                                );
-
-                            let selected_row = self.apig_state.routes.selected;
-                            let mut current_row = 0;
-                            if let Some(route_key) = self.find_route_at_row(
-                                &filtered_items,
-                                selected_row,
-                                &mut current_row,
-                            ) {
-                                if self.apig_state.expanded_routes.contains(&route_key) {
-                                    let total_rows =
-                                        crate::ui::tree::TreeRenderer::count_visible_rows(
-                                            &filtered_items,
-                                            &self.apig_state.expanded_routes,
-                                            &filtered_children,
-                                        );
-                                    if selected_row + 1 < total_rows {
-                                        self.apig_state.routes.selected = selected_row + 1;
-                                    }
-                                } else {
-                                    self.apig_state.expanded_routes.insert(route_key);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    self.apig_state.apis.expand();
-                }
+                crate::apig::actions::expand_row(self);
             }
             Service::CloudTrailEvents => {
                 if self.cloudtrail_state.current_event.is_some()
@@ -6067,163 +5713,6 @@ impl App {
                 self.next_pane();
             }
         }
-    }
-
-    fn find_route_at_row(
-        &self,
-        routes: &[Route],
-        target_row: usize,
-        current_row: &mut usize,
-    ) -> Option<String> {
-        for route in routes {
-            if *current_row == target_row {
-                return Some(route.route_key.clone());
-            }
-            *current_row += 1;
-
-            // Check children if expanded
-            if route.is_expandable() && self.apig_state.expanded_routes.contains(&route.route_key) {
-                if let Some(children) = self.apig_state.route_children.get(&route.route_key) {
-                    if let Some(key) = self.find_route_at_row(children, target_row, current_row) {
-                        return Some(key);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn find_route_id_at_row_with_children(
-        &self,
-        routes: &[Route],
-        children_map: &HashMap<String, Vec<Route>>,
-        target_row: usize,
-        current_row: &mut usize,
-    ) -> Option<String> {
-        for route in routes {
-            if *current_row == target_row {
-                // Only return route_id if this is a leaf (has target/integration)
-                if !route.target.is_empty() {
-                    return Some(route.route_id.clone());
-                } else {
-                    return None;
-                }
-            }
-            *current_row += 1;
-
-            // Check children if expanded
-            if route.is_expandable() && self.apig_state.expanded_routes.contains(&route.route_key) {
-                if let Some(children) = children_map.get(&route.route_key) {
-                    if let Some(id) = self.find_route_id_at_row_with_children(
-                        children,
-                        children_map,
-                        target_row,
-                        current_row,
-                    ) {
-                        return Some(id);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn find_parent_row(&self, routes: &[Route], child_key: &str) -> Option<usize> {
-        let mut current_row = 0;
-        self.find_parent_row_recursive(routes, child_key, &mut current_row)
-    }
-
-    fn find_parent_row_recursive(
-        &self,
-        routes: &[Route],
-        child_key: &str,
-        current_row: &mut usize,
-    ) -> Option<usize> {
-        for route in routes {
-            let parent_row = *current_row;
-            *current_row += 1;
-
-            // Check if this route's children contain the target
-            if route.is_expandable() && self.apig_state.expanded_routes.contains(&route.route_key) {
-                if let Some(children) = self.apig_state.route_children.get(&route.route_key) {
-                    // Check direct children
-                    for child in children {
-                        if child.route_key == child_key {
-                            return Some(parent_row);
-                        }
-                    }
-
-                    // Check nested children
-                    if let Some(row) =
-                        self.find_parent_row_recursive(children, child_key, current_row)
-                    {
-                        return Some(row);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn find_resource_at_row(
-        &self,
-        resources: &[ApigResource],
-        target_row: usize,
-        current_row: &mut usize,
-    ) -> Option<String> {
-        for resource in resources {
-            if *current_row == target_row {
-                return Some(resource.id.clone());
-            }
-            *current_row += 1;
-
-            if self.apig_state.expanded_resources.contains(&resource.id) {
-                if let Some(children) = self.apig_state.resource_children.get(&resource.id) {
-                    if let Some(id) = self.find_resource_at_row(children, target_row, current_row) {
-                        return Some(id);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn find_resource_parent_row(
-        &self,
-        resources: &[ApigResource],
-        child_id: &str,
-    ) -> Option<usize> {
-        let mut current_row = 0;
-        self.find_resource_parent_row_recursive(resources, child_id, &mut current_row)
-    }
-
-    fn find_resource_parent_row_recursive(
-        &self,
-        resources: &[ApigResource],
-        child_id: &str,
-        current_row: &mut usize,
-    ) -> Option<usize> {
-        for resource in resources {
-            let parent_row = *current_row;
-            *current_row += 1;
-
-            if self.apig_state.expanded_resources.contains(&resource.id) {
-                if let Some(children) = self.apig_state.resource_children.get(&resource.id) {
-                    for child in children {
-                        if child.id == child_id {
-                            return Some(parent_row);
-                        }
-                    }
-
-                    if let Some(row) =
-                        self.find_resource_parent_row_recursive(children, child_id, current_row)
-                    {
-                        return Some(row);
-                    }
-                }
-            }
-        }
-        None
     }
 
     fn select_item(&mut self) {
@@ -6626,20 +6115,7 @@ impl App {
                     }
                 }
             } else if self.current_service == Service::ApiGatewayApis {
-                if self.apig_state.current_api.is_none() {
-                    // In APIs view - drill into selected API
-                    let filtered_apis = crate::ui::apig::filtered_apis(self);
-                    if let Some(api) = self.apig_state.apis.get_selected(&filtered_apis) {
-                        let protocol = api.protocol_type.to_uppercase();
-                        self.apig_state.current_api = Some((*api).clone());
-                        if protocol == "REST" {
-                            self.apig_state.resources.loading = true;
-                        } else {
-                            self.apig_state.routes.loading = true;
-                        }
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::apig::actions::select_item(self);
             } else if self.current_service == Service::CloudFormationStacks {
                 if self.cfn_state.current_stack.is_none() {
                     // Drill into stack detail view
@@ -20293,6 +19769,7 @@ mod lambda_version_tab_tests {
     #[test]
     fn test_apig_yank_copies_route_arn() {
         use crate::apig::api::RestApi;
+        use crate::apig::route::Route;
         use crate::ui::apig::ApiDetailTab;
 
         let mut app = test_app();
@@ -20345,6 +19822,7 @@ mod lambda_version_tab_tests {
     #[test]
     fn test_apig_yank_ignores_empty_arn() {
         use crate::apig::api::RestApi;
+        use crate::apig::route::Route;
         use crate::ui::apig::ApiDetailTab;
 
         let mut app = test_app();

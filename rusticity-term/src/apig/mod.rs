@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod api;
 pub mod resource;
 pub mod route;

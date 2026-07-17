@@ -433,3 +433,15 @@ pub fn console_url(app: &App) -> String {
         lambda::console_url_applications(&app.config.region)
     }
 }
+
+pub fn get_active_filter_mut(app: &mut App) -> Option<&mut String> {
+    if app.lambda_application_state.current_application.is_some() {
+        if app.lambda_application_state.detail_tab == LambdaApplicationDetailTab::Deployments {
+            Some(&mut app.lambda_application_state.deployments.filter)
+        } else {
+            Some(&mut app.lambda_application_state.resources.filter)
+        }
+    } else {
+        Some(&mut app.lambda_application_state.table.filter)
+    }
+}

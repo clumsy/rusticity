@@ -694,3 +694,21 @@ pub fn console_url(app: &App) -> String {
         lambda::console_url_functions(&app.config.region)
     }
 }
+
+pub fn get_active_filter_mut(app: &mut App) -> Option<&mut String> {
+    if app.lambda_state.current_version.is_some()
+        && app.lambda_state.detail_tab == LambdaDetailTab::Configuration
+    {
+        Some(&mut app.lambda_state.alias_table.filter)
+    } else if app.lambda_state.current_function.is_some()
+        && app.lambda_state.detail_tab == LambdaDetailTab::Versions
+    {
+        Some(&mut app.lambda_state.version_table.filter)
+    } else if app.lambda_state.current_function.is_some()
+        && app.lambda_state.detail_tab == LambdaDetailTab::Aliases
+    {
+        Some(&mut app.lambda_state.alias_table.filter)
+    } else {
+        Some(&mut app.lambda_state.table.filter)
+    }
+}

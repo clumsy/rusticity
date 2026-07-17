@@ -469,33 +469,9 @@ impl App {
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::LambdaFunctions {
-            if self.lambda_state.current_version.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
-            {
-                Some(&mut self.lambda_state.alias_table.filter)
-            } else if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Versions
-            {
-                Some(&mut self.lambda_state.version_table.filter)
-            } else if self.lambda_state.current_function.is_some()
-                && self.lambda_state.detail_tab == LambdaDetailTab::Aliases
-            {
-                Some(&mut self.lambda_state.alias_table.filter)
-            } else {
-                Some(&mut self.lambda_state.table.filter)
-            }
+            crate::lambda::functions::get_active_filter_mut(self)
         } else if self.current_service == Service::LambdaApplications {
-            if self.lambda_application_state.current_application.is_some() {
-                if self.lambda_application_state.detail_tab
-                    == LambdaApplicationDetailTab::Deployments
-                {
-                    Some(&mut self.lambda_application_state.deployments.filter)
-                } else {
-                    Some(&mut self.lambda_application_state.resources.filter)
-                }
-            } else {
-                Some(&mut self.lambda_application_state.table.filter)
-            }
+            crate::lambda::applications::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudFormationStacks {
             if self.cfn_state.current_stack.is_some()
                 && self.cfn_state.detail_tab == CfnDetailTab::Resources
@@ -2872,14 +2848,8 @@ impl App {
                 {
                     self.cloudtrail_state.event_json_scroll =
                         self.cloudtrail_state.event_json_scroll.saturating_sub(10);
-                } else if self.current_service == Service::LambdaFunctions
-                    && self.lambda_state.current_function.is_some()
-                    && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
-                    && !self.lambda_state.is_metrics_loading()
-                {
-                    self.lambda_state.set_monitoring_scroll(
-                        self.lambda_state.monitoring_scroll().saturating_sub(1),
-                    );
+                } else if self.current_service == Service::LambdaFunctions {
+                    crate::lambda::functions::scroll_up(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::scroll_up(self);
                 } else if self.current_service == Service::SqsQueues
@@ -3840,20 +3810,9 @@ impl App {
                     crate::apig::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
-                {
-                    crate::sqs::actions::scroll_down_detail(self);
-                } else if self.current_service == Service::LambdaFunctions
-                    && self.lambda_state.current_function.is_some()
-                    && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
-                    && !self.lambda_state.is_metrics_loading()
-                {
-                    self.lambda_state
-                        .set_monitoring_scroll((self.lambda_state.monitoring_scroll() + 1).min(9));
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
-                    && !self.sqs_state.is_metrics_loading()
+                    && (self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
+                        || (self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
+                            && !self.sqs_state.is_metrics_loading()))
                 {
                     crate::sqs::actions::scroll_down_detail(self);
                 } else if self.view_mode == ViewMode::Events {

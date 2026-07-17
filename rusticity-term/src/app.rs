@@ -30,7 +30,6 @@ pub use crate::s3::{Bucket as S3Bucket, BucketColumn as S3BucketColumn, Object a
 use crate::session::{Session, SessionTab};
 pub use crate::sqs::queue::Column as SqsColumn;
 pub use crate::sqs::trigger::Column as SqsTriggerColumn;
-use crate::sqs::{console_url_queue_detail, console_url_queues};
 #[cfg(test)]
 use crate::sqs::{
     EventBridgePipe, LambdaTrigger, Queue as SqsQueue, QueueTag as SqsQueueTag, SnsSubscription,
@@ -478,25 +477,7 @@ impl App {
                 Some(&mut self.ecr_state.repositories.filter)
             }
         } else if self.current_service == Service::SqsQueues {
-            if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-            {
-                Some(&mut self.sqs_state.triggers.filter)
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-            {
-                Some(&mut self.sqs_state.pipes.filter)
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-            {
-                Some(&mut self.sqs_state.tags.filter)
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-            {
-                Some(&mut self.sqs_state.subscriptions.filter)
-            } else {
-                Some(&mut self.sqs_state.queues.filter)
-            }
+            crate::sqs::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::LambdaFunctions {
             if self.lambda_state.current_version.is_some()
                 && self.lambda_state.detail_tab == LambdaDetailTab::Configuration
@@ -596,7 +577,7 @@ impl App {
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
-                self.sqs_state.queues.reset();
+                crate::sqs::actions::apply_filter_reset(self);
             } else if self.current_service == Service::LambdaFunctions {
                 crate::lambda::functions::apply_filter_reset(self);
             } else if self.current_service == Service::LambdaApplications {
@@ -1408,6 +1389,9 @@ impl App {
                 } else if self.mode == Mode::ServicePicker && self.service_picker.filter_active {
                     self.service_picker.filter.push(c);
                     self.service_picker.selected = 0;
+                } else if self.mode == Mode::ServicePicker && c == 'q' {
+                    // 'q' when not filtering in ServicePicker triggers quit confirmation
+                    self.mode = Mode::QuitConfirm;
                 } else if self.mode == Mode::RegionPicker && self.region_filter_active {
                     self.region_filter.push(c);
                     self.region_picker_selected = 0;
@@ -1925,137 +1909,7 @@ impl App {
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_column(self);
                 } else if self.current_service == Service::SqsQueues {
-                    if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-                    {
-                        // Triggers tab - columns + page size
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.sqs_state.trigger_column_ids.len() {
-                            if let Some(col) = self.sqs_state.trigger_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .sqs_state
-                                    .trigger_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.sqs_state.trigger_visible_column_ids.remove(pos);
-                                } else {
-                                    self.sqs_state.trigger_visible_column_ids.push(col.clone());
-                                }
-                            }
-                        } else if idx == self.sqs_state.trigger_column_ids.len() + 3 {
-                            self.sqs_state.triggers.page_size = PageSize::Ten;
-                        } else if idx == self.sqs_state.trigger_column_ids.len() + 4 {
-                            self.sqs_state.triggers.page_size = PageSize::TwentyFive;
-                        } else if idx == self.sqs_state.trigger_column_ids.len() + 5 {
-                            self.sqs_state.triggers.page_size = PageSize::Fifty;
-                        } else if idx == self.sqs_state.trigger_column_ids.len() + 6 {
-                            self.sqs_state.triggers.page_size = PageSize::OneHundred;
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-                    {
-                        // Pipes tab - columns + page size
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.sqs_state.pipe_column_ids.len() {
-                            if let Some(col) = self.sqs_state.pipe_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .sqs_state
-                                    .pipe_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.sqs_state.pipe_visible_column_ids.remove(pos);
-                                } else {
-                                    self.sqs_state.pipe_visible_column_ids.push(col.clone());
-                                }
-                            }
-                        } else if idx == self.sqs_state.pipe_column_ids.len() + 3 {
-                            self.sqs_state.pipes.page_size = PageSize::Ten;
-                        } else if idx == self.sqs_state.pipe_column_ids.len() + 4 {
-                            self.sqs_state.pipes.page_size = PageSize::TwentyFive;
-                        } else if idx == self.sqs_state.pipe_column_ids.len() + 5 {
-                            self.sqs_state.pipes.page_size = PageSize::Fifty;
-                        } else if idx == self.sqs_state.pipe_column_ids.len() + 6 {
-                            self.sqs_state.pipes.page_size = PageSize::OneHundred;
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-                    {
-                        // Tags tab - columns + page size
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.sqs_state.tag_column_ids.len() {
-                            if let Some(col) = self.sqs_state.tag_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .sqs_state
-                                    .tag_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.sqs_state.tag_visible_column_ids.remove(pos);
-                                } else {
-                                    self.sqs_state.tag_visible_column_ids.push(col.clone());
-                                }
-                            }
-                        } else if idx == self.sqs_state.tag_column_ids.len() + 3 {
-                            self.sqs_state.tags.page_size = PageSize::Ten;
-                        } else if idx == self.sqs_state.tag_column_ids.len() + 4 {
-                            self.sqs_state.tags.page_size = PageSize::TwentyFive;
-                        } else if idx == self.sqs_state.tag_column_ids.len() + 5 {
-                            self.sqs_state.tags.page_size = PageSize::Fifty;
-                        } else if idx == self.sqs_state.tag_column_ids.len() + 6 {
-                            self.sqs_state.tags.page_size = PageSize::OneHundred;
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                    {
-                        // Subscriptions tab - columns + page size
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.sqs_state.subscription_column_ids.len() {
-                            if let Some(col) = self.sqs_state.subscription_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .sqs_state
-                                    .subscription_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.sqs_state.subscription_visible_column_ids.remove(pos);
-                                } else {
-                                    self.sqs_state
-                                        .subscription_visible_column_ids
-                                        .push(col.clone());
-                                }
-                            }
-                        } else if idx == self.sqs_state.subscription_column_ids.len() + 3 {
-                            self.sqs_state.subscriptions.page_size = PageSize::Ten;
-                        } else if idx == self.sqs_state.subscription_column_ids.len() + 4 {
-                            self.sqs_state.subscriptions.page_size = PageSize::TwentyFive;
-                        } else if idx == self.sqs_state.subscription_column_ids.len() + 5 {
-                            self.sqs_state.subscriptions.page_size = PageSize::Fifty;
-                        } else if idx == self.sqs_state.subscription_column_ids.len() + 6 {
-                            self.sqs_state.subscriptions.page_size = PageSize::OneHundred;
-                        }
-                    } else {
-                        // Queues list - columns + page size
-                        let idx = self.column_selector_index;
-                        if let Some(col) = self.sqs_column_ids.get(idx) {
-                            if let Some(pos) =
-                                self.sqs_visible_column_ids.iter().position(|c| c == col)
-                            {
-                                self.sqs_visible_column_ids.remove(pos);
-                            } else {
-                                self.sqs_visible_column_ids.push(*col);
-                            }
-                        } else if idx == self.sqs_column_ids.len() + 2 {
-                            self.sqs_state.queues.page_size = PageSize::Ten;
-                        } else if idx == self.sqs_column_ids.len() + 3 {
-                            self.sqs_state.queues.page_size = PageSize::TwentyFive;
-                        } else if idx == self.sqs_column_ids.len() + 4 {
-                            self.sqs_state.queues.page_size = PageSize::Fifty;
-                        } else if idx == self.sqs_column_ids.len() + 5 {
-                            self.sqs_state.queues.page_size = PageSize::OneHundred;
-                        }
-                    }
+                    crate::sqs::actions::toggle_column(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::toggle_column(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2629,20 +2483,7 @@ impl App {
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                 {
-                    self.sqs_state.detail_tab = self.sqs_state.detail_tab.next();
-                    if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                        self.sqs_state.set_metrics_loading(true);
-                        self.sqs_state.set_monitoring_scroll(0);
-                        self.sqs_state.clear_metrics();
-                    } else if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
-                        self.sqs_state.triggers.loading = true;
-                    } else if self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes {
-                        self.sqs_state.pipes.loading = true;
-                    } else if self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging {
-                        self.sqs_state.tags.loading = true;
-                    } else if self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions {
-                        self.sqs_state.subscriptions.loading = true;
-                    }
+                    crate::sqs::actions::next_detail_tab(self);
                 } else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                 {
@@ -2698,12 +2539,7 @@ impl App {
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                 {
-                    self.sqs_state.detail_tab = self.sqs_state.detail_tab.prev();
-                    if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                        self.sqs_state.set_metrics_loading(true);
-                        self.sqs_state.set_monitoring_scroll(0);
-                        self.sqs_state.clear_metrics();
-                    }
+                    crate::sqs::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::Ec2Instances
                     && self.ec2_state.current_instance.is_some()
                 {
@@ -2897,19 +2733,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::SqsQueues
                 {
-                    if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                    {
-                        use crate::ui::sqs::SUBSCRIPTION_FILTER_CONTROLS;
-                        self.sqs_state.input_focus = self
-                            .sqs_state
-                            .input_focus
-                            .next(SUBSCRIPTION_FILTER_CONTROLS);
-                    } else {
-                        use crate::ui::sqs::FILTER_CONTROLS;
-                        self.sqs_state.input_focus =
-                            self.sqs_state.input_focus.next(FILTER_CONTROLS);
-                    }
+                    crate::sqs::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchLogGroups
                 {
@@ -2971,19 +2795,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::SqsQueues
                 {
-                    if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                    {
-                        use crate::ui::sqs::SUBSCRIPTION_FILTER_CONTROLS;
-                        self.sqs_state.input_focus = self
-                            .sqs_state
-                            .input_focus
-                            .prev(SUBSCRIPTION_FILTER_CONTROLS);
-                    } else {
-                        use crate::ui::sqs::FILTER_CONTROLS;
-                        self.sqs_state.input_focus =
-                            self.sqs_state.input_focus.prev(FILTER_CONTROLS);
-                    }
+                    crate::sqs::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_none()
@@ -3774,8 +3586,7 @@ impl App {
                 parts.extend(crate::s3::actions::breadcrumb(self));
             }
             Service::SqsQueues => {
-                parts.push("SQS".to_string());
-                parts.push("Queues".to_string());
+                parts.extend(crate::sqs::actions::breadcrumb());
             }
             Service::EcrRepositories => {
                 parts.extend(crate::ecr::actions::breadcrumb(self));
@@ -3869,13 +3680,7 @@ impl App {
             }
             Service::CloudTrailEvents => crate::cloudtrail::actions::console_url(self),
             Service::S3Buckets => crate::s3::actions::console_url(self),
-            Service::SqsQueues => {
-                if let Some(queue_url) = &self.sqs_state.current_queue {
-                    console_url_queue_detail(&self.config.region, queue_url)
-                } else {
-                    console_url_queues(&self.config.region)
-                }
-            }
+            Service::SqsQueues => crate::sqs::actions::console_url(self),
             Service::EcrRepositories => crate::ecr::actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -3985,7 +3790,7 @@ impl App {
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
-            self.sqs_column_ids.len() - 1
+            crate::sqs::actions::column_selector_max(self)
         } else if self.current_service == Service::LambdaFunctions {
             crate::lambda::functions::column_selector_max(self)
         } else if self.current_service == Service::LambdaApplications {
@@ -4029,7 +3834,7 @@ impl App {
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
-            self.sqs_column_ids.len()
+            crate::sqs::actions::column_count(self)
         } else if self.current_service == Service::LambdaFunctions {
             crate::lambda::functions::column_count(self)
         } else if self.current_service == Service::LambdaApplications {
@@ -4105,14 +3910,7 @@ impl App {
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_state_filter_next(self);
                 } else if self.current_service == Service::SqsQueues {
-                    use crate::ui::sqs::SUBSCRIPTION_REGION;
-                    if self.sqs_state.input_focus == SUBSCRIPTION_REGION {
-                        let regions = AwsRegion::all();
-                        self.sqs_state.subscription_region_selected =
-                            (self.sqs_state.subscription_region_selected + 1)
-                                .min(regions.len() - 1);
-                        self.sqs_state.subscriptions.reset();
-                    }
+                    crate::sqs::actions::next_item_filter_input(self);
                 }
             }
             Mode::RegionPicker => {
@@ -4259,10 +4057,7 @@ impl App {
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
                 {
-                    let lines = self.sqs_state.policy_document.lines().count();
-                    let max_scroll = lines.saturating_sub(1);
-                    self.sqs_state.policy_scroll =
-                        (self.sqs_state.policy_scroll + 1).min(max_scroll);
+                    crate::sqs::actions::scroll_down_detail(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                     && self.lambda_state.detail_tab == LambdaDetailTab::Monitor
@@ -4275,8 +4070,7 @@ impl App {
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
                     && !self.sqs_state.is_metrics_loading()
                 {
-                    self.sqs_state
-                        .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(8));
+                    crate::sqs::actions::scroll_down_detail(self);
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
                     if self.log_groups_state.event_scroll_offset < max_scroll {
@@ -4294,43 +4088,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
-                    if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-                    {
-                        let filtered = filtered_lambda_triggers(self);
-                        if !filtered.is_empty() {
-                            self.sqs_state.triggers.next_item(filtered.len());
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-                    {
-                        let filtered = filtered_eventbridge_pipes(self);
-                        if !filtered.is_empty() {
-                            self.sqs_state.pipes.next_item(filtered.len());
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-                    {
-                        let filtered = filtered_tags(self);
-                        if !filtered.is_empty() {
-                            self.sqs_state.tags.next_item(filtered.len());
-                        }
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                    {
-                        let filtered = filtered_subscriptions(self);
-                        if !filtered.is_empty() {
-                            self.sqs_state.subscriptions.next_item(filtered.len());
-                        }
-                    } else {
-                        let filtered_queues = filtered_queues(
-                            &self.sqs_state.queues.items,
-                            &self.sqs_state.queues.filter,
-                        );
-                        if !filtered_queues.is_empty() {
-                            self.sqs_state.queues.next_item(filtered_queues.len());
-                        }
-                    }
+                    crate::sqs::actions::next_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::next_item(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -4629,25 +4387,7 @@ impl App {
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::prev_item(self);
                 } else if self.current_service == Service::SqsQueues {
-                    if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-                    {
-                        self.sqs_state.triggers.prev_item();
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-                    {
-                        self.sqs_state.pipes.prev_item();
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-                    {
-                        self.sqs_state.tags.prev_item();
-                    } else if self.sqs_state.current_queue.is_some()
-                        && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                    {
-                        self.sqs_state.subscriptions.prev_item();
-                    } else {
-                        self.sqs_state.queues.prev_item();
-                    }
+                    crate::sqs::actions::prev_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::prev_item(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -4776,14 +4516,7 @@ impl App {
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
-            if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                self.sqs_state
-                    .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(8));
-            } else {
-                let lines = self.sqs_state.policy_document.lines().count();
-                let max_scroll = lines.saturating_sub(1);
-                self.sqs_state.policy_scroll = (self.sqs_state.policy_scroll + 10).min(max_scroll);
-            }
+            crate::sqs::actions::scroll_down_fast(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -4853,9 +4586,7 @@ impl App {
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
-                let filtered =
-                    filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter);
-                self.sqs_state.queues.page_down(filtered.len());
+                crate::sqs::actions::page_down_normal(self);
             } else if self.current_service == Service::LambdaFunctions {
                 crate::lambda::functions::page_down_normal(self);
             } else if self.current_service == Service::LambdaApplications {
@@ -5028,12 +4759,7 @@ impl App {
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
-            if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                self.sqs_state
-                    .set_monitoring_scroll(self.sqs_state.monitoring_scroll().saturating_sub(1));
-            } else {
-                self.sqs_state.policy_scroll = self.sqs_state.policy_scroll.saturating_sub(10);
-            }
+            crate::sqs::actions::scroll_up_fast(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -5352,25 +5078,7 @@ impl App {
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::next_pane(self);
         } else if self.current_service == Service::SqsQueues {
-            if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-            {
-                self.sqs_state.triggers.toggle_expand();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-            {
-                self.sqs_state.pipes.toggle_expand();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-            {
-                self.sqs_state.tags.toggle_expand();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-            {
-                self.sqs_state.subscriptions.toggle_expand();
-            } else {
-                self.sqs_state.queues.expand();
-            }
+            crate::sqs::actions::expand_row(self);
         } else if self.current_service == Service::LambdaFunctions {
             crate::lambda::functions::expand_row(self);
         } else if self.current_service == Service::LambdaApplications {
@@ -5479,10 +5187,7 @@ impl App {
                 crate::ecr::actions::go_to_page(self, page);
             }
             Service::SqsQueues => {
-                let filtered_count =
-                    filtered_queues(&self.sqs_state.queues.items, &self.sqs_state.queues.filter)
-                        .len();
-                self.sqs_state.queues.goto_page(page, filtered_count);
+                crate::sqs::actions::go_to_page(self, page);
             }
             Service::S3Buckets => {
                 if self.s3_state.current_bucket.is_some() {
@@ -5741,25 +5446,7 @@ impl App {
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
-            if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-            {
-                self.sqs_state.triggers.collapse();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-            {
-                self.sqs_state.pipes.collapse();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-            {
-                self.sqs_state.tags.collapse();
-            } else if self.sqs_state.current_queue.is_some()
-                && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-            {
-                self.sqs_state.subscriptions.collapse();
-            } else {
-                self.sqs_state.queues.collapse();
-            }
+            crate::sqs::actions::prev_pane(self);
         } else if self.current_service == Service::LambdaFunctions {
             crate::lambda::functions::prev_pane(self);
         } else if self.current_service == Service::LambdaApplications {
@@ -5980,7 +5667,7 @@ impl App {
             }
             Service::LambdaFunctions => crate::lambda::functions::collapse_row(self),
             Service::LambdaApplications => crate::lambda::applications::prev_pane(self),
-            Service::SqsQueues => self.sqs_state.queues.collapse(),
+            Service::SqsQueues => crate::sqs::actions::collapse_row(self),
             Service::CloudFormationStacks => {
                 crate::cfn::actions::collapse_row(self);
             }
@@ -6978,27 +6665,7 @@ impl App {
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::select_item(self);
             } else if self.current_service == Service::SqsQueues {
-                if self.sqs_state.current_queue.is_none() {
-                    let filtered_queues = filtered_queues(
-                        &self.sqs_state.queues.items,
-                        &self.sqs_state.queues.filter,
-                    );
-                    if let Some(queue) = self.sqs_state.queues.get_selected(&filtered_queues) {
-                        self.sqs_state.current_queue = Some(queue.url.clone());
-
-                        if self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
-                            self.sqs_state.metrics_loading = true;
-                        } else if self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers {
-                            self.sqs_state.triggers.loading = true;
-                        } else if self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes {
-                            self.sqs_state.pipes.loading = true;
-                        } else if self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging {
-                            self.sqs_state.tags.loading = true;
-                        } else if self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions {
-                            self.sqs_state.subscriptions.loading = true;
-                        }
-                    }
-                }
+                crate::sqs::actions::select_item(self);
             } else if self.current_service == Service::IamUsers {
                 if self.iam_state.current_user.is_some() {
                     // Open policy view only when in Permissions tab

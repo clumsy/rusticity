@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod pipe;
 pub mod queue;
 pub mod sub;

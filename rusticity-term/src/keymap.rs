@@ -96,13 +96,15 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
-            KeyCode::Char('q') if key.modifiers.is_empty() => Some(Action::Quit),
+            // 'q' quits when filter is not active; when filter is active it types 'q'
+            // We can't check filter_active here, so we always emit FilterInput('q')
+            // and handle quit-from-picker in the Action::Quit handler (Normal mode only).
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::DeleteWord)
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordLeft),
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordRight),
-            KeyCode::Char(c) if c != 'i' && c != 'q' => Some(Action::FilterInput(c)),
+            KeyCode::Char(c) if c != 'i' => Some(Action::FilterInput(c)),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             _ => None,
         },
@@ -556,12 +558,53 @@ mod tests {
 
     #[test]
     fn test_q_in_service_picker_shows_quit_confirmation() {
+        // 'q' in ServicePicker now dispatches FilterInput('q') so it can type 'q'
+        // when filter is active (e.g. typing "sqs"). When filter is NOT active,
+        // app.rs handles FilterInput('q') as QuitConfirm.
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
         let action = handle_key(key, Mode::ServicePicker);
         assert_eq!(
             action,
-            Some(Action::Quit),
-            "q in ServicePicker must trigger quit confirmation, not filter input"
+            Some(Action::FilterInput('q')),
+            "q in ServicePicker must dispatch FilterInput so it can type 'sqs' in filter"
+        );
+    }
+
+    #[test]
+    fn test_q_in_service_picker_not_filtering_triggers_quit() {
+        // When ServicePicker filter is NOT active, FilterInput('q') triggers QuitConfirm
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = false; // not filtering
+
+        app.handle_action(Action::FilterInput('q'));
+
+        assert_eq!(
+            app.mode,
+            Mode::QuitConfirm,
+            "q when not filtering in ServicePicker must show quit confirmation"
+        );
+    }
+
+    #[test]
+    fn test_q_in_service_picker_while_filtering_types_q() {
+        // When ServicePicker filter IS active (user is typing), 'q' types into filter
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = true; // filter is active (user pressed 'i')
+
+        app.handle_action(Action::FilterInput('q'));
+
+        assert_eq!(
+            app.mode,
+            Mode::ServicePicker,
+            "q while filtering must NOT quit"
+        );
+        assert_eq!(
+            app.service_picker.filter, "q",
+            "q while filtering must type 'q' into filter"
         );
     }
 

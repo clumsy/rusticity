@@ -3559,7 +3559,7 @@ impl App {
         calculate_total_bucket_rows(self)
     }
 
-    fn calculate_total_object_rows(&self) -> usize {
+    pub fn calculate_total_object_rows(&self) -> usize {
         calculate_total_object_rows(self)
     }
 
@@ -3761,44 +3761,7 @@ impl App {
                             (self.service_picker.selected + 1).min(filtered.len() - 1);
                     }
                 } else if self.current_service == Service::S3Buckets {
-                    if self.s3_state.current_bucket.is_some() {
-                        if self.s3_state.object_tab == S3ObjectTab::Properties {
-                            // Scroll properties view
-                            self.s3_state.properties_scroll =
-                                self.s3_state.properties_scroll.saturating_add(1);
-                        } else {
-                            // Calculate total rows including all nested preview items
-                            let total_rows = self.calculate_total_object_rows();
-                            let max = total_rows.saturating_sub(1);
-                            self.s3_state.selected_object =
-                                (self.s3_state.selected_object + 1).min(max);
-
-                            // Adjust scroll offset if selection goes below viewport
-                            let visible_rows = self.s3_state.object_visible_rows.get();
-                            if self.s3_state.selected_object
-                                >= self.s3_state.object_scroll_offset + visible_rows
-                            {
-                                self.s3_state.object_scroll_offset =
-                                    self.s3_state.selected_object - visible_rows + 1;
-                            }
-                        }
-                    } else {
-                        // Navigate rows in bucket list
-                        let total_rows = crate::ui::s3::calculate_filtered_bucket_rows(self);
-                        if total_rows > 0 {
-                            self.s3_state.selected_row =
-                                (self.s3_state.selected_row + 1).min(total_rows - 1);
-
-                            // Adjust scroll offset if selection goes below viewport
-                            let visible_rows = self.s3_state.bucket_visible_rows.get();
-                            if self.s3_state.selected_row
-                                >= self.s3_state.bucket_scroll_offset + visible_rows
-                            {
-                                self.s3_state.bucket_scroll_offset =
-                                    self.s3_state.selected_row - visible_rows + 1;
-                            }
-                        }
-                    }
+                    crate::s3::actions::next_item(self);
                 } else if self.view_mode == ViewMode::InsightsResults {
                     crate::cw::actions::insights_next_item_results(self);
                 } else if self.current_service == Service::CloudWatchInsights
@@ -4036,27 +3999,7 @@ impl App {
                 if !self.service_selected {
                     self.service_picker.selected = self.service_picker.selected.saturating_sub(1);
                 } else if self.current_service == Service::S3Buckets {
-                    if self.s3_state.current_bucket.is_some() {
-                        if self.s3_state.object_tab == S3ObjectTab::Properties {
-                            self.s3_state.properties_scroll =
-                                self.s3_state.properties_scroll.saturating_sub(1);
-                        } else {
-                            self.s3_state.selected_object =
-                                self.s3_state.selected_object.saturating_sub(1);
-
-                            // Adjust scroll offset if selection goes above viewport
-                            if self.s3_state.selected_object < self.s3_state.object_scroll_offset {
-                                self.s3_state.object_scroll_offset = self.s3_state.selected_object;
-                            }
-                        }
-                    } else {
-                        self.s3_state.selected_row = self.s3_state.selected_row.saturating_sub(1);
-
-                        // Adjust scroll offset if selection goes above viewport
-                        if self.s3_state.selected_row < self.s3_state.bucket_scroll_offset {
-                            self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-                        }
-                    }
+                    crate::s3::actions::prev_item(self);
                 } else if self.current_service == Service::ApiGatewayApis {
                     crate::apig::actions::prev_item(self);
                 } else if self.view_mode == ViewMode::InsightsResults {
@@ -4259,39 +4202,8 @@ impl App {
             self.iam_state.revoke_sessions_scroll =
                 (self.iam_state.revoke_sessions_scroll + 10).min(19);
         } else if self.mode == Mode::Normal {
-            if self.current_service == Service::S3Buckets && self.s3_state.current_bucket.is_none()
-            {
-                let total_rows = self.calculate_total_bucket_rows();
-                self.s3_state.selected_row = self
-                    .s3_state
-                    .selected_row
-                    .saturating_add(10)
-                    .min(total_rows.saturating_sub(1));
-
-                // Adjust scroll offset if selection goes below viewport
-                let visible_rows = self.s3_state.bucket_visible_rows.get();
-                if self.s3_state.selected_row >= self.s3_state.bucket_scroll_offset + visible_rows {
-                    self.s3_state.bucket_scroll_offset =
-                        self.s3_state.selected_row - visible_rows + 1;
-                }
-            } else if self.current_service == Service::S3Buckets
-                && self.s3_state.current_bucket.is_some()
-            {
-                let total_rows = self.calculate_total_object_rows();
-                self.s3_state.selected_object = self
-                    .s3_state
-                    .selected_object
-                    .saturating_add(10)
-                    .min(total_rows.saturating_sub(1));
-
-                // Adjust scroll offset if selection goes below viewport
-                let visible_rows = self.s3_state.object_visible_rows.get();
-                if self.s3_state.selected_object
-                    >= self.s3_state.object_scroll_offset + visible_rows
-                {
-                    self.s3_state.object_scroll_offset =
-                        self.s3_state.selected_object - visible_rows + 1;
-                }
+            if self.current_service == Service::S3Buckets {
+                crate::s3::actions::page_down_normal(self);
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::List
             {
@@ -4500,23 +4412,8 @@ impl App {
             self.iam_state.revoke_sessions_scroll =
                 self.iam_state.revoke_sessions_scroll.saturating_sub(10);
         } else if self.mode == Mode::Normal {
-            if self.current_service == Service::S3Buckets && self.s3_state.current_bucket.is_none()
-            {
-                self.s3_state.selected_row = self.s3_state.selected_row.saturating_sub(10);
-
-                // Adjust scroll offset if selection goes above viewport
-                if self.s3_state.selected_row < self.s3_state.bucket_scroll_offset {
-                    self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-                }
-            } else if self.current_service == Service::S3Buckets
-                && self.s3_state.current_bucket.is_some()
-            {
-                self.s3_state.selected_object = self.s3_state.selected_object.saturating_sub(10);
-
-                // Adjust scroll offset if selection goes above viewport
-                if self.s3_state.selected_object < self.s3_state.object_scroll_offset {
-                    self.s3_state.object_scroll_offset = self.s3_state.selected_object;
-                }
+            if self.current_service == Service::S3Buckets {
+                crate::s3::actions::page_up_normal(self);
             } else if self.current_service == Service::CloudWatchLogGroups
                 && self.view_mode == ViewMode::List
             {
@@ -4559,229 +4456,7 @@ impl App {
 
     fn next_pane(&mut self) {
         if self.current_service == Service::S3Buckets {
-            if self.s3_state.current_bucket.is_some() {
-                // In objects view - expand prefix and trigger preview load
-                // Map visual index to actual object (including nested items)
-                let mut visual_idx = 0;
-                let mut found_obj: Option<S3Object> = None;
-
-                // Helper to recursively check nested items
-                fn check_nested(
-                    obj: &S3Object,
-                    visual_idx: &mut usize,
-                    target_idx: usize,
-                    expanded_prefixes: &std::collections::HashSet<String>,
-                    prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                    found_obj: &mut Option<S3Object>,
-                ) {
-                    if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                        if let Some(preview) = prefix_preview.get(&obj.key) {
-                            for nested_obj in preview {
-                                if *visual_idx == target_idx {
-                                    *found_obj = Some(nested_obj.clone());
-                                    return;
-                                }
-                                *visual_idx += 1;
-
-                                // Recursively check deeper levels
-                                check_nested(
-                                    nested_obj,
-                                    visual_idx,
-                                    target_idx,
-                                    expanded_prefixes,
-                                    prefix_preview,
-                                    found_obj,
-                                );
-                                if found_obj.is_some() {
-                                    return;
-                                }
-                            }
-                        } else {
-                            // Loading row
-                            *visual_idx += 1;
-                        }
-                    }
-                }
-
-                for obj in &self.s3_state.objects {
-                    if visual_idx == self.s3_state.selected_object {
-                        found_obj = Some(obj.clone());
-                        break;
-                    }
-                    visual_idx += 1;
-
-                    // Check nested items recursively
-                    check_nested(
-                        obj,
-                        &mut visual_idx,
-                        self.s3_state.selected_object,
-                        &self.s3_state.expanded_prefixes,
-                        &self.s3_state.prefix_preview,
-                        &mut found_obj,
-                    );
-                    if found_obj.is_some() {
-                        break;
-                    }
-                }
-
-                if let Some(obj) = found_obj {
-                    if obj.is_prefix {
-                        if !self.s3_state.expanded_prefixes.contains(&obj.key) {
-                            self.s3_state.expanded_prefixes.insert(obj.key.clone());
-                            // Trigger preview load if not already cached
-                            if !self.s3_state.prefix_preview.contains_key(&obj.key) {
-                                self.s3_state.buckets.loading = true;
-                            }
-                        }
-                        // Move to first child if expanded and has children
-                        if self.s3_state.expanded_prefixes.contains(&obj.key) {
-                            if let Some(preview) = self.s3_state.prefix_preview.get(&obj.key) {
-                                if !preview.is_empty() {
-                                    self.s3_state.selected_object += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                // In bucket list - find which bucket/prefix the selected row corresponds to
-                let mut row_idx = 0;
-                let mut found = false;
-                for bucket in &self.s3_state.buckets.items {
-                    if row_idx == self.s3_state.selected_row {
-                        // Selected row is a bucket - expand and move to first child
-                        if !self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                            self.s3_state.expanded_prefixes.insert(bucket.name.clone());
-                            if !self.s3_state.bucket_preview.contains_key(&bucket.name)
-                                && !self.s3_state.bucket_errors.contains_key(&bucket.name)
-                            {
-                                self.s3_state.buckets.loading = true;
-                            }
-                        }
-                        // Move to first child if expanded and has children
-                        if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                            if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                                if !preview.is_empty() {
-                                    self.s3_state.selected_row = row_idx + 1;
-                                    // Adjust scroll so new selection stays visible
-                                    let visible = self.s3_state.bucket_visible_rows.get();
-                                    if self.s3_state.selected_row
-                                        >= self.s3_state.bucket_scroll_offset + visible
-                                    {
-                                        self.s3_state.bucket_scroll_offset =
-                                            self.s3_state.selected_row.saturating_sub(visible - 1);
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    row_idx += 1;
-
-                    // Count error rows in traversal so row indices match the render
-                    if self.s3_state.bucket_errors.contains_key(&bucket.name)
-                        && self.s3_state.expanded_prefixes.contains(&bucket.name)
-                    {
-                        if let Some(err) = self.s3_state.bucket_errors.get(&bucket.name) {
-                            let max_width = 120;
-                            let error_rows = if err.len() > max_width {
-                                err.len().div_ceil(max_width)
-                            } else {
-                                1
-                            };
-                            row_idx += error_rows;
-                        }
-                        continue;
-                    }
-
-                    if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                        if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                            // Recursive function to check nested items at any depth
-                            #[allow(clippy::too_many_arguments)]
-                            fn check_nested_expansion(
-                                objects: &[S3Object],
-                                row_idx: &mut usize,
-                                target_row: usize,
-                                expanded_prefixes: &mut std::collections::HashSet<String>,
-                                prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                                found: &mut bool,
-                                loading: &mut bool,
-                                selected_row: &mut usize,
-                            ) {
-                                for obj in objects {
-                                    if *row_idx == target_row {
-                                        // Selected this item - expand and move to first child
-                                        if obj.is_prefix {
-                                            if !expanded_prefixes.contains(&obj.key) {
-                                                expanded_prefixes.insert(obj.key.clone());
-                                                if !prefix_preview.contains_key(&obj.key) {
-                                                    *loading = true;
-                                                }
-                                            }
-                                            // Move to first child if expanded and has children
-                                            if expanded_prefixes.contains(&obj.key) {
-                                                if let Some(preview) = prefix_preview.get(&obj.key)
-                                                {
-                                                    if !preview.is_empty() {
-                                                        *selected_row = *row_idx + 1;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        *found = true;
-                                        return;
-                                    }
-                                    *row_idx += 1;
-
-                                    // Recursively check nested items if expanded
-                                    if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                                        if let Some(nested) = prefix_preview.get(&obj.key) {
-                                            check_nested_expansion(
-                                                nested,
-                                                row_idx,
-                                                target_row,
-                                                expanded_prefixes,
-                                                prefix_preview,
-                                                found,
-                                                loading,
-                                                selected_row,
-                                            );
-                                            if *found {
-                                                return;
-                                            }
-                                        } else {
-                                            *row_idx += 1; // Loading row
-                                        }
-                                    }
-                                }
-                            }
-
-                            check_nested_expansion(
-                                preview,
-                                &mut row_idx,
-                                self.s3_state.selected_row,
-                                &mut self.s3_state.expanded_prefixes,
-                                &self.s3_state.prefix_preview,
-                                &mut found,
-                                &mut self.s3_state.buckets.loading,
-                                &mut self.s3_state.selected_row,
-                            );
-                            if found || row_idx > self.s3_state.selected_row {
-                                break;
-                            }
-                        } else {
-                            // Preview not loaded yet — this bucket has no visible child rows,
-                            // so row_idx must not advance past the bucket itself.
-                            if row_idx > self.s3_state.selected_row {
-                                break;
-                            }
-                        }
-                    }
-                    if found {
-                        break;
-                    }
-                }
-            }
+            crate::s3::actions::expand_row(self);
         } else if self.view_mode == ViewMode::InsightsResults {
             // Right arrow scrolls horizontally by 1 column
             let max_cols = self
@@ -4917,22 +4592,7 @@ impl App {
                 crate::sqs::actions::go_to_page(self, page);
             }
             Service::S3Buckets => {
-                if self.s3_state.current_bucket.is_some() {
-                    let page_size = 50; // S3 objects use fixed page size
-                    let target = (page - 1) * page_size;
-                    let total_rows = self.calculate_total_object_rows();
-                    let max = total_rows.saturating_sub(1);
-                    self.s3_state.selected_object = target.min(max);
-                } else {
-                    let page_size = self.s3_state.buckets.page_size.value();
-                    let target = (page - 1) * page_size;
-                    let total_rows = self.calculate_total_bucket_rows();
-                    let max = total_rows.saturating_sub(1);
-                    self.s3_state.selected_row = target.min(max);
-                    // Adjust scroll offset to show the target page
-                    self.s3_state.bucket_scroll_offset =
-                        target.min(total_rows.saturating_sub(page_size));
-                }
+                crate::s3::actions::go_to_page(self, page);
             }
             Service::LambdaFunctions => {
                 crate::lambda::functions::go_to_page(self, page);
@@ -4957,202 +4617,7 @@ impl App {
 
     fn prev_pane(&mut self) {
         if self.current_service == Service::S3Buckets {
-            if self.s3_state.current_bucket.is_some() {
-                // In objects view - collapse prefix or jump to parent
-                // Map visual index to actual object (including nested items)
-                let mut visual_idx = 0;
-                let mut found_obj: Option<S3Object> = None;
-                let mut parent_idx: Option<usize> = None;
-
-                // Helper to recursively find object and its parent
-                #[allow(clippy::too_many_arguments)]
-                fn find_with_parent(
-                    objects: &[S3Object],
-                    visual_idx: &mut usize,
-                    target_idx: usize,
-                    expanded_prefixes: &std::collections::HashSet<String>,
-                    prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                    found_obj: &mut Option<S3Object>,
-                    parent_idx: &mut Option<usize>,
-                    current_parent: Option<usize>,
-                ) {
-                    for obj in objects {
-                        if *visual_idx == target_idx {
-                            *found_obj = Some(obj.clone());
-                            *parent_idx = current_parent;
-                            return;
-                        }
-                        let obj_idx = *visual_idx;
-                        *visual_idx += 1;
-
-                        // Check nested items if expanded
-                        if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                            if let Some(preview) = prefix_preview.get(&obj.key) {
-                                find_with_parent(
-                                    preview,
-                                    visual_idx,
-                                    target_idx,
-                                    expanded_prefixes,
-                                    prefix_preview,
-                                    found_obj,
-                                    parent_idx,
-                                    Some(obj_idx),
-                                );
-                                if found_obj.is_some() {
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                find_with_parent(
-                    &self.s3_state.objects,
-                    &mut visual_idx,
-                    self.s3_state.selected_object,
-                    &self.s3_state.expanded_prefixes,
-                    &self.s3_state.prefix_preview,
-                    &mut found_obj,
-                    &mut parent_idx,
-                    None,
-                );
-
-                if let Some(obj) = found_obj {
-                    if obj.is_prefix && self.s3_state.expanded_prefixes.contains(&obj.key) {
-                        // Expanded: collapse it and jump to parent
-                        self.s3_state.expanded_prefixes.remove(&obj.key);
-                        if let Some(parent) = parent_idx {
-                            self.s3_state.selected_object = parent;
-                        }
-                    } else if let Some(parent) = parent_idx {
-                        // Already collapsed or not a prefix: jump to parent
-                        self.s3_state.selected_object = parent;
-                    }
-                }
-
-                // Adjust scroll offset to keep selection visible
-                let visible_rows = self.s3_state.object_visible_rows.get();
-                if self.s3_state.selected_object < self.s3_state.object_scroll_offset {
-                    self.s3_state.object_scroll_offset = self.s3_state.selected_object;
-                } else if self.s3_state.selected_object
-                    >= self.s3_state.object_scroll_offset + visible_rows
-                {
-                    self.s3_state.object_scroll_offset = self
-                        .s3_state
-                        .selected_object
-                        .saturating_sub(visible_rows - 1);
-                }
-            } else {
-                // In bucket list - find which bucket/prefix the selected row corresponds to
-                let mut row_idx = 0;
-                for bucket in &self.s3_state.buckets.items {
-                    if row_idx == self.s3_state.selected_row {
-                        // Selected row is a bucket - collapse it
-                        self.s3_state.expanded_prefixes.remove(&bucket.name);
-                        break;
-                    }
-                    row_idx += 1;
-                    if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                        if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                            // Recursive function to check nested items at any depth
-                            #[allow(clippy::too_many_arguments)]
-                            fn check_nested_collapse(
-                                objects: &[S3Object],
-                                row_idx: &mut usize,
-                                target_row: usize,
-                                expanded_prefixes: &mut std::collections::HashSet<String>,
-                                prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                                found: &mut bool,
-                                selected_row: &mut usize,
-                                parent_row: usize,
-                            ) {
-                                for obj in objects {
-                                    let current_row = *row_idx;
-                                    if *row_idx == target_row {
-                                        // Selected this item - collapse or jump to parent
-                                        if obj.is_prefix {
-                                            if expanded_prefixes.contains(&obj.key) {
-                                                // Expanded: collapse it and move to parent
-                                                expanded_prefixes.remove(&obj.key);
-                                                *selected_row = parent_row;
-                                            } else {
-                                                // Already collapsed: jump to parent
-                                                *selected_row = parent_row;
-                                            }
-                                        } else {
-                                            // Not a prefix: jump to parent
-                                            *selected_row = parent_row;
-                                        }
-                                        *found = true;
-                                        return;
-                                    }
-                                    *row_idx += 1;
-
-                                    // Recursively check nested items if expanded
-                                    if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                                        if let Some(nested) = prefix_preview.get(&obj.key) {
-                                            check_nested_collapse(
-                                                nested,
-                                                row_idx,
-                                                target_row,
-                                                expanded_prefixes,
-                                                prefix_preview,
-                                                found,
-                                                selected_row,
-                                                current_row,
-                                            );
-                                            if *found {
-                                                return;
-                                            }
-                                        } else {
-                                            *row_idx += 1; // Loading row
-                                        }
-                                    }
-                                }
-                            }
-
-                            let mut found = false;
-                            let parent_row = row_idx - 1; // Parent is the bucket
-                            check_nested_collapse(
-                                preview,
-                                &mut row_idx,
-                                self.s3_state.selected_row,
-                                &mut self.s3_state.expanded_prefixes,
-                                &self.s3_state.prefix_preview,
-                                &mut found,
-                                &mut self.s3_state.selected_row,
-                                parent_row,
-                            );
-                            if found {
-                                // Adjust scroll offset to keep selection visible
-                                let visible_rows = self.s3_state.bucket_visible_rows.get();
-                                if self.s3_state.selected_row < self.s3_state.bucket_scroll_offset {
-                                    self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-                                } else if self.s3_state.selected_row
-                                    >= self.s3_state.bucket_scroll_offset + visible_rows
-                                {
-                                    self.s3_state.bucket_scroll_offset =
-                                        self.s3_state.selected_row.saturating_sub(visible_rows - 1);
-                                }
-                                return;
-                            }
-                        } else {
-                            row_idx += 1;
-                        }
-                    }
-                }
-
-                // Adjust scroll offset to keep selection visible after collapse
-                let visible_rows = self.s3_state.bucket_visible_rows.get();
-                if self.s3_state.selected_row < self.s3_state.bucket_scroll_offset {
-                    self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-                } else if self.s3_state.selected_row
-                    >= self.s3_state.bucket_scroll_offset + visible_rows
-                {
-                    self.s3_state.bucket_scroll_offset =
-                        self.s3_state.selected_row.saturating_sub(visible_rows - 1);
-                }
-            }
+            crate::s3::actions::prev_pane(self);
         } else if self.view_mode == ViewMode::InsightsResults {
             // Left arrow scrolls horizontally by 1 column
             self.insights_state.insights.results_horizontal_scroll = self
@@ -5238,149 +4703,7 @@ impl App {
     fn collapse_row(&mut self) {
         match self.current_service {
             Service::S3Buckets => {
-                if self.s3_state.current_bucket.is_none() {
-                    // Filter buckets first
-                    let filtered_buckets: Vec<_> = self
-                        .s3_state
-                        .buckets
-                        .items
-                        .iter()
-                        .filter(|b| {
-                            if self.s3_state.buckets.filter.is_empty() {
-                                true
-                            } else {
-                                b.name
-                                    .to_lowercase()
-                                    .contains(&self.s3_state.buckets.filter.to_lowercase())
-                            }
-                        })
-                        .collect();
-
-                    // In bucket list - collapse bucket or nested prefix
-                    let mut row_idx = 0;
-
-                    for bucket in filtered_buckets {
-                        if row_idx == self.s3_state.selected_row {
-                            // Selected row is a bucket - collapse it
-                            self.s3_state.expanded_prefixes.remove(&bucket.name);
-                            // Don't return - let scroll adjustment happen below
-                            break;
-                        }
-                        row_idx += 1;
-                        if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                            // Check if bucket has error - don't count error rows as they're not selectable
-                            if self.s3_state.bucket_errors.contains_key(&bucket.name) {
-                                // Bucket has error, no child rows to navigate
-                                continue;
-                            }
-                            if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                                // Recursive function to check nested items at any depth
-                                #[allow(clippy::too_many_arguments)]
-                                fn check_nested_collapse(
-                                    objects: &[S3Object],
-                                    row_idx: &mut usize,
-                                    target_row: usize,
-                                    expanded_prefixes: &mut std::collections::HashSet<String>,
-                                    prefix_preview: &std::collections::HashMap<
-                                        String,
-                                        Vec<S3Object>,
-                                    >,
-                                    found: &mut bool,
-                                    selected_row: &mut usize,
-                                    parent_row: usize,
-                                ) {
-                                    for obj in objects {
-                                        let current_row = *row_idx;
-                                        if *row_idx == target_row {
-                                            // Selected this item - collapse or jump to parent
-                                            if obj.is_prefix {
-                                                if expanded_prefixes.contains(&obj.key) {
-                                                    // Expanded: collapse it and move to parent
-                                                    expanded_prefixes.remove(&obj.key);
-                                                    *selected_row = parent_row;
-                                                } else {
-                                                    // Already collapsed: jump to parent
-                                                    *selected_row = parent_row;
-                                                }
-                                            } else {
-                                                // Not a prefix: jump to parent
-                                                *selected_row = parent_row;
-                                            }
-                                            *found = true;
-                                            return;
-                                        }
-                                        *row_idx += 1;
-
-                                        // Recursively check nested items if expanded
-                                        if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                                            if let Some(nested) = prefix_preview.get(&obj.key) {
-                                                check_nested_collapse(
-                                                    nested,
-                                                    row_idx,
-                                                    target_row,
-                                                    expanded_prefixes,
-                                                    prefix_preview,
-                                                    found,
-                                                    selected_row,
-                                                    current_row,
-                                                );
-                                                if *found {
-                                                    return;
-                                                }
-                                            } else {
-                                                *row_idx += 1; // Loading row
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let mut found = false;
-                                let parent_row = row_idx - 1; // Parent is the bucket
-                                check_nested_collapse(
-                                    preview,
-                                    &mut row_idx,
-                                    self.s3_state.selected_row,
-                                    &mut self.s3_state.expanded_prefixes,
-                                    &self.s3_state.prefix_preview,
-                                    &mut found,
-                                    &mut self.s3_state.selected_row,
-                                    parent_row,
-                                );
-                                if found {
-                                    // Adjust scroll offset to keep selection visible
-                                    let visible_rows = self.s3_state.bucket_visible_rows.get();
-                                    if self.s3_state.selected_row
-                                        < self.s3_state.bucket_scroll_offset
-                                    {
-                                        self.s3_state.bucket_scroll_offset =
-                                            self.s3_state.selected_row;
-                                    } else if self.s3_state.selected_row
-                                        >= self.s3_state.bucket_scroll_offset + visible_rows
-                                    {
-                                        self.s3_state.bucket_scroll_offset = self
-                                            .s3_state
-                                            .selected_row
-                                            .saturating_sub(visible_rows - 1);
-                                    }
-                                    return;
-                                }
-                            } else {
-                                row_idx += 1;
-                            }
-                        }
-                    }
-
-                    // Adjust scroll offset to keep selection visible after collapse
-                    let visible_rows = self.s3_state.bucket_visible_rows.get();
-                    if self.s3_state.selected_row < self.s3_state.bucket_scroll_offset {
-                        self.s3_state.bucket_scroll_offset = self.s3_state.selected_row;
-                    } else if self.s3_state.selected_row
-                        >= self.s3_state.bucket_scroll_offset + visible_rows
-                    {
-                        self.s3_state.bucket_scroll_offset =
-                            self.s3_state.selected_row.saturating_sub(visible_rows - 1);
-                    }
-                }
+                crate::s3::actions::collapse_row(self);
             }
             Service::CloudWatchLogGroups => {
                 crate::cw::actions::logs_collapse_row(self);
@@ -5452,204 +4775,7 @@ impl App {
     fn expand_row(&mut self) {
         match self.current_service {
             Service::S3Buckets => {
-                if self.s3_state.current_bucket.is_none() {
-                    // Filter buckets first
-                    let filtered_buckets: Vec<_> = self
-                        .s3_state
-                        .buckets
-                        .items
-                        .iter()
-                        .filter(|b| {
-                            if self.s3_state.buckets.filter.is_empty() {
-                                true
-                            } else {
-                                b.name
-                                    .to_lowercase()
-                                    .contains(&self.s3_state.buckets.filter.to_lowercase())
-                            }
-                        })
-                        .collect();
-
-                    // Recursive helper to check nested items
-                    fn check_nested_expand(
-                        objects: &[S3Object],
-                        row_idx: &mut usize,
-                        target_row: usize,
-                        expanded_prefixes: &mut std::collections::HashSet<String>,
-                        prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                    ) -> Option<(bool, usize)> {
-                        for obj in objects {
-                            if *row_idx == target_row {
-                                if obj.is_prefix {
-                                    // Toggle expansion
-                                    if expanded_prefixes.contains(&obj.key) {
-                                        expanded_prefixes.remove(&obj.key);
-                                        return Some((true, *row_idx));
-                                    } else {
-                                        expanded_prefixes.insert(obj.key.clone());
-                                        return Some((true, *row_idx + 1)); // Move to first child
-                                    }
-                                }
-                                return Some((false, *row_idx));
-                            }
-                            *row_idx += 1;
-
-                            // Check nested items if expanded
-                            if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                                if let Some(nested) = prefix_preview.get(&obj.key) {
-                                    if let Some(result) = check_nested_expand(
-                                        nested,
-                                        row_idx,
-                                        target_row,
-                                        expanded_prefixes,
-                                        prefix_preview,
-                                    ) {
-                                        return Some(result);
-                                    }
-                                }
-                            }
-                        }
-                        None
-                    }
-
-                    let mut row_idx = 0;
-                    for bucket in filtered_buckets {
-                        if row_idx == self.s3_state.selected_row {
-                            if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                                // Already expanded: if preview loaded, enter first child
-                                if let Some(preview) =
-                                    self.s3_state.bucket_preview.get(&bucket.name)
-                                {
-                                    if !preview.is_empty() {
-                                        self.s3_state.selected_row = row_idx + 1;
-                                        let visible = self.s3_state.bucket_visible_rows.get();
-                                        if self.s3_state.selected_row
-                                            >= self.s3_state.bucket_scroll_offset + visible
-                                        {
-                                            self.s3_state.bucket_scroll_offset = self
-                                                .s3_state
-                                                .selected_row
-                                                .saturating_sub(visible - 1);
-                                        }
-                                    }
-                                    // If preview empty, nothing to enter — stay
-                                } else {
-                                    // Preview still loading — stay on bucket
-                                }
-                            } else {
-                                self.s3_state.expanded_prefixes.insert(bucket.name.clone());
-                                self.s3_state.buckets.loading = true;
-                                // Move to first child only if preview already loaded
-                                if let Some(preview) =
-                                    self.s3_state.bucket_preview.get(&bucket.name)
-                                {
-                                    if !preview.is_empty() {
-                                        self.s3_state.selected_row = row_idx + 1;
-                                        let visible = self.s3_state.bucket_visible_rows.get();
-                                        if self.s3_state.selected_row
-                                            >= self.s3_state.bucket_scroll_offset + visible
-                                        {
-                                            self.s3_state.bucket_scroll_offset = self
-                                                .s3_state
-                                                .selected_row
-                                                .saturating_sub(visible - 1);
-                                        }
-                                    }
-                                }
-                            }
-                            return;
-                        }
-                        row_idx += 1;
-
-                        if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                            if self.s3_state.bucket_errors.contains_key(&bucket.name) {
-                                continue;
-                            }
-                            if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                                if let Some((loading, new_row)) = check_nested_expand(
-                                    preview,
-                                    &mut row_idx,
-                                    self.s3_state.selected_row,
-                                    &mut self.s3_state.expanded_prefixes,
-                                    &self.s3_state.prefix_preview,
-                                ) {
-                                    self.s3_state.selected_row = new_row;
-                                    if loading {
-                                        self.s3_state.buckets.loading = true;
-                                    }
-                                    // Adjust scroll so new selection stays visible
-                                    let visible = self.s3_state.bucket_visible_rows.get();
-                                    if self.s3_state.selected_row
-                                        >= self.s3_state.bucket_scroll_offset + visible
-                                    {
-                                        self.s3_state.bucket_scroll_offset =
-                                            self.s3_state.selected_row.saturating_sub(visible - 1);
-                                    } else if self.s3_state.selected_row
-                                        < self.s3_state.bucket_scroll_offset
-                                    {
-                                        self.s3_state.bucket_scroll_offset =
-                                            self.s3_state.selected_row;
-                                    }
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Inside a bucket - expand objects
-                    fn check_object_expand(
-                        objects: &[S3Object],
-                        row_idx: &mut usize,
-                        target_row: usize,
-                        expanded_prefixes: &mut std::collections::HashSet<String>,
-                        prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                    ) -> Option<(bool, usize)> {
-                        for obj in objects {
-                            if *row_idx == target_row {
-                                if obj.is_prefix {
-                                    if expanded_prefixes.contains(&obj.key) {
-                                        expanded_prefixes.remove(&obj.key);
-                                        return Some((true, *row_idx));
-                                    } else {
-                                        expanded_prefixes.insert(obj.key.clone());
-                                        return Some((true, *row_idx + 1));
-                                    }
-                                }
-                                return Some((false, *row_idx));
-                            }
-                            *row_idx += 1;
-
-                            if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                                if let Some(nested) = prefix_preview.get(&obj.key) {
-                                    if let Some(result) = check_object_expand(
-                                        nested,
-                                        row_idx,
-                                        target_row,
-                                        expanded_prefixes,
-                                        prefix_preview,
-                                    ) {
-                                        return Some(result);
-                                    }
-                                }
-                            }
-                        }
-                        None
-                    }
-
-                    let mut row_idx = 0;
-                    if let Some((loading, new_row)) = check_object_expand(
-                        &self.s3_state.objects,
-                        &mut row_idx,
-                        self.s3_state.selected_object,
-                        &mut self.s3_state.expanded_prefixes,
-                        &self.s3_state.prefix_preview,
-                    ) {
-                        self.s3_state.selected_object = new_row;
-                        if loading {
-                            self.s3_state.buckets.loading = true;
-                        }
-                    }
-                }
+                crate::s3::actions::expand_row_left(self);
             }
             Service::ApiGatewayApis => {
                 crate::apig::actions::expand_row(self);
@@ -5915,164 +5041,7 @@ impl App {
                         Some(self.insights_state.insights.results_selected);
                 }
             } else if self.current_service == Service::S3Buckets {
-                if self.s3_state.current_bucket.is_none() {
-                    // Filter buckets first
-                    let filtered_buckets: Vec<_> = self
-                        .s3_state
-                        .buckets
-                        .items
-                        .iter()
-                        .filter(|b| {
-                            if self.s3_state.buckets.filter.is_empty() {
-                                true
-                            } else {
-                                b.name
-                                    .to_lowercase()
-                                    .contains(&self.s3_state.buckets.filter.to_lowercase())
-                            }
-                        })
-                        .collect();
-
-                    // Find which bucket/prefix the selected row corresponds to
-                    let mut row_idx = 0;
-                    for bucket in filtered_buckets {
-                        if row_idx == self.s3_state.selected_row {
-                            // Selected a bucket - drill into it
-                            self.s3_state.current_bucket = Some(bucket.name.clone());
-                            self.s3_state.prefix_stack.clear();
-                            self.s3_state.buckets.loading = true;
-                            return;
-                        }
-                        row_idx += 1;
-
-                        // Skip error rows - they're not selectable
-                        if self.s3_state.bucket_errors.contains_key(&bucket.name)
-                            && self.s3_state.expanded_prefixes.contains(&bucket.name)
-                        {
-                            continue;
-                        }
-
-                        if self.s3_state.expanded_prefixes.contains(&bucket.name) {
-                            if let Some(preview) = self.s3_state.bucket_preview.get(&bucket.name) {
-                                for obj in preview {
-                                    if row_idx == self.s3_state.selected_row {
-                                        // Selected a prefix - drill into bucket with this prefix
-                                        if obj.is_prefix {
-                                            self.s3_state.current_bucket =
-                                                Some(bucket.name.clone());
-                                            self.s3_state.prefix_stack = vec![obj.key.clone()];
-                                            self.s3_state.buckets.loading = true;
-                                        }
-                                        return;
-                                    }
-                                    row_idx += 1;
-
-                                    // Check nested preview rows
-                                    if obj.is_prefix
-                                        && self.s3_state.expanded_prefixes.contains(&obj.key)
-                                    {
-                                        if let Some(nested) =
-                                            self.s3_state.prefix_preview.get(&obj.key)
-                                        {
-                                            for nested_obj in nested {
-                                                if row_idx == self.s3_state.selected_row {
-                                                    // Selected a nested prefix - drill into bucket with this prefix
-                                                    if nested_obj.is_prefix {
-                                                        self.s3_state.current_bucket =
-                                                            Some(bucket.name.clone());
-                                                        // Build proper prefix stack: parent, then child
-                                                        self.s3_state.prefix_stack = vec![
-                                                            obj.key.clone(),
-                                                            nested_obj.key.clone(),
-                                                        ];
-                                                        self.s3_state.buckets.loading = true;
-                                                    }
-                                                    return;
-                                                }
-                                                row_idx += 1;
-                                            }
-                                        } else {
-                                            row_idx += 1;
-                                        }
-                                    }
-                                }
-                            } else {
-                                row_idx += 1;
-                            }
-                        }
-                    }
-                } else {
-                    // In objects view - map visual index to actual object (including nested items)
-                    let mut visual_idx = 0;
-                    let mut found_obj: Option<S3Object> = None;
-
-                    // Helper to recursively check nested items
-                    fn check_nested_select(
-                        obj: &S3Object,
-                        visual_idx: &mut usize,
-                        target_idx: usize,
-                        expanded_prefixes: &std::collections::HashSet<String>,
-                        prefix_preview: &std::collections::HashMap<String, Vec<S3Object>>,
-                        found_obj: &mut Option<S3Object>,
-                    ) {
-                        if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                            if let Some(preview) = prefix_preview.get(&obj.key) {
-                                for nested_obj in preview {
-                                    if *visual_idx == target_idx {
-                                        *found_obj = Some(nested_obj.clone());
-                                        return;
-                                    }
-                                    *visual_idx += 1;
-
-                                    // Recursively check deeper levels
-                                    check_nested_select(
-                                        nested_obj,
-                                        visual_idx,
-                                        target_idx,
-                                        expanded_prefixes,
-                                        prefix_preview,
-                                        found_obj,
-                                    );
-                                    if found_obj.is_some() {
-                                        return;
-                                    }
-                                }
-                            } else {
-                                // Loading row
-                                *visual_idx += 1;
-                            }
-                        }
-                    }
-
-                    for obj in &self.s3_state.objects {
-                        if visual_idx == self.s3_state.selected_object {
-                            found_obj = Some(obj.clone());
-                            break;
-                        }
-                        visual_idx += 1;
-
-                        // Check nested items recursively
-                        check_nested_select(
-                            obj,
-                            &mut visual_idx,
-                            self.s3_state.selected_object,
-                            &self.s3_state.expanded_prefixes,
-                            &self.s3_state.prefix_preview,
-                            &mut found_obj,
-                        );
-                        if found_obj.is_some() {
-                            break;
-                        }
-                    }
-
-                    if let Some(obj) = found_obj {
-                        if obj.is_prefix {
-                            // Drill into prefix
-                            self.s3_state.prefix_stack.push(obj.key.clone());
-                            self.s3_state.buckets.loading = true;
-                        }
-                    }
-                }
+                crate::s3::actions::select_item(self);
             } else if self.current_service == Service::ApiGatewayApis {
                 crate::apig::actions::select_item(self);
             } else if self.current_service == Service::CloudFormationStacks {
@@ -19428,6 +18397,111 @@ mod lambda_version_tab_tests {
 
         // Should have at least 1 call for objects table
         assert!(!render_calls.is_empty(), "S3 must use render_tree_table");
+    }
+
+    #[test]
+    fn test_s3_page_down_skips_expanded_children() {
+        // PageDown should land on top-level bucket rows, not expanded child rows.
+        // With 3 buckets where bucket0 is expanded and has 20 children,
+        // the visual layout is: row0=bucket0, rows1-20=children, row21=bucket1, row22=bucket2.
+        // PageDown (10 buckets) from bucket0 → should land on bucket1 (only 3 buckets total).
+        use crate::keymap::Action;
+
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(30);
+
+        app.s3_state.buckets.items = (0..3)
+            .map(|i| S3Bucket {
+                name: format!("bucket{}", i),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            })
+            .collect();
+
+        // Expand bucket0 with 20 children
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            (0..20)
+                .map(|i| crate::app::S3Object {
+                    key: format!("key{}", i),
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                    is_prefix: false,
+                })
+                .collect(),
+        );
+
+        app.s3_state.selected_row = 0;
+
+        // PageDown: jump 10 top-level buckets, but only 3 exist → clamp to last (bucket2)
+        app.handle_action(Action::PageDown);
+        // selected_row should be on bucket2 (visual row 22), not row 10 (child of bucket0)
+        let row = app.s3_state.selected_row;
+        assert_eq!(
+            row, 22,
+            "PageDown must land on bucket2 (visual row 22), got {}",
+            row
+        );
+
+        // PageUp from bucket2 back to bucket0
+        app.handle_action(Action::PageUp);
+        assert_eq!(
+            app.s3_state.selected_row, 0,
+            "PageUp must return to bucket0"
+        );
+    }
+
+    #[test]
+    fn test_s3_page_down_with_many_buckets_skips_expanded() {
+        // With 25 buckets where bucket0 has 100 children expanded,
+        // PageDown from bucket0 should land on bucket10, not on a child row.
+        use crate::keymap::Action;
+
+        let mut app = test_app();
+        app.current_service = Service::S3Buckets;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.s3_state.bucket_visible_rows = std::cell::Cell::new(30);
+
+        app.s3_state.buckets.items = (0..25)
+            .map(|i| S3Bucket {
+                name: format!("bucket{}", i),
+                region: "us-east-1".to_string(),
+                creation_date: String::new(),
+            })
+            .collect();
+
+        // Expand bucket0 with 100 children
+        app.s3_state.expanded_prefixes.insert("bucket0".to_string());
+        app.s3_state.bucket_preview.insert(
+            "bucket0".to_string(),
+            (0..100)
+                .map(|i| crate::app::S3Object {
+                    key: format!("key{}", i),
+                    size: 0,
+                    last_modified: String::new(),
+                    storage_class: String::new(),
+                    is_prefix: false,
+                })
+                .collect(),
+        );
+
+        app.s3_state.selected_row = 0;
+
+        // PageDown: should jump to bucket10 (visual row 100 + 10 = 110)
+        app.handle_action(Action::PageDown);
+        let row = app.s3_state.selected_row;
+        // bucket0 = row 0, 100 children = rows 1-100, bucket1 = row 101, ..., bucket10 = row 110
+        assert_eq!(
+            row, 110,
+            "PageDown must land on bucket10 (row 110), got {}",
+            row
+        );
     }
 
     #[test]

@@ -92,19 +92,15 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
         },
         Mode::ServicePicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
-            KeyCode::Char('i') if key.modifiers.is_empty() => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
-            // 'q' quits when filter is not active; when filter is active it types 'q'
-            // We can't check filter_active here, so we always emit FilterInput('q')
-            // and handle quit-from-picker in the Action::Quit handler (Normal mode only).
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::DeleteWord)
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordLeft),
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => Some(Action::WordRight),
-            KeyCode::Char(c) if c != 'i' => Some(Action::FilterInput(c)),
+            KeyCode::Char(c) => Some(Action::FilterInput(c)),
             KeyCode::Backspace => Some(Action::FilterBackspace),
             _ => None,
         },
@@ -606,6 +602,83 @@ mod tests {
             app.service_picker.filter, "q",
             "q while filtering must type 'q' into filter"
         );
+    }
+
+    #[test]
+    fn test_i_in_service_picker_dispatches_filter_input() {
+        let key = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE);
+        let action = handle_key(key, Mode::ServicePicker);
+        assert_eq!(
+            action,
+            Some(Action::FilterInput('i')),
+            "i in ServicePicker must dispatch FilterInput('i')"
+        );
+    }
+
+    #[test]
+    fn test_i_in_service_picker_not_filtering_activates_filter() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = false;
+
+        app.handle_action(Action::FilterInput('i'));
+
+        assert!(app.service_picker.filter_active);
+        assert_eq!(
+            app.service_picker.filter, "",
+            "i activates filter but must not type itself"
+        );
+    }
+
+    #[test]
+    fn test_i_in_service_picker_while_filtering_types_i() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = true;
+        app.service_picker.filter = "sqs".to_string();
+
+        app.handle_action(Action::FilterInput('i'));
+
+        assert_eq!(
+            app.service_picker.filter, "sqsi",
+            "i while filtering must type 'i' into filter"
+        );
+        assert_eq!(
+            app.mode,
+            Mode::ServicePicker,
+            "mode must stay ServicePicker"
+        );
+    }
+
+    #[test]
+    fn test_service_filter_types_all_chars_in_sqs() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = true;
+
+        for c in ['s', 'q', 's'] {
+            app.handle_action(Action::FilterInput(c));
+        }
+
+        assert_eq!(app.service_picker.filter, "sqs");
+        assert_eq!(app.mode, Mode::ServicePicker);
+    }
+
+    #[test]
+    fn test_any_char_auto_activates_filter_in_service_picker() {
+        // Typing any non-q char when not filtering auto-activates and types it
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = false;
+
+        app.handle_action(Action::FilterInput('s'));
+
+        assert!(app.service_picker.filter_active);
+        assert_eq!(app.service_picker.filter, "s");
     }
 
     #[test]

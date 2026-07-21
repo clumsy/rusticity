@@ -1352,8 +1352,14 @@ impl App {
                     self.service_picker.filter.push(c);
                     self.service_picker.selected = 0;
                 } else if self.mode == Mode::ServicePicker && c == 'q' {
-                    // 'q' when not filtering in ServicePicker triggers quit confirmation
                     self.mode = Mode::QuitConfirm;
+                } else if self.mode == Mode::ServicePicker && c == 'i' {
+                    self.service_picker.filter_active = true;
+                } else if self.mode == Mode::ServicePicker {
+                    // Any other char auto-activates filter and types it
+                    self.service_picker.filter_active = true;
+                    self.service_picker.filter.push(c);
+                    self.service_picker.selected = 0;
                 } else if self.mode == Mode::RegionPicker && self.region_filter_active {
                     self.region_filter.push(c);
                     self.region_picker_selected = 0;

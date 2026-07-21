@@ -18,6 +18,7 @@ use crate::iam::{
 #[cfg(test)]
 use crate::iam::{IamRole, IamUser, LastAccessedService};
 use crate::keymap::{Action, Mode};
+use crate::kms::key::Key as KmsKey;
 pub use crate::lambda::{
     Alias as LambdaAlias, Application as LambdaApplication,
     ApplicationColumn as LambdaApplicationColumn, Deployment, DeploymentColumn,
@@ -59,6 +60,7 @@ pub use crate::ui::ecr::{
     FILTER_CONTROLS as ECR_FILTER_CONTROLS,
 };
 use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
+pub use crate::ui::kms::{State as KmsState, Tab as KmsTab};
 pub use crate::ui::lambda::{
     filtered_lambda_applications, filtered_lambda_functions,
     ApplicationDetailTab as LambdaApplicationDetailTab, ApplicationState as LambdaApplicationState,
@@ -83,7 +85,8 @@ pub use crate::ui::{
 use rusticity_core::LogStream;
 use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
-    CloudWatchClient, Ec2Client, EcrClient, IamClient, LambdaClient, S3Client, SqsClient,
+    CloudWatchClient, Ec2Client, EcrClient, IamClient, KmsClient, LambdaClient, S3Client,
+    SqsClient,
 };
 
 #[derive(Clone)]
@@ -104,6 +107,7 @@ pub struct App {
     pub alarms_client: AlarmsClient,
     pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
+    pub kms_client: KmsClient,
     pub apig_client: ApiGatewayClient,
     pub iam_client: IamClient,
     pub lambda_client: LambdaClient,
@@ -122,6 +126,7 @@ pub struct App {
     pub sqs_state: SqsState,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
+    pub kms_state: KmsState,
     pub apig_state: ApigState,
     pub lambda_state: LambdaState,
     pub lambda_application_state: LambdaApplicationState,
@@ -307,6 +312,7 @@ pub enum Service {
     SqsQueues,
     Ec2Instances,
     EcrRepositories,
+    KmsKeys,
     LambdaFunctions,
     LambdaApplications,
     CloudFormationStacks,
@@ -327,6 +333,7 @@ impl Service {
             Service::SqsQueues => "SQS › Queues",
             Service::Ec2Instances => "EC2 › Instances",
             Service::EcrRepositories => "ECR › Repositories",
+            Service::KmsKeys => "KMS › Managed Keys",
             Service::LambdaFunctions => "Lambda › Functions",
             Service::LambdaApplications => "Lambda › Applications",
             Service::CloudFormationStacks => "CloudFormation › Stacks",
@@ -468,6 +475,8 @@ impl App {
             crate::lambda::functions::get_active_filter_mut(self)
         } else if self.current_service == Service::LambdaApplications {
             crate::lambda::applications::get_active_filter_mut(self)
+        } else if self.current_service == Service::KmsKeys {
+            crate::kms::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudFormationStacks {
             if self.cfn_state.current_stack.is_some()
                 && self.cfn_state.detail_tab == CfnDetailTab::Resources
@@ -538,6 +547,8 @@ impl App {
                 crate::s3::actions::apply_filter_reset(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::apply_filter_reset(self);
+            } else if self.current_service == Service::KmsKeys {
+                crate::kms::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
                 crate::sqs::actions::apply_filter_reset(self);
             } else if self.current_service == Service::LambdaFunctions {
@@ -580,6 +591,7 @@ impl App {
         let ecr_client = EcrClient::new(config.clone());
         let apig_client = ApiGatewayClient::new(config.clone());
         let iam_client = IamClient::new(config.clone());
+        let kms_client = KmsClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
         let cloudformation_client = CloudFormationClient::new(config.clone());
         let region_name = config.region.clone();
@@ -595,6 +607,7 @@ impl App {
             alarms_client,
             ec2_client,
             ecr_client,
+            kms_client,
             apig_client,
             iam_client,
             lambda_client,
@@ -621,6 +634,7 @@ impl App {
             sqs_state: SqsState::new(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
+            kms_state: KmsState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -810,6 +824,7 @@ impl App {
             alarms_client: AlarmsClient::new(config.clone()),
             ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
+            kms_client: KmsClient::new(config.clone()),
             apig_client: ApiGatewayClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
             lambda_client: LambdaClient::new(config.clone()),
@@ -836,6 +851,7 @@ impl App {
             sqs_state: SqsState::new(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
+            kms_state: KmsState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -1188,6 +1204,9 @@ impl App {
                     Service::EcrRepositories => {
                         crate::ecr::actions::apply_filter_reset(self);
                     }
+                    Service::KmsKeys => {
+                        crate::kms::actions::apply_filter_reset(self);
+                    }
                     Service::ApiGatewayApis => {
                         crate::apig::actions::apply_filter_reset(self);
                     }
@@ -1273,6 +1292,7 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
+                            "KmsKeys" => Service::KmsKeys,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
                             "CloudFormationStacks" => Service::CloudFormationStacks,
@@ -1431,6 +1451,8 @@ impl App {
                         && self.ecr_state.current_repository.is_none()
                     {
                         crate::ecr::actions::is_pagination_focused(self)
+                    } else if self.current_service == Service::KmsKeys {
+                        crate::kms::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::LambdaFunctions {
                         crate::lambda::functions::is_pagination_focused(self)
                     } else if self.current_service == Service::SqsQueues {
@@ -1811,6 +1833,8 @@ impl App {
                     crate::apig::actions::toggle_column(self);
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::toggle_column(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_column(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -1927,6 +1951,8 @@ impl App {
                     && self.ecr_state.current_repository.is_some()
                 {
                     crate::ecr::actions::next_preferences(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::next_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::next_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2043,6 +2069,8 @@ impl App {
                     && self.ecr_state.current_repository.is_some()
                 {
                     crate::ecr::actions::prev_preferences(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2174,6 +2202,8 @@ impl App {
                     && self.ecr_state.current_repository.is_none()
                 {
                     crate::ecr::actions::next_detail_tab(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::next_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -2227,6 +2257,8 @@ impl App {
                     && self.ecr_state.current_repository.is_none()
                 {
                     crate::ecr::actions::prev_detail_tab(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -2255,6 +2287,7 @@ impl App {
                     crate::s3::actions::start_filter(self);
                 } else if self.current_service == Service::ApiGatewayApis
                     || self.current_service == Service::EcrRepositories
+                    || self.current_service == Service::KmsKeys
                     || self.current_service == Service::IamUsers
                     || self.current_service == Service::IamUserGroups
                 {
@@ -2265,6 +2298,8 @@ impl App {
                         && self.ecr_state.current_repository.is_none()
                     {
                         self.ecr_state.input_focus = InputFocus::Filter;
+                    } else if self.current_service == Service::KmsKeys {
+                        crate::kms::actions::start_filter(self);
                     }
                 } else if self.current_service == Service::LambdaFunctions {
                     self.mode = Mode::FilterInput;
@@ -2379,6 +2414,9 @@ impl App {
                     && self.ecr_state.current_repository.is_none()
                 {
                     crate::ecr::actions::next_filter_focus(self);
+                } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys
+                {
+                    crate::kms::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
@@ -2451,6 +2489,9 @@ impl App {
                     && self.ecr_state.current_repository.is_none()
                 {
                     crate::ecr::actions::prev_filter_focus(self);
+                } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys
+                {
+                    crate::kms::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
@@ -2702,6 +2743,8 @@ impl App {
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::yank(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::yank(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::yank(self);
                 } else if self.current_service == Service::CloudFormationStacks {
@@ -3117,6 +3160,9 @@ impl App {
             Service::EcrRepositories => {
                 parts.extend(crate::ecr::actions::breadcrumb(self));
             }
+            Service::KmsKeys => {
+                parts.extend(crate::kms::actions::breadcrumb(self));
+            }
             Service::LambdaFunctions => {
                 parts.extend(crate::lambda::functions::breadcrumb(self));
             }
@@ -3203,6 +3249,7 @@ impl App {
             Service::S3Buckets => crate::s3::actions::console_url(self),
             Service::SqsQueues => crate::sqs::actions::console_url(self),
             Service::EcrRepositories => crate::ecr::actions::console_url(self),
+            Service::KmsKeys => crate::kms::actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
             Service::CloudFormationStacks => crate::cfn::actions::console_url(self),
@@ -3241,6 +3288,8 @@ impl App {
             crate::ec2::actions::column_selector_max(self)
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_selector_max(self)
+        } else if self.current_service == Service::KmsKeys {
+            crate::kms::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_selector_max(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3277,6 +3326,8 @@ impl App {
             crate::ec2::actions::column_count(self)
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::column_count(self)
+        } else if self.current_service == Service::KmsKeys {
+            crate::kms::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_count(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3423,6 +3474,8 @@ impl App {
                     crate::ec2::actions::next_item(self);
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::next_item(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     crate::sqs::actions::next_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
@@ -3570,6 +3623,8 @@ impl App {
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::prev_item(self);
+                } else if self.current_service == Service::KmsKeys {
+                    crate::kms::actions::prev_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     crate::sqs::actions::prev_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
@@ -3638,6 +3693,8 @@ impl App {
             && self.ecr_state.current_repository.is_none()
         {
             crate::ecr::actions::page_down_filter_input(self);
+        } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys {
+            crate::kms::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
             crate::iam::actions::page_down_filter_input_policy_view(self);
         } else if self.view_mode == ViewMode::PolicyView {
@@ -3692,6 +3749,8 @@ impl App {
                 crate::ec2::actions::page_down_normal(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::page_down_normal(self);
+            } else if self.current_service == Service::KmsKeys {
+                crate::kms::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
                 crate::sqs::actions::page_down_normal(self);
             } else if self.current_service == Service::LambdaFunctions {
@@ -3752,6 +3811,8 @@ impl App {
             && self.current_service == Service::LambdaApplications
         {
             crate::lambda::applications::page_up_filter_input(self);
+        } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys {
+            crate::kms::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
@@ -3799,6 +3860,8 @@ impl App {
                 crate::cw::actions::alarms_page_up_normal(self);
             } else if self.current_service == Service::CloudTrailEvents {
                 crate::cloudtrail::actions::page_up_normal(self);
+            } else if self.current_service == Service::KmsKeys {
+                crate::kms::actions::page_up_normal(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::page_up_normal(self);
             } else if self.current_service == Service::EcrRepositories {
@@ -3844,6 +3907,8 @@ impl App {
             crate::ec2::actions::expand_row(self);
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::next_pane(self);
+        } else if self.current_service == Service::KmsKeys {
+            crate::kms::actions::expand_row(self);
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::expand_row(self);
         } else if self.current_service == Service::LambdaFunctions {
@@ -3907,6 +3972,9 @@ impl App {
             Service::EcrRepositories => {
                 crate::ecr::actions::go_to_page(self, page);
             }
+            Service::KmsKeys => {
+                crate::kms::actions::go_to_page(self, page);
+            }
             Service::SqsQueues => {
                 crate::sqs::actions::go_to_page(self, page);
             }
@@ -3954,6 +4022,8 @@ impl App {
             crate::apig::actions::prev_pane(self);
         } else if self.current_service == Service::EcrRepositories {
             crate::ecr::actions::prev_pane(self);
+        } else if self.current_service == Service::KmsKeys {
+            crate::kms::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::prev_pane(self);
         } else if self.current_service == Service::LambdaFunctions {
@@ -4003,6 +4073,9 @@ impl App {
             }
             Service::ApiGatewayApis => {
                 crate::apig::actions::collapse_row(self);
+            }
+            Service::KmsKeys => {
+                crate::kms::actions::collapse_row(self);
             }
             Service::CloudTrailEvents => {
                 if self.cloudtrail_state.current_event.is_some()
@@ -4122,6 +4195,7 @@ impl App {
                     "CloudFormation › Stacks" => Service::CloudFormationStacks,
                     "EC2 › Instances" => Service::Ec2Instances,
                     "ECR › Repositories" => Service::EcrRepositories,
+                    "KMS › Managed Keys" => Service::KmsKeys,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
                     "IAM › User Groups" => Service::IamUserGroups,
@@ -4312,6 +4386,8 @@ impl App {
                 crate::cloudtrail::actions::select_item(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::select_item(self);
+            } else if self.current_service == Service::KmsKeys {
+                // KMS keys list — no drill-down yet; tab switch on Enter
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::select_item(self);
             } else if self.current_service == Service::SqsQueues {
@@ -4715,6 +4791,31 @@ impl App {
             .repositories
             .items
             .sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(())
+    }
+
+    pub async fn load_kms_keys(&mut self) -> anyhow::Result<()> {
+        let keys = self.kms_client.list_keys().await?;
+        self.kms_state.keys.items = keys
+            .into_iter()
+            .map(|k| KmsKey {
+                key_id: k.key_id,
+                key_arn: k.key_arn,
+                alias: k.alias,
+                description: k.description,
+                key_state: k.key_state,
+                key_usage: k.key_usage,
+                key_spec: k.key_spec,
+                key_manager: k.key_manager,
+                creation_date: k.creation_date,
+                expiration_date: k.expiration_date,
+                deletion_date: k.deletion_date,
+                custom_key_store_id: k.custom_key_store_id,
+                origin: k.origin,
+                multi_region: k.multi_region,
+                enabled: k.enabled,
+            })
+            .collect();
         Ok(())
     }
 
@@ -5368,6 +5469,7 @@ impl ServicePickerState {
                 "IAM › Users",
                 "IAM › Roles",
                 "IAM › User Groups",
+                "KMS › Managed Keys",
                 "Lambda › Functions",
                 "Lambda › Applications",
                 "S3 › Buckets",
@@ -10591,6 +10693,126 @@ mod region_latency_tests {
         assert!(app.service_picker.filter.is_empty());
         assert!(!app.service_picker.filter_active);
         assert_eq!(app.service_picker.selected, 0);
+    }
+
+    #[test]
+    fn test_kms_in_service_picker_services_list() {
+        let app = test_app();
+        assert!(
+            app.service_picker.services.contains(&"KMS › Managed Keys"),
+            "KMS › Managed Keys must be in the service picker list"
+        );
+    }
+
+    #[test]
+    fn test_kms_service_picker_selects_kms_service() {
+        let mut app = test_app();
+        app.mode = Mode::ServicePicker;
+        app.service_picker.filter_active = true;
+
+        // Type "kms" into the filter
+        for c in ['k', 'm', 's'] {
+            app.handle_action(Action::FilterInput(c));
+        }
+
+        assert_eq!(app.service_picker.filter, "kms");
+
+        // The filtered list should contain "KMS › Managed Keys"
+        let filtered: Vec<_> = app
+            .service_picker
+            .services
+            .iter()
+            .filter(|s| s.to_lowercase().contains("kms"))
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(*filtered[0], "KMS › Managed Keys");
+    }
+
+    #[test]
+    fn test_selecting_kms_in_picker_switches_service() {
+        let mut app = test_app();
+        app.mode = Mode::ServicePicker;
+        app.service_selected = false;
+
+        // Find the index of "KMS › Managed Keys" and select it
+        let kms_idx = app
+            .service_picker
+            .services
+            .iter()
+            .position(|&s| s == "KMS › Managed Keys")
+            .expect("KMS › Managed Keys must be in services list");
+        app.service_picker.selected = kms_idx;
+
+        app.handle_action(Action::Select);
+
+        assert_eq!(app.current_service, Service::KmsKeys);
+        assert!(app.service_selected);
+    }
+
+    #[test]
+    fn test_kms_picker_creates_session_tab_with_correct_title() {
+        // Session tab title must be "KMS › Managed Keys" so it shows in the tabs row
+        let mut app = test_app();
+        app.mode = Mode::ServicePicker;
+        app.service_selected = false;
+
+        let kms_idx = app
+            .service_picker
+            .services
+            .iter()
+            .position(|&s| s == "KMS › Managed Keys")
+            .unwrap();
+        app.service_picker.selected = kms_idx;
+        app.handle_action(Action::Select);
+
+        assert!(!app.tabs.is_empty(), "a session tab must be created");
+        let tab = &app.tabs[app.current_tab];
+        assert_eq!(
+            tab.title, "KMS › Managed Keys",
+            "session tab title must match picker label"
+        );
+        assert_eq!(tab.service, Service::KmsKeys);
+    }
+
+    #[test]
+    fn test_kms_tab_switch_does_not_trigger_reload() {
+        // Switching between AWS managed / Customer managed must NOT set loading=true.
+        // The data is filtered client-side; re-fetching would show "0" briefly.
+        use crate::ui::kms::Tab as KmsTab;
+        let mut app = test_app();
+        app.current_service = Service::KmsKeys;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.kms_state.tab = KmsTab::AwsManaged;
+        app.kms_state.keys.loading = false;
+
+        app.handle_action(Action::NextDetailTab);
+
+        assert_eq!(app.kms_state.tab, KmsTab::CustomerManaged);
+        assert!(
+            !app.kms_state.keys.loading,
+            "tab switch must NOT trigger a reload — keys are filtered client-side"
+        );
+    }
+
+    #[test]
+    fn test_kms_tab_switching_cycles() {
+        use crate::ui::kms::Tab as KmsTab;
+        let mut app = test_app();
+        app.current_service = Service::KmsKeys;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+
+        assert_eq!(app.kms_state.tab, KmsTab::AwsManaged);
+
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.kms_state.tab, KmsTab::CustomerManaged);
+
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.kms_state.tab, KmsTab::AwsManaged, "must wrap around");
+
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.kms_state.tab, KmsTab::CustomerManaged);
     }
 
     #[test]

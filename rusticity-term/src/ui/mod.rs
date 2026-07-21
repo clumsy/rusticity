@@ -7,6 +7,7 @@ pub mod ecr;
 mod expanded_view;
 pub mod filter;
 pub mod iam;
+pub mod kms;
 pub mod lambda;
 pub mod monitoring;
 mod pagination;
@@ -58,6 +59,7 @@ use crate::ec2::Column as Ec2Column;
 use crate::ecr::{image, repo};
 use crate::iam::{RoleColumn, UserColumn};
 use crate::keymap::Mode;
+use crate::kms::key as kms_key;
 use crate::lambda::{ApplicationColumn, DeploymentColumn, FunctionColumn, ResourceColumn};
 use crate::s3::BucketColumn;
 use crate::sqs::pipe::Column as SqsPipeColumn;
@@ -850,6 +852,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
+        Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
@@ -1232,6 +1235,46 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::KmsKeys {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let (header, header_len) = render_section_header("Columns");
+        all_items.push(header);
+        max_len = max_len.max(header_len);
+
+        let tab_col_ids = app.kms_state.tab_column_ids();
+        let visible_ids = app.kms_state.visible_column_ids();
+
+        for (i, col_id) in tab_col_ids.iter().enumerate() {
+            if let Some(col) = kms_key::Column::from_id(col_id) {
+                if i == 0 {
+                    // Alias is always visible — show grayed-out disabled toggle
+                    let col_name = col.name();
+                    let spans = vec![
+                        Span::styled("◼", Style::default().fg(Color::DarkGray)),
+                        Span::styled("⬜", Style::default().fg(Color::DarkGray)),
+                        Span::raw(" "),
+                        Span::styled(col_name.clone(), Style::default().fg(Color::DarkGray)),
+                    ];
+                    all_items.push(ListItem::new(Line::from(spans)));
+                    max_len = max_len.max(4 + col_name.len());
+                } else {
+                    let is_visible = visible_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+        }
+
+        all_items.push(ListItem::new(""));
+        let (page_items, page_len) =
+            render_page_size_section(app.kms_state.keys.page_size, PAGE_SIZE_OPTIONS);
+        all_items.extend(page_items);
+        max_len = max_len.max(page_len);
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::Ec2Instances {
@@ -2402,6 +2445,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
             }
         }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
+        Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),

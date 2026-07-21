@@ -481,6 +481,20 @@ async fn main() -> Result<()> {
                             app.ecr_state.repositories.loading = false;
                         }
 
+                        // Load KMS keys when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::KmsKeys
+                            && ((!prev_service_selected || prev_service != Service::KmsKeys)
+                                || app.kms_state.keys.loading) {
+                            app.kms_state.keys.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_kms_keys().await {
+                                app.error_message = Some(format!("Failed to load KMS keys: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.kms_state.keys.loading = false;
+                        }
+
                         // Load API Gateway APIs when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::ApiGatewayApis
                             && ((!prev_service_selected || prev_service != Service::ApiGatewayApis)

@@ -237,6 +237,10 @@ impl AwsConfig {
         aws_sdk_ecr::Client::new(&self.sdk_config)
     }
 
+    pub fn kms_client(&self) -> aws_sdk_kms::Client {
+        aws_sdk_kms::Client::new(&self.sdk_config)
+    }
+
     pub fn ecr_public_client(&self) -> aws_sdk_ecrpublic::Client {
         // ECR Public is a global service only available in us-east-1.
         // Reuse stored credentials but override region.

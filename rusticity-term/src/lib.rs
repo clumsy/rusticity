@@ -10,6 +10,7 @@ pub mod ecr;
 pub mod event;
 pub mod iam;
 pub mod keymap;
+pub mod kms;
 pub mod lambda;
 pub mod s3;
 pub mod session;
@@ -53,6 +54,7 @@ pub fn init() {
     cfn::init(&mut i18n);
     cloudtrail::init(&mut i18n);
     iam::init(&mut i18n);
+    kms::init(&mut i18n);
 
     // Set shared i18n map after all defaults are added
     common::set_i18n(i18n);

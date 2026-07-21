@@ -12,8 +12,8 @@ pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
 use crate::iam::{
-    self, GroupUser as IamGroupUser, Policy as IamPolicy, RoleColumn, RoleTag as IamRoleTag,
-    UserColumn, UserTag as IamUserTag,
+    GroupUser as IamGroupUser, Policy as IamPolicy, RoleColumn, RoleTag as IamRoleTag, UserColumn,
+    UserTag as IamUserTag,
 };
 #[cfg(test)]
 use crate::iam::{IamRole, IamUser, LastAccessedService};
@@ -58,11 +58,7 @@ pub use crate::ui::ecr::{
     filtered_ecr_images, filtered_ecr_repositories, State as EcrState, Tab as EcrTab,
     FILTER_CONTROLS as ECR_FILTER_CONTROLS,
 };
-use crate::ui::iam::{
-    filtered_iam_policies, filtered_iam_roles, filtered_iam_users, filtered_last_accessed,
-    filtered_tags as filtered_iam_tags, filtered_user_tags, GroupTab, RoleTab, State as IamState,
-    UserTab,
-};
+use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
 pub use crate::ui::lambda::{
     filtered_lambda_applications, filtered_lambda_functions,
     ApplicationDetailTab as LambdaApplicationDetailTab, ApplicationState as LambdaApplicationState,
@@ -1412,9 +1408,9 @@ impl App {
                     } else if self.current_service == Service::IamRoles
                         && self.iam_state.current_role.is_none()
                     {
-                        self.iam_state.role_input_focus == InputFocus::Pagination
+                        crate::iam::actions::is_pagination_focused_roles(self)
                     } else if self.view_mode == ViewMode::PolicyView {
-                        self.iam_state.policy_input_focus == InputFocus::Pagination
+                        crate::iam::actions::is_pagination_focused_policy_view(self)
                     } else if self.current_service == Service::CloudWatchAlarms {
                         crate::cw::actions::alarms_is_pagination_focused(self)
                     } else if self.current_service == Service::CloudTrailEvents {
@@ -1464,11 +1460,11 @@ impl App {
                     } else if self.current_service == Service::IamRoles
                         && self.iam_state.current_role.is_none()
                     {
-                        if self.iam_state.role_input_focus == InputFocus::Filter {
+                        if crate::iam::actions::is_filter_focused_roles(self) {
                             self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.view_mode == ViewMode::PolicyView {
-                        if self.iam_state.policy_input_focus == InputFocus::Filter {
+                        if crate::iam::actions::is_filter_focused_policy_view(self) {
                             self.apply_filter_operation(|f| f.push(c));
                         }
                     } else if self.current_service == Service::ApiGatewayApis
@@ -1886,102 +1882,11 @@ impl App {
                 } else if self.current_service == Service::CloudFormationStacks {
                     crate::cfn::actions::toggle_column(self);
                 } else if self.current_service == Service::IamUsers {
-                    let idx = self.column_selector_index;
-                    if self.iam_state.current_user.is_some() {
-                        match self.iam_state.user_tab {
-                            UserTab::Permissions => {
-                                // Policy columns
-                                if idx > 0 && idx <= self.iam_policy_column_ids.len() {
-                                    if let Some(col) = self.iam_policy_column_ids.get(idx - 1) {
-                                        if let Some(pos) = self
-                                            .iam_policy_visible_column_ids
-                                            .iter()
-                                            .position(|c| c == col)
-                                        {
-                                            self.iam_policy_visible_column_ids.remove(pos);
-                                        } else {
-                                            self.iam_policy_visible_column_ids.push(col.clone());
-                                        }
-                                    }
-                                } else if idx == self.iam_policy_column_ids.len() + 3 {
-                                    self.iam_state.policies.page_size = PageSize::Ten;
-                                } else if idx == self.iam_policy_column_ids.len() + 4 {
-                                    self.iam_state.policies.page_size = PageSize::TwentyFive;
-                                } else if idx == self.iam_policy_column_ids.len() + 5 {
-                                    self.iam_state.policies.page_size = PageSize::Fifty;
-                                }
-                            }
-                            UserTab::Groups => {
-                                toggle_iam_page_size_only(
-                                    idx,
-                                    5,
-                                    &mut self.iam_state.user_group_memberships.page_size,
-                                );
-                            }
-                            UserTab::Tags => {
-                                toggle_iam_page_size_only(
-                                    idx,
-                                    5,
-                                    &mut self.iam_state.user_tags.page_size,
-                                );
-                            }
-                            UserTab::LastAccessed => {
-                                toggle_iam_page_size_only(
-                                    idx,
-                                    6,
-                                    &mut self.iam_state.last_accessed_services.page_size,
-                                );
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // User list columns
-                        toggle_iam_preference_static(
-                            idx,
-                            &self.iam_user_column_ids,
-                            &mut self.iam_user_visible_column_ids,
-                            &mut self.iam_state.users.page_size,
-                        );
-                    }
+                    crate::iam::actions::toggle_column_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    let idx = self.column_selector_index;
-                    if self.iam_state.current_role.is_some() {
-                        match self.iam_state.role_tab {
-                            RoleTab::Permissions => {
-                                // Policy columns for role detail
-                                toggle_iam_preference(
-                                    idx,
-                                    &self.iam_policy_column_ids,
-                                    &mut self.iam_policy_visible_column_ids,
-                                    &mut self.iam_state.policies.page_size,
-                                );
-                            }
-                            RoleTab::LastAccessed => {
-                                // 0: header, 1-3: columns, 4: empty, 5: PageSize header, 6-8: page sizes
-                                toggle_iam_page_size_only(
-                                    idx,
-                                    6,
-                                    &mut self.iam_state.last_accessed_services.page_size,
-                                );
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // Role list columns
-                        toggle_iam_preference_static(
-                            idx,
-                            &self.iam_role_column_ids,
-                            &mut self.iam_role_visible_column_ids,
-                            &mut self.iam_state.roles.page_size,
-                        );
-                    }
+                    crate::iam::actions::toggle_column_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    toggle_iam_preference(
-                        self.column_selector_index,
-                        &self.iam_group_column_ids,
-                        &mut self.iam_group_visible_column_ids,
-                        &mut self.iam_state.groups.page_size,
-                    );
+                    crate::iam::actions::toggle_column_groups(self);
                 } else {
                     let idx = self.column_selector_index;
                     if idx > 0 && idx <= self.cw_log_group_column_ids.len() {
@@ -2044,91 +1949,11 @@ impl App {
                         self.column_selector_index = 0;
                     }
                 } else if self.current_service == Service::IamUsers {
-                    if self.iam_state.current_user.is_some() {
-                        match self.iam_state.user_tab {
-                            UserTab::Permissions => {
-                                // Columns(0), PageSize(columns.len() + 2)
-                                let page_size_idx = self.iam_policy_column_ids.len() + 2;
-                                if self.column_selector_index < page_size_idx {
-                                    self.column_selector_index = page_size_idx;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            UserTab::Groups | UserTab::Tags => {
-                                // Columns(0), PageSize(4)
-                                if self.column_selector_index < 4 {
-                                    self.column_selector_index = 4;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            UserTab::LastAccessed => {
-                                // Columns(0), PageSize(5)
-                                if self.column_selector_index < 5 {
-                                    self.column_selector_index = 5;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // User columns: Columns(0), PageSize(columns.len() + 2)
-                        let page_size_idx = self.iam_user_column_ids.len() + 2;
-                        if self.column_selector_index < page_size_idx {
-                            self.column_selector_index = page_size_idx;
-                        } else {
-                            self.column_selector_index = 0;
-                        }
-                    }
+                    crate::iam::actions::next_preferences_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        match self.iam_state.role_tab {
-                            RoleTab::Permissions => {
-                                // Columns(0), PageSize(columns.len() + 2)
-                                let page_size_idx = self.iam_policy_column_ids.len() + 2;
-                                if self.column_selector_index < page_size_idx {
-                                    self.column_selector_index = page_size_idx;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            RoleTab::Tags => {
-                                // Columns(0), PageSize(4)
-                                if self.column_selector_index < 4 {
-                                    self.column_selector_index = 4;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            RoleTab::LastAccessed => {
-                                // Columns(0), PageSize(5)
-                                if self.column_selector_index < 5 {
-                                    self.column_selector_index = 5;
-                                } else {
-                                    self.column_selector_index = 0;
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        // Role columns: Columns(0), PageSize(columns.len() + 2)
-                        let page_size_idx = self.iam_role_column_ids.len() + 2;
-                        if self.column_selector_index < page_size_idx {
-                            self.column_selector_index = page_size_idx;
-                        } else {
-                            self.column_selector_index = 0;
-                        }
-                    }
+                    crate::iam::actions::next_preferences_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    // Group columns: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.iam_group_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
+                    crate::iam::actions::next_preferences_groups(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
@@ -2235,82 +2060,11 @@ impl App {
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::next_preferences(self);
                 } else if self.current_service == Service::IamUsers {
-                    if self.iam_state.current_user.is_some() {
-                        match self.iam_state.user_tab {
-                            UserTab::Permissions => {
-                                let page_size_idx = self.iam_policy_column_ids.len() + 2;
-                                if self.column_selector_index >= page_size_idx {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = page_size_idx;
-                                }
-                            }
-                            UserTab::Groups | UserTab::Tags => {
-                                if self.column_selector_index >= 4 {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = 4;
-                                }
-                            }
-                            UserTab::LastAccessed => {
-                                if self.column_selector_index >= 5 {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = 5;
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        let page_size_idx = self.iam_user_column_ids.len() + 2;
-                        if self.column_selector_index >= page_size_idx {
-                            self.column_selector_index = 0;
-                        } else {
-                            self.column_selector_index = page_size_idx;
-                        }
-                    }
+                    crate::iam::actions::prev_preferences_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        match self.iam_state.role_tab {
-                            RoleTab::Permissions => {
-                                let page_size_idx = self.iam_policy_column_ids.len() + 2;
-                                if self.column_selector_index >= page_size_idx {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = page_size_idx;
-                                }
-                            }
-                            RoleTab::Tags => {
-                                if self.column_selector_index >= 4 {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = 4;
-                                }
-                            }
-                            RoleTab::LastAccessed => {
-                                if self.column_selector_index >= 5 {
-                                    self.column_selector_index = 0;
-                                } else {
-                                    self.column_selector_index = 5;
-                                }
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        let page_size_idx = self.iam_role_column_ids.len() + 2;
-                        if self.column_selector_index >= page_size_idx {
-                            self.column_selector_index = 0;
-                        } else {
-                            self.column_selector_index = page_size_idx;
-                        }
-                    }
+                    crate::iam::actions::prev_preferences_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    let page_size_idx = self.iam_group_column_ids.len() + 2;
-                    if self.column_selector_index >= page_size_idx {
-                        self.column_selector_index = 0;
-                    } else {
-                        self.column_selector_index = page_size_idx;
-                    }
+                    crate::iam::actions::prev_preferences_groups(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                 {
@@ -2568,52 +2322,17 @@ impl App {
                     crate::lambda::applications::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
-                    && self.iam_state.current_role.is_some()
                 {
-                    use crate::ui::iam::POLICY_FILTER_CONTROLS;
-                    self.iam_state.policy_input_focus = self
-                        .iam_state
-                        .policy_input_focus
-                        .next(&POLICY_FILTER_CONTROLS);
-                } else if self.mode == Mode::FilterInput
-                    && self.current_service == Service::IamRoles
-                    && self.iam_state.current_role.is_none()
-                {
-                    use crate::ui::iam::ROLE_FILTER_CONTROLS;
-                    self.iam_state.role_input_focus =
-                        self.iam_state.role_input_focus.next(&ROLE_FILTER_CONTROLS);
+                    crate::iam::actions::next_filter_focus_roles(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    use crate::ui::iam::{
-                        POLICY_FILTER_CONTROLS, USER_LAST_ACCESSED_FILTER_CONTROLS,
-                        USER_SIMPLE_FILTER_CONTROLS,
-                    };
-                    if self.iam_state.user_tab == UserTab::Permissions {
-                        self.iam_state.policy_input_focus = self
-                            .iam_state
-                            .policy_input_focus
-                            .next(&POLICY_FILTER_CONTROLS);
-                    } else if self.iam_state.user_tab == UserTab::LastAccessed {
-                        self.iam_state.last_accessed_input_focus = self
-                            .iam_state
-                            .last_accessed_input_focus
-                            .next(&USER_LAST_ACCESSED_FILTER_CONTROLS);
-                    } else {
-                        self.iam_state.user_input_focus = self
-                            .iam_state
-                            .user_input_focus
-                            .next(&USER_SIMPLE_FILTER_CONTROLS);
-                    }
+                    crate::iam::actions::next_filter_focus_users(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamUserGroups
                 {
-                    use crate::ui::iam::GROUP_FILTER_CONTROLS;
-                    self.iam_state.group_input_focus = self
-                        .iam_state
-                        .group_input_focus
-                        .next(&GROUP_FILTER_CONTROLS);
+                    crate::iam::actions::next_filter_focus_groups(self);
                 } else if self.mode == Mode::InsightsInput {
                     use crate::app::InsightsFocus;
                     self.insights_state.insights.insights_focus =
@@ -2691,43 +2410,17 @@ impl App {
                     crate::sqs::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamRoles
-                    && self.iam_state.current_role.is_none()
                 {
-                    use crate::ui::iam::ROLE_FILTER_CONTROLS;
-                    self.iam_state.role_input_focus =
-                        self.iam_state.role_input_focus.prev(&ROLE_FILTER_CONTROLS);
+                    crate::iam::actions::prev_filter_focus_roles(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    use crate::ui::iam::{
-                        POLICY_FILTER_CONTROLS, USER_LAST_ACCESSED_FILTER_CONTROLS,
-                        USER_SIMPLE_FILTER_CONTROLS,
-                    };
-                    if self.iam_state.user_tab == UserTab::Permissions {
-                        self.iam_state.policy_input_focus = self
-                            .iam_state
-                            .policy_input_focus
-                            .prev(&POLICY_FILTER_CONTROLS);
-                    } else if self.iam_state.user_tab == UserTab::LastAccessed {
-                        self.iam_state.last_accessed_input_focus = self
-                            .iam_state
-                            .last_accessed_input_focus
-                            .prev(&USER_LAST_ACCESSED_FILTER_CONTROLS);
-                    } else {
-                        self.iam_state.user_input_focus = self
-                            .iam_state
-                            .user_input_focus
-                            .prev(&USER_SIMPLE_FILTER_CONTROLS);
-                    }
+                    crate::iam::actions::prev_filter_focus_users(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::IamUserGroups
                 {
-                    use crate::ui::iam::GROUP_FILTER_CONTROLS;
-                    self.iam_state.group_input_focus = self
-                        .iam_state
-                        .group_input_focus
-                        .prev(&GROUP_FILTER_CONTROLS);
+                    crate::iam::actions::prev_filter_focus_groups(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchLogGroups
                 {
@@ -2738,11 +2431,7 @@ impl App {
                     && self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                 {
-                    use crate::ui::iam::POLICY_FILTER_CONTROLS;
-                    self.iam_state.policy_input_focus = self
-                        .iam_state
-                        .policy_input_focus
-                        .prev(&POLICY_FILTER_CONTROLS);
+                    crate::iam::actions::prev_filter_focus_roles(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::CloudWatchAlarms
                 {
@@ -2861,13 +2550,12 @@ impl App {
                         self.sqs_state.monitoring_scroll().saturating_sub(1),
                     );
                 } else if self.view_mode == ViewMode::PolicyView {
-                    self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
+                    crate::iam::actions::scroll_up_policy_view(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                     && self.iam_state.role_tab == RoleTab::TrustRelationships
                 {
-                    self.iam_state.trust_policy_scroll =
-                        self.iam_state.trust_policy_scroll.saturating_sub(10);
+                    crate::iam::actions::scroll_up_trust_policy(self);
                 } else if self.view_mode == ViewMode::Events {
                     if self.log_groups_state.event_scroll_offset == 0
                         && self.log_groups_state.has_older_events
@@ -2920,18 +2608,12 @@ impl App {
                     self.sqs_state
                         .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(1));
                 } else if self.view_mode == ViewMode::PolicyView {
-                    let lines = self.iam_state.policy_document.lines().count();
-                    let max_scroll = lines.saturating_sub(1);
-                    self.iam_state.policy_scroll =
-                        (self.iam_state.policy_scroll + 10).min(max_scroll);
+                    crate::iam::actions::scroll_down_policy_view(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                     && self.iam_state.role_tab == RoleTab::TrustRelationships
                 {
-                    let lines = self.iam_state.trust_policy_document.lines().count();
-                    let max_scroll = lines.saturating_sub(1);
-                    self.iam_state.trust_policy_scroll =
-                        (self.iam_state.trust_policy_scroll + 10).min(max_scroll);
+                    crate::iam::actions::scroll_down_trust_policy(self);
                 } else if self.view_mode == ViewMode::Events {
                     let max_scroll = self.log_groups_state.log_events.len().saturating_sub(1);
                     if self.log_groups_state.event_scroll_offset >= max_scroll {
@@ -3027,36 +2709,7 @@ impl App {
                 } else if self.current_service == Service::IamRoles {
                     crate::iam::actions::yank_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    if self.iam_state.current_group.is_some() {
-                        if let Some(group_name) = &self.iam_state.current_group {
-                            let arn = iam::format_arn(&self.config.account_id, "group", group_name);
-                            copy_to_clipboard(&arn);
-                        }
-                    } else {
-                        let filtered_groups: Vec<_> = self
-                            .iam_state
-                            .groups
-                            .items
-                            .iter()
-                            .filter(|g| {
-                                if self.iam_state.groups.filter.is_empty() {
-                                    true
-                                } else {
-                                    g.group_name
-                                        .to_lowercase()
-                                        .contains(&self.iam_state.groups.filter.to_lowercase())
-                                }
-                            })
-                            .collect();
-                        if let Some(group) = self.iam_state.groups.get_selected(&filtered_groups) {
-                            let arn = iam::format_arn(
-                                &self.config.account_id,
-                                "group",
-                                &group.group_name,
-                            );
-                            copy_to_clipboard(&arn);
-                        }
-                    }
+                    crate::iam::actions::yank_groups(self);
                 } else if self.current_service == Service::SqsQueues {
                     if self.sqs_state.current_queue.is_some() {
                         // In queue detail view - copy queue ARN
@@ -3591,17 +3244,9 @@ impl App {
         } else if self.current_service == Service::CloudFormationStacks {
             crate::cfn::actions::column_selector_max(self)
         } else if self.current_service == Service::IamUsers {
-            if self.iam_state.current_user.is_some() {
-                self.iam_policy_column_ids.len() + 5
-            } else {
-                self.iam_user_column_ids.len() + 5
-            }
+            crate::iam::actions::column_selector_max_users(self)
         } else if self.current_service == Service::IamRoles {
-            if self.iam_state.current_role.is_some() {
-                self.iam_policy_column_ids.len() + 5
-            } else {
-                self.iam_role_column_ids.len() + 5
-            }
+            crate::iam::actions::column_selector_max_roles(self)
         } else {
             self.cw_log_group_column_ids.len() + 6
         }
@@ -3635,17 +3280,9 @@ impl App {
         } else if self.current_service == Service::CloudFormationStacks {
             crate::cfn::actions::column_count(self)
         } else if self.current_service == Service::IamUsers {
-            if self.iam_state.current_user.is_some() {
-                self.iam_policy_column_ids.len()
-            } else {
-                self.iam_user_column_ids.len()
-            }
+            crate::iam::actions::column_count_users(self)
         } else if self.current_service == Service::IamRoles {
-            if self.iam_state.current_role.is_some() {
-                self.iam_policy_column_ids.len()
-            } else {
-                self.iam_role_column_ids.len()
-            }
+            crate::iam::actions::column_count_roles(self)
         } else {
             self.cw_log_group_column_ids.len()
         }
@@ -3680,26 +3317,12 @@ impl App {
                 } else if self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    use crate::ui::iam::{HISTORY_FILTER, POLICY_TYPE_DROPDOWN};
-                    if self.iam_state.user_tab == UserTab::Permissions
-                        && self.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN
-                    {
-                        self.cycle_policy_type_next();
-                    } else if self.iam_state.user_tab == UserTab::LastAccessed
-                        && self.iam_state.last_accessed_input_focus == HISTORY_FILTER
-                    {
-                        self.iam_state.last_accessed_history_filter =
-                            self.iam_state.last_accessed_history_filter.next();
-                        self.iam_state.last_accessed_services.reset();
-                    }
+                    crate::iam::actions::next_item_filter_input_users(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                     && self.iam_state.role_tab == RoleTab::Permissions
                 {
-                    use crate::ui::iam::POLICY_TYPE_DROPDOWN;
-                    if self.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN {
-                        self.cycle_policy_type_next();
-                    }
+                    crate::iam::actions::next_item_filter_input_roles(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_state_filter_next(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -3803,112 +3426,11 @@ impl App {
                 } else if self.current_service == Service::CloudFormationStacks {
                     crate::cfn::actions::next_item(self);
                 } else if self.current_service == Service::IamUsers {
-                    if self.iam_state.current_user.is_some() {
-                        if self.iam_state.user_tab == UserTab::Tags {
-                            let filtered = filtered_user_tags(self);
-                            if !filtered.is_empty() {
-                                self.iam_state.user_tags.next_item(filtered.len());
-                            }
-                        } else {
-                            let filtered = filtered_iam_policies(self);
-                            if !filtered.is_empty() {
-                                self.iam_state.policies.next_item(filtered.len());
-                            }
-                        }
-                    } else {
-                        let filtered = filtered_iam_users(self);
-                        if !filtered.is_empty() {
-                            self.iam_state.users.next_item(filtered.len());
-                        }
-                    }
+                    crate::iam::actions::next_item_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        if self.iam_state.role_tab == RoleTab::TrustRelationships {
-                            let lines = self.iam_state.trust_policy_document.lines().count();
-                            let max_scroll = lines.saturating_sub(1);
-                            self.iam_state.trust_policy_scroll =
-                                (self.iam_state.trust_policy_scroll + 1).min(max_scroll);
-                        } else if self.iam_state.role_tab == RoleTab::RevokeSessions {
-                            self.iam_state.revoke_sessions_scroll =
-                                (self.iam_state.revoke_sessions_scroll + 1).min(19);
-                        } else if self.iam_state.role_tab == RoleTab::Tags {
-                            let filtered = filtered_iam_tags(self);
-                            if !filtered.is_empty() {
-                                self.iam_state.tags.next_item(filtered.len());
-                            }
-                        } else if self.iam_state.role_tab == RoleTab::LastAccessed {
-                            let filtered = filtered_last_accessed(self);
-                            if !filtered.is_empty() {
-                                self.iam_state
-                                    .last_accessed_services
-                                    .next_item(filtered.len());
-                            }
-                        } else {
-                            let filtered = filtered_iam_policies(self);
-                            if !filtered.is_empty() {
-                                self.iam_state.policies.next_item(filtered.len());
-                            }
-                        }
-                    } else {
-                        let filtered = filtered_iam_roles(self);
-                        if !filtered.is_empty() {
-                            self.iam_state.roles.next_item(filtered.len());
-                        }
-                    }
+                    crate::iam::actions::next_item_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    if self.iam_state.current_group.is_some() {
-                        if self.iam_state.group_tab == GroupTab::Users {
-                            let filtered: Vec<_> = self
-                                .iam_state
-                                .group_users
-                                .items
-                                .iter()
-                                .filter(|u| {
-                                    if self.iam_state.group_users.filter.is_empty() {
-                                        true
-                                    } else {
-                                        u.user_name.to_lowercase().contains(
-                                            &self.iam_state.group_users.filter.to_lowercase(),
-                                        )
-                                    }
-                                })
-                                .collect();
-                            if !filtered.is_empty() {
-                                self.iam_state.group_users.next_item(filtered.len());
-                            }
-                        } else if self.iam_state.group_tab == GroupTab::Permissions {
-                            let filtered = filtered_iam_policies(self);
-                            if !filtered.is_empty() {
-                                self.iam_state.policies.next_item(filtered.len());
-                            }
-                        } else if self.iam_state.group_tab == GroupTab::AccessAdvisor {
-                            let filtered = filtered_last_accessed(self);
-                            if !filtered.is_empty() {
-                                self.iam_state
-                                    .last_accessed_services
-                                    .next_item(filtered.len());
-                            }
-                        }
-                    } else {
-                        let filtered: Vec<_> = self
-                            .iam_state
-                            .groups
-                            .items
-                            .iter()
-                            .filter(|g| {
-                                if self.iam_state.groups.filter.is_empty() {
-                                    true
-                                } else {
-                                    g.group_name
-                                        .to_lowercase()
-                                        .contains(&self.iam_state.groups.filter.to_lowercase())
-                                }
-                            })
-                            .collect();
-                        if !filtered.is_empty() {
-                            self.iam_state.groups.next_item(filtered.len());
-                        }
-                    }
+                    crate::iam::actions::next_item_groups(self);
                 }
             }
             _ => {}
@@ -3936,26 +3458,12 @@ impl App {
                 } else if self.current_service == Service::IamUsers
                     && self.iam_state.current_user.is_some()
                 {
-                    use crate::ui::iam::{HISTORY_FILTER, POLICY_TYPE_DROPDOWN};
-                    if self.iam_state.user_tab == UserTab::Permissions
-                        && self.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN
-                    {
-                        self.cycle_policy_type_prev();
-                    } else if self.iam_state.user_tab == UserTab::LastAccessed
-                        && self.iam_state.last_accessed_input_focus == HISTORY_FILTER
-                    {
-                        self.iam_state.last_accessed_history_filter =
-                            self.iam_state.last_accessed_history_filter.prev();
-                        self.iam_state.last_accessed_services.reset();
-                    }
+                    crate::iam::actions::prev_item_filter_input_users(self);
                 } else if self.current_service == Service::IamRoles
                     && self.iam_state.current_role.is_some()
                     && self.iam_state.role_tab == RoleTab::Permissions
                 {
-                    use crate::ui::iam::POLICY_TYPE_DROPDOWN;
-                    if self.iam_state.policy_input_focus == POLICY_TYPE_DROPDOWN {
-                        self.cycle_policy_type_prev();
-                    }
+                    crate::iam::actions::prev_item_filter_input_roles(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_state_filter_prev(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -4011,7 +3519,7 @@ impl App {
                 {
                     crate::cw::actions::insights_prev_item_dropdown(self);
                 } else if self.view_mode == ViewMode::PolicyView {
-                    self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(1);
+                    crate::iam::actions::scroll_up_policy_view_one(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::QueuePolicies
@@ -4065,37 +3573,11 @@ impl App {
                 } else if self.current_service == Service::CloudFormationStacks {
                     crate::cfn::actions::prev_item(self);
                 } else if self.current_service == Service::IamUsers {
-                    self.iam_state.users.prev_item();
+                    crate::iam::actions::prev_item_users(self);
                 } else if self.current_service == Service::IamRoles {
-                    if self.iam_state.current_role.is_some() {
-                        if self.iam_state.role_tab == RoleTab::TrustRelationships {
-                            self.iam_state.trust_policy_scroll =
-                                self.iam_state.trust_policy_scroll.saturating_sub(1);
-                        } else if self.iam_state.role_tab == RoleTab::RevokeSessions {
-                            self.iam_state.revoke_sessions_scroll =
-                                self.iam_state.revoke_sessions_scroll.saturating_sub(1);
-                        } else if self.iam_state.role_tab == RoleTab::Tags {
-                            self.iam_state.tags.prev_item();
-                        } else if self.iam_state.role_tab == RoleTab::LastAccessed {
-                            self.iam_state.last_accessed_services.prev_item();
-                        } else {
-                            self.iam_state.policies.prev_item();
-                        }
-                    } else {
-                        self.iam_state.roles.prev_item();
-                    }
+                    crate::iam::actions::prev_item_roles(self);
                 } else if self.current_service == Service::IamUserGroups {
-                    if self.iam_state.current_group.is_some() {
-                        if self.iam_state.group_tab == GroupTab::Users {
-                            self.iam_state.group_users.prev_item();
-                        } else if self.iam_state.group_tab == GroupTab::Permissions {
-                            self.iam_state.policies.prev_item();
-                        } else if self.iam_state.group_tab == GroupTab::AccessAdvisor {
-                            self.iam_state.last_accessed_services.prev_item();
-                        }
-                    } else {
-                        self.iam_state.groups.prev_item();
-                    }
+                    crate::iam::actions::prev_item_groups(self);
                 }
             }
             _ => {}
@@ -4125,14 +3607,7 @@ impl App {
             && self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_none()
         {
-            let page_size = self.iam_state.roles.page_size.value();
-            let filtered_count = filtered_iam_roles(self).len();
-            self.iam_state.role_input_focus.handle_page_down(
-                &mut self.iam_state.roles.selected,
-                &mut self.iam_state.roles.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            crate::iam::actions::page_down_filter_input_roles(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchAlarms
         {
@@ -4158,18 +3633,9 @@ impl App {
         {
             crate::ecr::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
-            let page_size = self.iam_state.policies.page_size.value();
-            let filtered_count = filtered_iam_policies(self).len();
-            self.iam_state.policy_input_focus.handle_page_down(
-                &mut self.iam_state.policies.selected,
-                &mut self.iam_state.policies.scroll_offset,
-                page_size,
-                filtered_count,
-            );
+            crate::iam::actions::page_down_filter_input_policy_view(self);
         } else if self.view_mode == ViewMode::PolicyView {
-            let lines = self.iam_state.policy_document.lines().count();
-            let max_scroll = lines.saturating_sub(1);
-            self.iam_state.policy_scroll = (self.iam_state.policy_scroll + 10).min(max_scroll);
+            crate::iam::actions::scroll_down_policy_view(self);
         } else if self.current_service == Service::CloudFormationStacks
             && self.cfn_state.current_stack.is_some()
             && self.cfn_state.detail_tab == CfnDetailTab::Template
@@ -4191,16 +3657,12 @@ impl App {
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
         {
-            let lines = self.iam_state.trust_policy_document.lines().count();
-            let max_scroll = lines.saturating_sub(1);
-            self.iam_state.trust_policy_scroll =
-                (self.iam_state.trust_policy_scroll + 10).min(max_scroll);
+            crate::iam::actions::scroll_down_trust_policy(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::RevokeSessions
         {
-            self.iam_state.revoke_sessions_scroll =
-                (self.iam_state.revoke_sessions_scroll + 10).min(19);
+            crate::iam::actions::scroll_down_revoke_sessions(self);
         } else if self.mode == Mode::Normal {
             if self.current_service == Service::S3Buckets {
                 crate::s3::actions::page_down_normal(self);
@@ -4233,100 +3695,13 @@ impl App {
             } else if self.current_service == Service::CloudFormationStacks {
                 crate::cfn::actions::page_down_normal(self);
             } else if self.current_service == Service::IamUsers {
-                let len = filtered_iam_users(self).len();
-                nav_page_down(&mut self.iam_state.users.selected, len, 10);
+                crate::iam::actions::page_down_normal_users(self);
             } else if self.current_service == Service::IamRoles {
-                if self.iam_state.current_role.is_some() {
-                    let filtered = filtered_iam_policies(self);
-                    if !filtered.is_empty() {
-                        self.iam_state.policies.page_down(filtered.len());
-                    }
-                } else {
-                    let filtered = filtered_iam_roles(self);
-                    self.iam_state.roles.page_down(filtered.len());
-                }
+                crate::iam::actions::page_down_normal_roles(self);
             } else if self.current_service == Service::IamUserGroups {
-                if self.iam_state.current_group.is_some() {
-                    if self.iam_state.group_tab == GroupTab::Users {
-                        let filtered: Vec<_> = self
-                            .iam_state
-                            .group_users
-                            .items
-                            .iter()
-                            .filter(|u| {
-                                if self.iam_state.group_users.filter.is_empty() {
-                                    true
-                                } else {
-                                    u.user_name
-                                        .to_lowercase()
-                                        .contains(&self.iam_state.group_users.filter.to_lowercase())
-                                }
-                            })
-                            .collect();
-                        if !filtered.is_empty() {
-                            self.iam_state.group_users.page_down(filtered.len());
-                        }
-                    } else if self.iam_state.group_tab == GroupTab::Permissions {
-                        let filtered = filtered_iam_policies(self);
-                        if !filtered.is_empty() {
-                            self.iam_state.policies.page_down(filtered.len());
-                        }
-                    } else if self.iam_state.group_tab == GroupTab::AccessAdvisor {
-                        let filtered = filtered_last_accessed(self);
-                        if !filtered.is_empty() {
-                            self.iam_state
-                                .last_accessed_services
-                                .page_down(filtered.len());
-                        }
-                    }
-                } else {
-                    let filtered: Vec<_> = self
-                        .iam_state
-                        .groups
-                        .items
-                        .iter()
-                        .filter(|g| {
-                            if self.iam_state.groups.filter.is_empty() {
-                                true
-                            } else {
-                                g.group_name
-                                    .to_lowercase()
-                                    .contains(&self.iam_state.groups.filter.to_lowercase())
-                            }
-                        })
-                        .collect();
-                    if !filtered.is_empty() {
-                        self.iam_state.groups.page_down(filtered.len());
-                    }
-                }
+                crate::iam::actions::page_down_normal_groups(self);
             }
         }
-    }
-
-    fn cycle_policy_type_next(&mut self) {
-        let types = ["All types", "AWS managed", "Customer managed"];
-        let current_idx = types
-            .iter()
-            .position(|&t| t == self.iam_state.policy_type_filter)
-            .unwrap_or(0);
-        let next_idx = (current_idx + 1) % types.len();
-        self.iam_state.policy_type_filter = types[next_idx].to_string();
-        self.iam_state.policies.reset();
-    }
-
-    fn cycle_policy_type_prev(&mut self) {
-        let types = ["All types", "AWS managed", "Customer managed"];
-        let current_idx = types
-            .iter()
-            .position(|&t| t == self.iam_state.policy_type_filter)
-            .unwrap_or(0);
-        let prev_idx = if current_idx == 0 {
-            types.len() - 1
-        } else {
-            current_idx - 1
-        };
-        self.iam_state.policy_type_filter = types[prev_idx].to_string();
-        self.iam_state.policies.reset();
     }
 
     fn page_up(&mut self) {
@@ -4351,12 +3726,7 @@ impl App {
             && self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_none()
         {
-            let page_size = self.iam_state.roles.page_size.value();
-            self.iam_state.role_input_focus.handle_page_up(
-                &mut self.iam_state.roles.selected,
-                &mut self.iam_state.roles.scroll_offset,
-                page_size,
-            );
+            crate::iam::actions::page_up_filter_input_roles(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::CloudWatchAlarms
         {
@@ -4382,14 +3752,9 @@ impl App {
         {
             crate::ecr::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
-            let page_size = self.iam_state.policies.page_size.value();
-            self.iam_state.policy_input_focus.handle_page_up(
-                &mut self.iam_state.policies.selected,
-                &mut self.iam_state.policies.scroll_offset,
-                page_size,
-            );
+            crate::iam::actions::page_up_filter_input_policy_view(self);
         } else if self.view_mode == ViewMode::PolicyView {
-            self.iam_state.policy_scroll = self.iam_state.policy_scroll.saturating_sub(10);
+            crate::iam::actions::scroll_up_policy_view(self);
         } else if self.current_service == Service::CloudFormationStacks
             && self.cfn_state.current_stack.is_some()
             && self.cfn_state.detail_tab == CfnDetailTab::Template
@@ -4403,14 +3768,12 @@ impl App {
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
         {
-            self.iam_state.trust_policy_scroll =
-                self.iam_state.trust_policy_scroll.saturating_sub(10);
+            crate::iam::actions::scroll_up_trust_policy(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::RevokeSessions
         {
-            self.iam_state.revoke_sessions_scroll =
-                self.iam_state.revoke_sessions_scroll.saturating_sub(10);
+            crate::iam::actions::scroll_up_revoke_sessions(self);
         } else if self.mode == Mode::Normal {
             if self.current_service == Service::S3Buckets {
                 crate::s3::actions::page_up_normal(self);
@@ -4443,13 +3806,9 @@ impl App {
             } else if self.current_service == Service::CloudFormationStacks {
                 crate::cfn::actions::page_up_normal(self);
             } else if self.current_service == Service::IamUsers {
-                self.iam_state.users.page_up();
+                crate::iam::actions::page_up_normal_users(self);
             } else if self.current_service == Service::IamRoles {
-                if self.iam_state.current_role.is_some() {
-                    self.iam_state.policies.page_up();
-                } else {
-                    self.iam_state.roles.page_up();
-                }
+                crate::iam::actions::page_up_normal_roles(self);
             }
         }
     }
@@ -4505,57 +3864,11 @@ impl App {
         {
             self.cfn_state.resources.toggle_expand();
         } else if self.current_service == Service::IamUsers {
-            if self.iam_state.current_user.is_some() {
-                if self.iam_state.user_tab == UserTab::Tags {
-                    if self.iam_state.user_tags.expanded_item
-                        != Some(self.iam_state.user_tags.selected)
-                    {
-                        self.iam_state.user_tags.expanded_item =
-                            Some(self.iam_state.user_tags.selected);
-                    }
-                } else if self.iam_state.policies.expanded_item
-                    != Some(self.iam_state.policies.selected)
-                {
-                    self.iam_state.policies.toggle_expand();
-                }
-            } else if !self.iam_state.users.is_expanded() {
-                self.iam_state.users.toggle_expand();
-            }
+            crate::iam::actions::expand_row_users(self);
         } else if self.current_service == Service::IamRoles {
-            if self.iam_state.current_role.is_some() {
-                // Handle expansion based on current tab
-                if self.iam_state.role_tab == RoleTab::Tags {
-                    if !self.iam_state.tags.is_expanded() {
-                        self.iam_state.tags.expand();
-                    }
-                } else if self.iam_state.role_tab == RoleTab::LastAccessed {
-                    if !self.iam_state.last_accessed_services.is_expanded() {
-                        self.iam_state.last_accessed_services.expand();
-                    }
-                } else if !self.iam_state.policies.is_expanded() {
-                    self.iam_state.policies.expand();
-                }
-            } else if !self.iam_state.roles.is_expanded() {
-                self.iam_state.roles.expand();
-            }
+            crate::iam::actions::expand_row_roles(self);
         } else if self.current_service == Service::IamUserGroups {
-            if self.iam_state.current_group.is_some() {
-                if self.iam_state.group_tab == GroupTab::Users {
-                    if !self.iam_state.group_users.is_expanded() {
-                        self.iam_state.group_users.expand();
-                    }
-                } else if self.iam_state.group_tab == GroupTab::Permissions {
-                    if !self.iam_state.policies.is_expanded() {
-                        self.iam_state.policies.expand();
-                    }
-                } else if self.iam_state.group_tab == GroupTab::AccessAdvisor
-                    && !self.iam_state.last_accessed_services.is_expanded()
-                {
-                    self.iam_state.last_accessed_services.expand();
-                }
-            } else if !self.iam_state.groups.is_expanded() {
-                self.iam_state.groups.expand();
-            }
+            crate::iam::actions::expand_row_groups(self);
         }
     }
 
@@ -4604,12 +3917,10 @@ impl App {
                 crate::cfn::actions::go_to_page(self, page);
             }
             Service::IamUsers => {
-                let filtered_count = filtered_iam_users(self).len();
-                self.iam_state.users.goto_page(page, filtered_count);
+                crate::iam::actions::go_to_page_users(self, page);
             }
             Service::IamRoles => {
-                let filtered_count = filtered_iam_roles(self).len();
-                self.iam_state.roles.goto_page(page, filtered_count);
+                crate::iam::actions::go_to_page_roles(self, page);
             }
             _ => {}
         }
@@ -4646,57 +3957,11 @@ impl App {
         } else if self.current_service == Service::CloudFormationStacks {
             crate::cfn::actions::prev_pane(self);
         } else if self.current_service == Service::IamUsers {
-            if self.iam_state.users.has_expanded_item() {
-                self.iam_state.users.collapse();
-            }
+            crate::iam::actions::prev_pane_users(self);
         } else if self.current_service == Service::IamRoles {
-            if self.view_mode == ViewMode::PolicyView {
-                // Go back from policy view to role detail
-                self.view_mode = ViewMode::Detail;
-                self.iam_state.current_policy = None;
-                self.iam_state.policy_document.clear();
-                self.iam_state.policy_scroll = 0;
-            } else if self.iam_state.current_role.is_some() {
-                if self.iam_state.role_tab == RoleTab::Tags
-                    && self.iam_state.tags.has_expanded_item()
-                {
-                    self.iam_state.tags.collapse();
-                } else if self.iam_state.role_tab == RoleTab::LastAccessed
-                    && self
-                        .iam_state
-                        .last_accessed_services
-                        .expanded_item
-                        .is_some()
-                {
-                    self.iam_state.last_accessed_services.collapse();
-                } else if self.iam_state.policies.has_expanded_item() {
-                    self.iam_state.policies.collapse();
-                }
-            } else if self.iam_state.roles.has_expanded_item() {
-                self.iam_state.roles.collapse();
-            }
+            crate::iam::actions::prev_pane_roles(self);
         } else if self.current_service == Service::IamUserGroups {
-            if self.iam_state.current_group.is_some() {
-                if self.iam_state.group_tab == GroupTab::Users
-                    && self.iam_state.group_users.has_expanded_item()
-                {
-                    self.iam_state.group_users.collapse();
-                } else if self.iam_state.group_tab == GroupTab::Permissions
-                    && self.iam_state.policies.has_expanded_item()
-                {
-                    self.iam_state.policies.collapse();
-                } else if self.iam_state.group_tab == GroupTab::AccessAdvisor
-                    && self
-                        .iam_state
-                        .last_accessed_services
-                        .expanded_item
-                        .is_some()
-                {
-                    self.iam_state.last_accessed_services.collapse();
-                }
-            } else if self.iam_state.groups.has_expanded_item() {
-                self.iam_state.groups.collapse();
-            }
+            crate::iam::actions::prev_pane_groups(self);
         }
     }
 
@@ -4722,39 +3987,14 @@ impl App {
                 crate::cfn::actions::collapse_row(self);
             }
             Service::IamUsers => {
-                if self.iam_state.current_user.is_some() {
-                    match self.iam_state.user_tab {
-                        crate::ui::iam::UserTab::Permissions => {
-                            self.iam_state.policies.collapse();
-                        }
-                        crate::ui::iam::UserTab::Groups => {
-                            self.iam_state.user_group_memberships.collapse();
-                        }
-                        crate::ui::iam::UserTab::Tags => {
-                            self.iam_state.user_tags.collapse();
-                        }
-                        _ => {}
-                    }
-                } else {
-                    self.iam_state.users.collapse();
-                }
+                crate::iam::actions::collapse_row_users(self);
             }
             Service::IamRoles => {
-                if self.iam_state.current_role.is_some() {
-                    match self.iam_state.role_tab {
-                        crate::ui::iam::RoleTab::Permissions => {
-                            self.iam_state.policies.collapse();
-                        }
-                        crate::ui::iam::RoleTab::Tags => {
-                            self.iam_state.tags.collapse();
-                        }
-                        _ => {}
-                    }
-                } else {
-                    self.iam_state.roles.collapse();
-                }
+                crate::iam::actions::collapse_row_roles(self);
             }
-            Service::IamUserGroups => self.iam_state.groups.collapse(),
+            Service::IamUserGroups => {
+                crate::iam::actions::collapse_row_groups(self);
+            }
             Service::ApiGatewayApis => {
                 crate::apig::actions::collapse_row(self);
             }
@@ -5071,71 +4311,11 @@ impl App {
             } else if self.current_service == Service::SqsQueues {
                 crate::sqs::actions::select_item(self);
             } else if self.current_service == Service::IamUsers {
-                if self.iam_state.current_user.is_some() {
-                    // Open policy view only when in Permissions tab
-                    if self.iam_state.user_tab == UserTab::Permissions {
-                        let filtered = filtered_iam_policies(self);
-                        if let Some(policy) = self.iam_state.policies.get_selected(&filtered) {
-                            self.iam_state.current_policy = Some(policy.policy_name.clone());
-                            self.iam_state.policy_scroll = 0;
-                            self.view_mode = ViewMode::PolicyView;
-                            self.iam_state.policies.loading = true;
-                            self.update_current_tab_breadcrumb();
-                        }
-                    }
-                } else if self.iam_state.current_user.is_none() {
-                    let filtered_users = filtered_iam_users(self);
-                    if let Some(user) = self.iam_state.users.get_selected(&filtered_users) {
-                        self.iam_state.current_user = Some(user.user_name.clone());
-                        self.iam_state.user_tab = UserTab::Permissions;
-                        self.iam_state.policies.reset();
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::iam::actions::select_item_users(self);
             } else if self.current_service == Service::IamRoles {
-                if self.iam_state.current_role.is_some() {
-                    // Open policy view only when in Permissions tab
-                    if self.iam_state.role_tab == RoleTab::Permissions {
-                        let filtered = filtered_iam_policies(self);
-                        if let Some(policy) = self.iam_state.policies.get_selected(&filtered) {
-                            self.iam_state.current_policy = Some(policy.policy_name.clone());
-                            self.iam_state.policy_scroll = 0;
-                            self.view_mode = ViewMode::PolicyView;
-                            self.iam_state.policies.loading = true;
-                            self.update_current_tab_breadcrumb();
-                        }
-                    }
-                } else if self.iam_state.current_role.is_none() {
-                    let filtered_roles = filtered_iam_roles(self);
-                    if let Some(role) = self.iam_state.roles.get_selected(&filtered_roles) {
-                        self.iam_state.current_role = Some(role.role_name.clone());
-                        self.iam_state.role_tab = RoleTab::Permissions;
-                        self.iam_state.policies.reset();
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::iam::actions::select_item_roles(self);
             } else if self.current_service == Service::IamUserGroups {
-                if self.iam_state.current_group.is_none() {
-                    let filtered_groups: Vec<_> = self
-                        .iam_state
-                        .groups
-                        .items
-                        .iter()
-                        .filter(|g| {
-                            if self.iam_state.groups.filter.is_empty() {
-                                true
-                            } else {
-                                g.group_name
-                                    .to_lowercase()
-                                    .contains(&self.iam_state.groups.filter.to_lowercase())
-                            }
-                        })
-                        .collect();
-                    if let Some(group) = self.iam_state.groups.get_selected(&filtered_groups) {
-                        self.iam_state.current_group = Some(group.group_name.clone());
-                        self.update_current_tab_breadcrumb();
-                    }
-                }
+                crate::iam::actions::select_item_groups(self);
             } else if self.current_service == Service::LambdaFunctions {
                 crate::lambda::functions::select_item(self);
             } else if self.current_service == Service::LambdaApplications {
@@ -9101,6 +8281,29 @@ mod iam_policy_view_tests {
             inline.creation_time, "-",
             "Inline policies have no creation time"
         );
+    }
+
+    #[test]
+    fn test_yank_in_policy_view_copies_document_not_arn() {
+        // In PolicyView, 'y' must copy the policy JSON, not the role ARN.
+        let mut app = test_app();
+        app.current_service = Service::IamRoles;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.view_mode = ViewMode::PolicyView;
+        app.iam_state.current_role = Some("TestRole".to_string());
+        app.iam_state.current_policy = Some("TestPolicy".to_string());
+
+        let policy_json = "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": []\n}".to_string();
+        app.iam_state.policy_document = policy_json.clone();
+
+        // Call yank_roles — it must read policy_document when view_mode == PolicyView.
+        use crate::iam::actions::yank_roles;
+        yank_roles(&app);
+
+        // State must be unchanged after yank (clipboard is a side-effect we can't inspect in tests)
+        assert_eq!(app.iam_state.policy_document, policy_json);
+        assert_eq!(app.view_mode, ViewMode::PolicyView);
     }
 }
 

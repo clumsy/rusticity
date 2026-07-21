@@ -602,7 +602,12 @@ pub fn prev_pane_users(app: &mut App) {
 }
 
 pub fn prev_pane_roles(app: &mut App) {
-    if app.iam_state.current_role.is_some() {
+    if app.view_mode == crate::app::ViewMode::PolicyView {
+        app.view_mode = crate::app::ViewMode::Detail;
+        app.iam_state.current_policy = None;
+        app.iam_state.policy_document.clear();
+        app.iam_state.policy_scroll = 0;
+    } else if app.iam_state.current_role.is_some() {
         if app.iam_state.role_tab == RoleTab::Tags && app.iam_state.tags.has_expanded_item() {
             app.iam_state.tags.collapse();
         } else if app.iam_state.role_tab == RoleTab::LastAccessed
@@ -800,6 +805,13 @@ pub fn select_item_groups(app: &mut App) {
 
 pub fn yank_users(app: &App) {
     use crate::app::copy_to_clipboard;
+    // In policy view, copy the policy document JSON
+    if app.view_mode == crate::app::ViewMode::PolicyView {
+        if !app.iam_state.policy_document.is_empty() {
+            copy_to_clipboard(&app.iam_state.policy_document);
+        }
+        return;
+    }
     if app.iam_state.current_user.is_some() {
         if let Some(user_name) = &app.iam_state.current_user {
             if let Some(user) = app
@@ -822,6 +834,13 @@ pub fn yank_users(app: &App) {
 
 pub fn yank_roles(app: &App) {
     use crate::app::copy_to_clipboard;
+    // In policy view, copy the policy document JSON
+    if app.view_mode == crate::app::ViewMode::PolicyView {
+        if !app.iam_state.policy_document.is_empty() {
+            copy_to_clipboard(&app.iam_state.policy_document);
+        }
+        return;
+    }
     if app.iam_state.current_role.is_some() {
         if let Some(role_name) = &app.iam_state.current_role {
             if let Some(role) = app

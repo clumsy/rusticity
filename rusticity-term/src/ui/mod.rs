@@ -80,9 +80,11 @@ use ratatui::text::{Line, Span};
 pub fn labeled_field(label: &str, value: impl Into<String>) -> Line<'static> {
     let val = value.into();
     let display = if val.is_empty() { "-".to_string() } else { val };
+    // Strip trailing ": " or ":" so callers that already include it don't double up
+    let clean_label = label.trim_end_matches(": ").trim_end_matches(':');
     Line::from(vec![
         Span::styled(
-            format!("{}: ", label),
+            format!("{}: ", clean_label),
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(display),
@@ -6978,5 +6980,43 @@ mod tests {
             narrow_height >= wide_height,
             "Wide layout should use as few or fewer rows than narrow: wide={wide_height} narrow={narrow_height}"
         );
+    }
+
+    #[test]
+    fn test_labeled_field_no_double_colon_with_trailing_colon_label() {
+        // Labels passed with trailing ": " must NOT produce "Label: : value"
+        let line = labeled_field("ARN: ", "some-arn");
+        let label_span = &line.spans[0];
+        assert_eq!(
+            label_span.content, "ARN: ",
+            "label should be 'ARN: ' not 'ARN: : '"
+        );
+        assert!(
+            !label_span.content.contains(": :"),
+            "double colon must not appear: {:?}",
+            label_span.content
+        );
+    }
+
+    #[test]
+    fn test_labeled_field_no_double_colon_without_trailing_colon() {
+        // Labels without ": " should still get ": " appended
+        let line = labeled_field("Last modified", "2024-01-01");
+        let label_span = &line.spans[0];
+        assert_eq!(label_span.content, "Last modified: ");
+    }
+
+    #[test]
+    fn test_labeled_field_with_colon_only() {
+        let line = labeled_field("Status:", "active");
+        let label_span = &line.spans[0];
+        assert_eq!(label_span.content, "Status: ");
+    }
+
+    #[test]
+    fn test_labeled_field_empty_value_shows_dash() {
+        let line = labeled_field("Description: ", "");
+        let value_span = &line.spans[1];
+        assert_eq!(value_span.content, "-");
     }
 }

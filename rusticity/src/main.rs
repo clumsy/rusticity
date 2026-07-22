@@ -42,8 +42,21 @@ async fn main() -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        // Any service loading → animate the spinner via periodic redraws
+        let any_loading = app.log_groups_state.loading
+            || app.kms_state.keys.loading
+            || app.ecr_state.repositories.loading
+            || app.ec2_state.table.loading
+            || app.cfn_state.table.loading
+            || app.lambda_state.table.loading
+            || app.lambda_application_state.table.loading
+            || app.alarms_state.table.loading
+            || app.cloudtrail_state.table.loading
+            || app.apig_state.apis.loading
+            || app.sqs_state.queues.loading;
+
         tokio::select! {
-            _ = tick_interval.tick(), if app.log_groups_state.loading => {
+            _ = tick_interval.tick(), if any_loading => {
                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
             }
             event = async { events.next() } => {
@@ -93,6 +106,9 @@ async fn main() -> Result<()> {
                         let prev_current_group = app.iam_state.current_group.clone();
                         let prev_lambda_function = app.lambda_state.current_function.clone();
                         let prev_lambda_tab = app.lambda_state.detail_tab;
+                        // Save tabs before handle_action — region change clears them
+                        let prev_tabs = app.tabs.clone();
+                        let prev_current_tab = app.current_tab;
 
                         app.handle_action(action);
 
@@ -493,6 +509,7 @@ async fn main() -> Result<()> {
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.kms_state.keys.loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
                         // Load API Gateway APIs when service is switched to, empty, or loading
@@ -991,6 +1008,9 @@ async fn main() -> Result<()> {
                                             rusticity_term::app::Service::EcrRepositories => {
                                                 new_app.ecr_state.repositories.loading = true;
                                             }
+                                            rusticity_term::app::Service::KmsKeys => {
+                                                new_app.kms_state.keys.loading = true;
+                                            }
                                             rusticity_term::app::Service::LambdaFunctions => {
                                                 new_app.lambda_state.table.loading = true;
                                             }
@@ -1005,6 +1025,9 @@ async fn main() -> Result<()> {
                                                 new_app.log_groups_state.loading = true;
                                             }
                                         }
+                                        // Restore session tabs so they remain visible after region change
+                                        new_app.tabs = prev_tabs;
+                                        new_app.current_tab = prev_current_tab;
                                     }
                                     app = new_app;
                                 },

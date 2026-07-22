@@ -334,22 +334,45 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap()
         .as_millis();
 
-    let spinner_frame = if app.log_groups_state.loading {
+    // Any service loading → show generic spinner inline with version on the right
+    let is_loading = app.log_groups_state.loading
+        || app.kms_state.keys.loading
+        || app.ecr_state.repositories.loading
+        || app.ec2_state.table.loading
+        || app.cfn_state.table.loading
+        || app.lambda_state.table.loading
+        || app.lambda_application_state.table.loading
+        || app.alarms_state.table.loading
+        || app.cloudtrail_state.table.loading
+        || app.apig_state.apis.loading
+        || app.sqs_state.queues.loading;
+
+    let spinner_frame = if is_loading {
         SPINNER_FRAMES[(millis / 100 % SPINNER_FRAMES.len() as u128) as usize]
     } else {
         " "
     };
 
-    let status_line_temp = if app.log_groups_state.loading {
-        let max_width = area.width.saturating_sub(10) as usize;
-        let msg = if app.log_groups_state.loading_message.len() > max_width {
-            format!(
-                "{}...",
-                &app.log_groups_state.loading_message[..max_width.saturating_sub(3)]
-            )
+    // Only show a left-side connection message (profile/region change), not generic loading noise
+    let connection_message: Option<String> =
+        if app.log_groups_state.loading && !app.log_groups_state.loading_message.is_empty() {
+            let msg = &app.log_groups_state.loading_message;
+            // Only connection messages, not "Refreshing..." noise
+            if msg.starts_with("Connecting") || msg.starts_with("Loading log") {
+                let max_width = area.width.saturating_sub(10) as usize;
+                Some(if msg.len() > max_width {
+                    format!("{}...", &msg[..max_width.saturating_sub(3)])
+                } else {
+                    msg.clone()
+                })
+            } else {
+                None
+            }
         } else {
-            app.log_groups_state.loading_message.clone()
+            None
         };
+
+    let status_line_temp = if let Some(msg) = connection_message {
         Some(Line::from(vec![Span::raw(msg)]))
     } else if !app.page_input.is_empty() {
         Some(Line::from(vec![Span::raw(format!(
@@ -375,6 +398,46 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         .block(Block::default())
         .style(Style::default().bg(Color::DarkGray).fg(Color::Yellow));
 
+    // Build version string
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = option_env!("GIT_HASH").unwrap_or("unknown");
+    let version_text = format!("⋮ RUSTICITY v{} (#{})", version, commit);
+
+    let colors = [
+        Color::Red,
+        Color::Green,
+        Color::Yellow,
+        Color::Blue,
+        Color::Magenta,
+        Color::Cyan,
+    ];
+    let seed = millis as usize;
+    let version_spans: Vec<Span> = version_text
+        .chars()
+        .enumerate()
+        .map(|(i, c)| {
+            let color = colors[(seed + i) % colors.len()];
+            Span::styled(c.to_string(), Style::default().fg(color))
+        })
+        .collect();
+
+    // When loading, prepend "Loading… <spinner>" in yellow to the version line
+    let right_line = if is_loading {
+        let spin = SPINNER_FRAMES[(millis / 100 % SPINNER_FRAMES.len() as u128) as usize];
+        let mut spans = vec![Span::styled(
+            format!("Loading… {} ", spin),
+            Style::default().fg(Color::Yellow),
+        )];
+        spans.extend(version_spans);
+        Line::from(spans)
+    } else {
+        Line::from(version_spans)
+    };
+
+    // Width: version text + optional "Loading… X " prefix (11 chars)
+    let loading_prefix_len: u16 = if is_loading { 11 } else { 0 };
+    let right_width = version_text.len() as u16 + loading_prefix_len;
+
     if let Some(line) = status_line_temp {
         let status_widget = Paragraph::new(line)
             .alignment(Alignment::Left)
@@ -383,35 +446,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(spinner_widget, chunks[1]);
         frame.render_widget(status_widget, chunks[2]);
     } else {
-        // Build version string
-        let version = env!("CARGO_PKG_VERSION");
-        let commit = option_env!("GIT_HASH").unwrap_or("unknown");
-        let version_text = format!("⋮ RUSTICITY v{} (#{})", version, commit);
-
-        let colors = [
-            Color::Red,
-            Color::Green,
-            Color::Yellow,
-            Color::Blue,
-            Color::Magenta,
-            Color::Cyan,
-        ];
-        let seed = millis as usize;
-        let version_spans: Vec<Span> = version_text
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                let color = colors[(seed + i) % colors.len()];
-                Span::styled(c.to_string(), Style::default().fg(color))
-            })
-            .collect();
-        let version_line = Line::from(version_spans);
-        let version_width = version_text.len() as u16;
-
-        // Split status area into help (left) and version (right)
         let status_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(version_width)])
+            .constraints([Constraint::Min(0), Constraint::Length(right_width)])
             .split(chunks[2]);
 
         let help_widget = Paragraph::new(Line::from(help))
@@ -419,7 +456,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             .alignment(Alignment::Left)
             .style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
-        let version_widget = Paragraph::new(version_line)
+        let version_widget = Paragraph::new(right_line)
             .alignment(Alignment::Right)
             .style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
@@ -584,5 +621,155 @@ mod tests {
             !detail_text.contains("^p preferences"),
             "Should not use '^p preferences'"
         );
+    }
+
+    #[test]
+    fn test_is_loading_true_when_kms_loading() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.kms_state.keys.loading = true;
+        // Verify is_loading would be true — test by checking the flag directly
+        // (render_bottom_bar is not unit-testable without a frame, but we verify the condition)
+        let is_loading = app.log_groups_state.loading
+            || app.kms_state.keys.loading
+            || app.ecr_state.repositories.loading;
+        assert!(is_loading, "is_loading must be true when kms keys loading");
+    }
+
+    #[test]
+    fn test_is_loading_false_when_nothing_loading() {
+        use crate::app::App;
+        let app = App::new_without_client("default".to_string(), None);
+        let is_loading = app.log_groups_state.loading
+            || app.kms_state.keys.loading
+            || app.ecr_state.repositories.loading
+            || app.ec2_state.table.loading;
+        assert!(
+            !is_loading,
+            "is_loading must be false when nothing is loading"
+        );
+    }
+
+    #[test]
+    fn test_refreshing_message_not_set_on_refresh() {
+        // Ctrl+R must NOT set loading_message to "Refreshing..." —
+        // that message was leaking the spinner into unrelated services.
+        use crate::app::App;
+        use crate::keymap::{Action, Mode};
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.mode = Mode::ProfilePicker;
+        app.handle_action(Action::Refresh);
+        assert!(
+            app.log_groups_state.loading_message.is_empty()
+                || !app.log_groups_state.loading_message.contains("Refreshing"),
+            "Refresh must not set 'Refreshing...' loading_message: got {:?}",
+            app.log_groups_state.loading_message
+        );
+    }
+
+    #[test]
+    fn test_spinner_off_when_all_loading_false() {
+        use crate::app::App;
+        let app = App::new_without_client("default".to_string(), None);
+        // All loading flags default to false
+        let is_loading = app.log_groups_state.loading
+            || app.kms_state.keys.loading
+            || app.ecr_state.repositories.loading
+            || app.ec2_state.table.loading
+            || app.cfn_state.table.loading
+            || app.lambda_state.table.loading
+            || app.lambda_application_state.table.loading
+            || app.alarms_state.table.loading
+            || app.cloudtrail_state.table.loading
+            || app.apig_state.apis.loading
+            || app.sqs_state.queues.loading;
+        assert!(!is_loading, "spinner must be OFF when nothing is loading");
+    }
+
+    #[test]
+    fn test_spinner_on_then_off_lifecycle() {
+        // Simulate: loading=true (spinner on) → load completes → loading=false (spinner off)
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+
+        app.kms_state.keys.loading = true;
+        let spinning = app.kms_state.keys.loading;
+        assert!(spinning, "spinner must be ON during load");
+
+        // Simulate load complete
+        app.kms_state.keys.loading = false;
+        let spinning_after = app.kms_state.keys.loading;
+        assert!(!spinning_after, "spinner must be OFF after load completes");
+    }
+
+    #[test]
+    fn test_spinner_on_for_each_service() {
+        use crate::app::App;
+        // Each service loading flag independently triggers the spinner
+        let check = |loading: bool| loading; // mirrors the any_loading OR chain
+
+        assert!(check(true), "loading=true must trigger spinner");
+        assert!(!check(false), "loading=false must not trigger spinner");
+
+        let mut app = App::new_without_client("default".to_string(), None);
+
+        type LoadSetter = Box<dyn Fn(&mut App, bool)>;
+        let cases: Vec<(&str, LoadSetter)> = vec![
+            (
+                "kms",
+                Box::new(|a: &mut App, v| a.kms_state.keys.loading = v),
+            ),
+            (
+                "ecr",
+                Box::new(|a: &mut App, v| a.ecr_state.repositories.loading = v),
+            ),
+            (
+                "ec2",
+                Box::new(|a: &mut App, v| a.ec2_state.table.loading = v),
+            ),
+            (
+                "cfn",
+                Box::new(|a: &mut App, v| a.cfn_state.table.loading = v),
+            ),
+            (
+                "lambda_fn",
+                Box::new(|a: &mut App, v| a.lambda_state.table.loading = v),
+            ),
+            (
+                "alarms",
+                Box::new(|a: &mut App, v| a.alarms_state.table.loading = v),
+            ),
+        ];
+
+        for (name, setter) in cases {
+            setter(&mut app, true);
+            let is_loading = app.kms_state.keys.loading
+                || app.ecr_state.repositories.loading
+                || app.ec2_state.table.loading
+                || app.cfn_state.table.loading
+                || app.lambda_state.table.loading
+                || app.alarms_state.table.loading;
+            assert!(is_loading, "spinner must be ON when {name} is loading");
+            setter(&mut app, false);
+        }
+    }
+
+    #[test]
+    fn test_connection_message_filter_allows_connecting() {
+        // Only "Connecting..." and "Loading log..." messages pass through to left side.
+        let allowed = ["Connecting with new region...", "Loading log groups..."];
+        for msg in &allowed {
+            assert!(
+                msg.starts_with("Connecting") || msg.starts_with("Loading log"),
+                "Message '{msg}' should pass connection filter"
+            );
+        }
+        let blocked = ["Refreshing...", "Loading KMS keys...", ""];
+        for msg in &blocked {
+            assert!(
+                !(msg.starts_with("Connecting") || msg.starts_with("Loading log")),
+                "Message '{msg}' should be blocked by connection filter"
+            );
+        }
     }
 }

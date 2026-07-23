@@ -53,6 +53,7 @@ async fn main() -> Result<()> {
             || app.alarms_state.table.loading
             || app.cloudtrail_state.table.loading
             || app.apig_state.apis.loading
+            || app.efs_state.file_systems.loading
             || app.sqs_state.queues.loading;
 
         tokio::select! {
@@ -237,6 +238,91 @@ async fn main() -> Result<()> {
                                 }
                             }
                             app.sqs_state.metrics_loading = false;
+                        }
+
+                        // Load EFS metrics when viewing file system detail on monitoring tab
+                        if app.current_service == Service::EfsFileSystems
+                            && app.efs_state.current_file_system.is_some()
+                            && app.efs_state.detail_tab == rusticity_term::ui::efs::DetailTab::Monitoring
+                            && app.efs_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.efs_state.current_file_system.clone() {
+                                if let Err(e) = rusticity_term::ui::efs::load_metrics(&mut app, &fs_id).await {
+                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.efs_state.metrics_loading = false;
+                        }
+
+                        // Load EFS file system policy when viewing the policy tab
+                        if app.current_service == Service::EfsFileSystems
+                            && app.efs_state.current_file_system.is_some()
+                            && app.efs_state.detail_tab == rusticity_term::ui::efs::DetailTab::FileSystemPolicy
+                            && app.efs_state.policy_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.efs_state.current_file_system.clone() {
+                                if let Err(e) = rusticity_term::ui::efs::load_policy(&mut app, &fs_id).await {
+                                    app.error_message = Some(format!("Failed to load file system policy: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.efs_state.policy_loading = false;
+                        }
+
+                        // Load EFS access points when viewing the access points tab
+                        if app.current_service == Service::EfsFileSystems
+                            && app.efs_state.current_file_system.is_some()
+                            && app.efs_state.detail_tab == rusticity_term::ui::efs::DetailTab::AccessPoints
+                            && app.efs_state.ap_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.efs_state.current_file_system.clone() {
+                                if let Err(e) = rusticity_term::ui::efs::load_access_points(&mut app, &fs_id).await {
+                                    app.error_message = Some(format!("Failed to load access points: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.efs_state.ap_loading = false;
+                        }
+
+                        // Load EFS mount targets when viewing the Network tab
+                        if app.current_service == Service::EfsFileSystems
+                            && app.efs_state.current_file_system.is_some()
+                            && app.efs_state.detail_tab == rusticity_term::ui::efs::DetailTab::Network
+                            && app.efs_state.mt_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.efs_state.current_file_system.clone() {
+                                if let Err(e) = rusticity_term::ui::efs::load_mount_targets(&mut app, &fs_id).await {
+                                    app.error_message = Some(format!("Failed to load mount targets: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.efs_state.mt_loading = false;
+                        }
+
+                        // Load EFS replication config when viewing the Replication tab
+                        if app.current_service == Service::EfsFileSystems
+                            && app.efs_state.current_file_system.is_some()
+                            && app.efs_state.detail_tab == rusticity_term::ui::efs::DetailTab::Replication
+                            && app.efs_state.replication_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.efs_state.current_file_system.clone() {
+                                if let Err(e) = rusticity_term::ui::efs::load_replication(&mut app, &fs_id).await {
+                                    app.error_message = Some(format!("Failed to load replication: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.efs_state.replication_loading = false;
                         }
 
                         // Load EventBridge Pipes when tab is switched
@@ -509,6 +595,21 @@ async fn main() -> Result<()> {
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.kms_state.keys.loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        // Load EFS file systems when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::EfsFileSystems
+                            && ((!prev_service_selected || prev_service != Service::EfsFileSystems)
+                                || app.efs_state.file_systems.loading) {
+                            app.efs_state.file_systems.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_efs_file_systems().await {
+                                app.error_message = Some(format!("Failed to load EFS file systems: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.efs_state.file_systems.loading = false;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
@@ -1010,6 +1111,9 @@ async fn main() -> Result<()> {
                                             }
                                             rusticity_term::app::Service::KmsKeys => {
                                                 new_app.kms_state.keys.loading = true;
+                                            }
+                                            rusticity_term::app::Service::EfsFileSystems => {
+                                                new_app.efs_state.file_systems.loading = true;
                                             }
                                             rusticity_term::app::Service::LambdaFunctions => {
                                                 new_app.lambda_state.table.loading = true;

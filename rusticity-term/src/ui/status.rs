@@ -345,6 +345,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.alarms_state.table.loading
         || app.cloudtrail_state.table.loading
         || app.apig_state.apis.loading
+        || app.efs_state.file_systems.loading
         || app.sqs_state.queues.loading;
 
     let spinner_frame = if is_loading {

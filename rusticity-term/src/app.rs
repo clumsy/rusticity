@@ -11,6 +11,7 @@ pub use crate::cw::{Alarm, AlarmColumn};
 pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
+use crate::efs::fs::{Column as EfsColumn, FileSystem as EfsFileSystem};
 use crate::iam::{
     GroupUser as IamGroupUser, Policy as IamPolicy, RoleColumn, RoleTag as IamRoleTag, UserColumn,
     UserTag as IamUserTag,
@@ -59,6 +60,7 @@ pub use crate::ui::ecr::{
     filtered_ecr_images, filtered_ecr_repositories, State as EcrState, Tab as EcrTab,
     FILTER_CONTROLS as ECR_FILTER_CONTROLS,
 };
+pub use crate::ui::efs::State as EfsState;
 use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
 pub use crate::ui::kms::{State as KmsState, Tab as KmsTab};
 pub use crate::ui::lambda::{
@@ -85,8 +87,8 @@ pub use crate::ui::{
 use rusticity_core::LogStream;
 use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
-    CloudWatchClient, Ec2Client, EcrClient, IamClient, KmsClient, LambdaClient, S3Client,
-    SqsClient,
+    CloudWatchClient, Ec2Client, EcrClient, EfsClient, IamClient, KmsClient, LambdaClient,
+    S3Client, SqsClient,
 };
 
 #[derive(Clone)]
@@ -108,6 +110,7 @@ pub struct App {
     pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
     pub kms_client: KmsClient,
+    pub efs_client: EfsClient,
     pub apig_client: ApiGatewayClient,
     pub iam_client: IamClient,
     pub lambda_client: LambdaClient,
@@ -127,6 +130,7 @@ pub struct App {
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub kms_state: KmsState,
+    pub efs_state: EfsState,
     pub apig_state: ApigState,
     pub lambda_state: LambdaState,
     pub lambda_application_state: LambdaApplicationState,
@@ -163,6 +167,8 @@ pub struct App {
     pub ecr_repo_column_ids: Vec<ColumnId>,
     pub ecr_image_visible_column_ids: Vec<ColumnId>,
     pub ecr_image_column_ids: Vec<ColumnId>,
+    pub efs_visible_column_ids: Vec<ColumnId>,
+    pub efs_column_ids: Vec<ColumnId>,
     pub apig_api_visible_column_ids: Vec<ColumnId>,
     pub apig_api_column_ids: Vec<ColumnId>,
     pub apig_route_visible_column_ids: Vec<ColumnId>,
@@ -313,6 +319,7 @@ pub enum Service {
     Ec2Instances,
     EcrRepositories,
     KmsKeys,
+    EfsFileSystems,
     LambdaFunctions,
     LambdaApplications,
     CloudFormationStacks,
@@ -334,6 +341,7 @@ impl Service {
             Service::Ec2Instances => "EC2 › Instances",
             Service::EcrRepositories => "ECR › Repositories",
             Service::KmsKeys => "KMS › Managed Keys",
+            Service::EfsFileSystems => "EFS › File Systems",
             Service::LambdaFunctions => "Lambda › Functions",
             Service::LambdaApplications => "Lambda › Applications",
             Service::CloudFormationStacks => "CloudFormation › Stacks",
@@ -477,6 +485,8 @@ impl App {
             crate::lambda::applications::get_active_filter_mut(self)
         } else if self.current_service == Service::KmsKeys {
             crate::kms::actions::get_active_filter_mut(self)
+        } else if self.current_service == Service::EfsFileSystems {
+            crate::efs::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudFormationStacks {
             if self.cfn_state.current_stack.is_some()
                 && self.cfn_state.detail_tab == CfnDetailTab::Resources
@@ -549,6 +559,8 @@ impl App {
                 crate::ecr::actions::apply_filter_reset(self);
             } else if self.current_service == Service::KmsKeys {
                 crate::kms::actions::apply_filter_reset(self);
+            } else if self.current_service == Service::EfsFileSystems {
+                crate::efs::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
                 crate::sqs::actions::apply_filter_reset(self);
             } else if self.current_service == Service::LambdaFunctions {
@@ -592,6 +604,7 @@ impl App {
         let apig_client = ApiGatewayClient::new(config.clone());
         let iam_client = IamClient::new(config.clone());
         let kms_client = KmsClient::new(config.clone());
+        let efs_client = EfsClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
         let cloudformation_client = CloudFormationClient::new(config.clone());
         let region_name = config.region.clone();
@@ -608,6 +621,7 @@ impl App {
             ec2_client,
             ecr_client,
             kms_client,
+            efs_client,
             apig_client,
             iam_client,
             lambda_client,
@@ -635,6 +649,7 @@ impl App {
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
+            efs_state: EfsState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -720,6 +735,8 @@ impl App {
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
             ecr_image_column_ids: EcrImageColumn::ids(),
+            efs_visible_column_ids: EfsColumn::default_visible_ids(),
+            efs_column_ids: EfsColumn::ids(),
             apig_api_visible_column_ids: ApigColumn::ids(),
             apig_api_column_ids: ApigColumn::ids(),
             apig_route_visible_column_ids: RouteColumn::all().iter().map(|c| c.id()).collect(),
@@ -825,6 +842,7 @@ impl App {
             ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
             kms_client: KmsClient::new(config.clone()),
+            efs_client: EfsClient::new(config.clone()),
             apig_client: ApiGatewayClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
             lambda_client: LambdaClient::new(config.clone()),
@@ -852,6 +870,7 @@ impl App {
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
+            efs_state: EfsState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
             lambda_application_state: LambdaApplicationState::new(),
@@ -938,6 +957,8 @@ impl App {
             ecr_repo_column_ids: EcrColumn::ids(),
             ecr_image_visible_column_ids: EcrImageColumn::ids(),
             ecr_image_column_ids: EcrImageColumn::ids(),
+            efs_visible_column_ids: EfsColumn::default_visible_ids(),
+            efs_column_ids: EfsColumn::ids(),
             lambda_application_visible_column_ids: LambdaApplicationColumn::visible(),
             lambda_application_column_ids: LambdaApplicationColumn::ids(),
             apig_api_visible_column_ids: ApigColumn::ids(),
@@ -1207,6 +1228,9 @@ impl App {
                     Service::KmsKeys => {
                         crate::kms::actions::apply_filter_reset(self);
                     }
+                    Service::EfsFileSystems => {
+                        crate::efs::actions::apply_filter_reset(self);
+                    }
                     Service::ApiGatewayApis => {
                         crate::apig::actions::apply_filter_reset(self);
                     }
@@ -1293,6 +1317,7 @@ impl App {
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "KmsKeys" => Service::KmsKeys,
+                            "EfsFileSystems" => Service::EfsFileSystems,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
                             "CloudFormationStacks" => Service::CloudFormationStacks,
@@ -1453,6 +1478,8 @@ impl App {
                         crate::ecr::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::KmsKeys {
                         crate::kms::actions::is_pagination_focused(self)
+                    } else if self.current_service == Service::EfsFileSystems {
+                        crate::efs::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::LambdaFunctions {
                         crate::lambda::functions::is_pagination_focused(self)
                     } else if self.current_service == Service::SqsQueues {
@@ -1835,6 +1862,8 @@ impl App {
                     crate::ecr::actions::toggle_column(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::toggle_column(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_column(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -1953,6 +1982,8 @@ impl App {
                     crate::ecr::actions::next_preferences(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::next_preferences(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::next_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::next_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2071,6 +2102,8 @@ impl App {
                     crate::ecr::actions::prev_preferences(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::prev_preferences(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2204,6 +2237,10 @@ impl App {
                     crate::ecr::actions::next_detail_tab(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::next_detail_tab(self);
+                } else if self.current_service == Service::EfsFileSystems
+                    && self.efs_state.current_file_system.is_some()
+                {
+                    crate::efs::actions::next_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -2259,6 +2296,10 @@ impl App {
                     crate::ecr::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::prev_detail_tab(self);
+                } else if self.current_service == Service::EfsFileSystems
+                    && self.efs_state.current_file_system.is_some()
+                {
+                    crate::efs::actions::prev_detail_tab(self);
                 } else if self.current_service == Service::LambdaFunctions
                     && self.lambda_state.current_function.is_some()
                 {
@@ -2288,6 +2329,7 @@ impl App {
                 } else if self.current_service == Service::ApiGatewayApis
                     || self.current_service == Service::EcrRepositories
                     || self.current_service == Service::KmsKeys
+                    || self.current_service == Service::EfsFileSystems
                     || self.current_service == Service::IamUsers
                     || self.current_service == Service::IamUserGroups
                 {
@@ -2300,6 +2342,8 @@ impl App {
                         self.ecr_state.input_focus = InputFocus::Filter;
                     } else if self.current_service == Service::KmsKeys {
                         crate::kms::actions::start_filter(self);
+                    } else if self.current_service == Service::EfsFileSystems {
+                        crate::efs::actions::start_filter(self);
                     }
                 } else if self.current_service == Service::LambdaFunctions {
                     self.mode = Mode::FilterInput;
@@ -2418,6 +2462,10 @@ impl App {
                 {
                     crate::kms::actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::EfsFileSystems
+                {
+                    crate::efs::actions::next_filter_focus(self);
+                } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
                     crate::lambda::functions::next_filter_focus(self);
@@ -2492,6 +2540,10 @@ impl App {
                 } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys
                 {
                     crate::kms::actions::prev_filter_focus(self);
+                } else if self.mode == Mode::FilterInput
+                    && self.current_service == Service::EfsFileSystems
+                {
+                    crate::efs::actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::LambdaFunctions
                 {
@@ -2596,6 +2648,13 @@ impl App {
                     self.sqs_state.set_monitoring_scroll(
                         self.sqs_state.monitoring_scroll().saturating_sub(1),
                     );
+                } else if self.current_service == Service::EfsFileSystems
+                    && self.efs_state.current_file_system.is_some()
+                    && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
+                        || self.efs_state.detail_tab == crate::ui::efs::DetailTab::FileSystemPolicy)
+                    && !self.efs_state.is_metrics_loading()
+                {
+                    crate::efs::actions::scroll_up_detail(self);
                 } else if self.view_mode == ViewMode::PolicyView {
                     crate::iam::actions::scroll_up_policy_view(self);
                 } else if self.current_service == Service::IamRoles
@@ -2654,6 +2713,12 @@ impl App {
                 {
                     self.sqs_state
                         .set_monitoring_scroll((self.sqs_state.monitoring_scroll() + 1).min(1));
+                } else if self.current_service == Service::EfsFileSystems
+                    && self.efs_state.current_file_system.is_some()
+                    && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
+                        || self.efs_state.detail_tab == crate::ui::efs::DetailTab::FileSystemPolicy)
+                {
+                    crate::efs::actions::scroll_down_detail(self);
                 } else if self.view_mode == ViewMode::PolicyView {
                     crate::iam::actions::scroll_down_policy_view(self);
                 } else if self.current_service == Service::IamRoles
@@ -2744,6 +2809,8 @@ impl App {
                     crate::ecr::actions::yank(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::yank(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::yank(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::yank(self);
                 } else if self.current_service == Service::CloudFormationStacks {
@@ -2914,6 +2981,10 @@ impl App {
                     && self.ecr_state.current_repository.is_some()
                 {
                     crate::ecr::actions::go_back(self);
+                } else if self.current_service == Service::EfsFileSystems
+                    && self.efs_state.current_file_system.is_some()
+                {
+                    crate::efs::actions::go_back(self);
                 }
                 // EC2: go back from instance detail to list
                 else if self.current_service == Service::Ec2Instances
@@ -3162,6 +3233,9 @@ impl App {
             Service::KmsKeys => {
                 parts.extend(crate::kms::actions::breadcrumb(self));
             }
+            Service::EfsFileSystems => {
+                parts.extend(crate::efs::actions::breadcrumb(self));
+            }
             Service::LambdaFunctions => {
                 parts.extend(crate::lambda::functions::breadcrumb(self));
             }
@@ -3249,6 +3323,7 @@ impl App {
             Service::SqsQueues => crate::sqs::actions::console_url(self),
             Service::EcrRepositories => crate::ecr::actions::console_url(self),
             Service::KmsKeys => crate::kms::actions::console_url(self),
+            Service::EfsFileSystems => crate::efs::actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
             Service::CloudFormationStacks => crate::cfn::actions::console_url(self),
@@ -3289,6 +3364,8 @@ impl App {
             crate::ecr::actions::column_selector_max(self)
         } else if self.current_service == Service::KmsKeys {
             crate::kms::actions::column_selector_max(self)
+        } else if self.current_service == Service::EfsFileSystems {
+            crate::efs::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_selector_max(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3327,6 +3404,8 @@ impl App {
             crate::ecr::actions::column_count(self)
         } else if self.current_service == Service::KmsKeys {
             crate::kms::actions::column_count(self)
+        } else if self.current_service == Service::EfsFileSystems {
+            crate::efs::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_count(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3475,6 +3554,8 @@ impl App {
                     crate::ecr::actions::next_item(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::next_item(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     crate::sqs::actions::next_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
@@ -3624,6 +3705,8 @@ impl App {
                     crate::ecr::actions::prev_item(self);
                 } else if self.current_service == Service::KmsKeys {
                     crate::kms::actions::prev_item(self);
+                } else if self.current_service == Service::EfsFileSystems {
+                    crate::efs::actions::prev_item(self);
                 } else if self.current_service == Service::SqsQueues {
                     crate::sqs::actions::prev_item(self);
                 } else if self.current_service == Service::LambdaFunctions {
@@ -3694,6 +3777,9 @@ impl App {
             crate::ecr::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys {
             crate::kms::actions::page_down_filter_input(self);
+        } else if self.mode == Mode::FilterInput && self.current_service == Service::EfsFileSystems
+        {
+            crate::efs::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.view_mode == ViewMode::PolicyView {
             crate::iam::actions::page_down_filter_input_policy_view(self);
         } else if self.view_mode == ViewMode::PolicyView {
@@ -3715,6 +3801,13 @@ impl App {
             && self.sqs_state.current_queue.is_some()
         {
             crate::sqs::actions::scroll_down_fast(self);
+        } else if self.current_service == Service::EfsFileSystems
+            && self.efs_state.current_file_system.is_some()
+            && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
+                || self.efs_state.detail_tab == crate::ui::efs::DetailTab::FileSystemPolicy)
+            && !self.efs_state.is_metrics_loading()
+        {
+            crate::efs::actions::scroll_down_detail(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -3750,6 +3843,8 @@ impl App {
                 crate::ecr::actions::page_down_normal(self);
             } else if self.current_service == Service::KmsKeys {
                 crate::kms::actions::page_down_normal(self);
+            } else if self.current_service == Service::EfsFileSystems {
+                crate::efs::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
                 crate::sqs::actions::page_down_normal(self);
             } else if self.current_service == Service::LambdaFunctions {
@@ -3812,6 +3907,9 @@ impl App {
             crate::lambda::applications::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::KmsKeys {
             crate::kms::actions::page_up_filter_input(self);
+        } else if self.mode == Mode::FilterInput && self.current_service == Service::EfsFileSystems
+        {
+            crate::efs::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput
             && self.current_service == Service::EcrRepositories
             && self.ecr_state.current_repository.is_none()
@@ -3830,6 +3928,13 @@ impl App {
             && self.sqs_state.current_queue.is_some()
         {
             crate::sqs::actions::scroll_up_fast(self);
+        } else if self.current_service == Service::EfsFileSystems
+            && self.efs_state.current_file_system.is_some()
+            && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
+                || self.efs_state.detail_tab == crate::ui::efs::DetailTab::FileSystemPolicy)
+            && !self.efs_state.is_metrics_loading()
+        {
+            crate::efs::actions::scroll_up_detail(self);
         } else if self.current_service == Service::IamRoles
             && self.iam_state.current_role.is_some()
             && self.iam_state.role_tab == RoleTab::TrustRelationships
@@ -3861,6 +3966,8 @@ impl App {
                 crate::cloudtrail::actions::page_up_normal(self);
             } else if self.current_service == Service::KmsKeys {
                 crate::kms::actions::page_up_normal(self);
+            } else if self.current_service == Service::EfsFileSystems {
+                crate::efs::actions::page_up_normal(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::page_up_normal(self);
             } else if self.current_service == Service::EcrRepositories {
@@ -3908,6 +4015,8 @@ impl App {
             crate::ecr::actions::next_pane(self);
         } else if self.current_service == Service::KmsKeys {
             crate::kms::actions::expand_row(self);
+        } else if self.current_service == Service::EfsFileSystems {
+            crate::efs::actions::expand_row(self);
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::expand_row(self);
         } else if self.current_service == Service::LambdaFunctions {
@@ -3974,6 +4083,9 @@ impl App {
             Service::KmsKeys => {
                 crate::kms::actions::go_to_page(self, page);
             }
+            Service::EfsFileSystems => {
+                crate::efs::actions::go_to_page(self, page);
+            }
             Service::SqsQueues => {
                 crate::sqs::actions::go_to_page(self, page);
             }
@@ -4023,6 +4135,8 @@ impl App {
             crate::ecr::actions::prev_pane(self);
         } else if self.current_service == Service::KmsKeys {
             crate::kms::actions::prev_pane(self);
+        } else if self.current_service == Service::EfsFileSystems {
+            crate::efs::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::prev_pane(self);
         } else if self.current_service == Service::LambdaFunctions {
@@ -4075,6 +4189,9 @@ impl App {
             }
             Service::KmsKeys => {
                 crate::kms::actions::collapse_row(self);
+            }
+            Service::EfsFileSystems => {
+                crate::efs::actions::collapse_row(self);
             }
             Service::CloudTrailEvents => {
                 if self.cloudtrail_state.current_event.is_some()
@@ -4195,6 +4312,7 @@ impl App {
                     "EC2 › Instances" => Service::Ec2Instances,
                     "ECR › Repositories" => Service::EcrRepositories,
                     "KMS › Managed Keys" => Service::KmsKeys,
+                    "EFS › File Systems" => Service::EfsFileSystems,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
                     "IAM › User Groups" => Service::IamUserGroups,
@@ -4387,6 +4505,8 @@ impl App {
                 crate::ecr::actions::select_item(self);
             } else if self.current_service == Service::KmsKeys {
                 // KMS keys list — no drill-down yet; tab switch on Enter
+            } else if self.current_service == Service::EfsFileSystems {
+                crate::efs::actions::select_item(self);
             } else if self.current_service == Service::Ec2Instances {
                 crate::ec2::actions::select_item(self);
             } else if self.current_service == Service::SqsQueues {
@@ -4813,6 +4933,41 @@ impl App {
                 origin: k.origin,
                 multi_region: k.multi_region,
                 enabled: k.enabled,
+            })
+            .collect();
+        Ok(())
+    }
+
+    pub async fn load_efs_file_systems(&mut self) -> anyhow::Result<()> {
+        let file_systems = self.efs_client.list_file_systems().await?;
+        self.efs_state.file_systems.items = file_systems
+            .into_iter()
+            .map(|f| EfsFileSystem {
+                file_system_id: f.file_system_id,
+                file_system_arn: f.file_system_arn,
+                name: f.name,
+                creation_token: f.creation_token,
+                encrypted: f.encrypted,
+                kms_key_id: f.kms_key_id,
+                total_size: f.total_size,
+                size_in_standard: f.size_in_standard,
+                size_in_ia: f.size_in_ia,
+                size_in_archive: f.size_in_archive,
+                provisioned_throughput: f.provisioned_throughput,
+                throughput_mode: f.throughput_mode,
+                life_cycle_state: f.life_cycle_state,
+                number_of_mount_targets: f.number_of_mount_targets,
+                owner_id: f.owner_id,
+                creation_time: f.creation_time,
+                performance_mode: f.performance_mode,
+                availability_zone: f.availability_zone,
+                replication_overwrite_protection: f.replication_overwrite_protection,
+                dns_name: f.dns_name,
+                tags: f.tags,
+                total_size_bytes: f.total_size_bytes,
+                size_in_standard_bytes: f.size_in_standard_bytes,
+                size_in_ia_bytes: f.size_in_ia_bytes,
+                size_in_archive_bytes: f.size_in_archive_bytes,
             })
             .collect();
         Ok(())
@@ -5469,6 +5624,7 @@ impl ServicePickerState {
                 "IAM › Roles",
                 "IAM › User Groups",
                 "KMS › Managed Keys",
+                "EFS › File Systems",
                 "Lambda › Functions",
                 "Lambda › Applications",
                 "S3 › Buckets",
@@ -10738,9 +10894,9 @@ mod region_latency_tests {
         app.service_selected = false;
 
         // Find the index of "KMS › Managed Keys" and select it
+        // filtered_services() sorts alphabetically, so use that for the correct index
         let kms_idx = app
-            .service_picker
-            .services
+            .filtered_services()
             .iter()
             .position(|&s| s == "KMS › Managed Keys")
             .expect("KMS › Managed Keys must be in services list");
@@ -10760,8 +10916,7 @@ mod region_latency_tests {
         app.service_selected = false;
 
         let kms_idx = app
-            .service_picker
-            .services
+            .filtered_services()
             .iter()
             .position(|&s| s == "KMS › Managed Keys")
             .unwrap();
@@ -10848,8 +11003,7 @@ mod region_latency_tests {
         app.service_selected = false;
 
         let kms_idx = app
-            .service_picker
-            .services
+            .filtered_services()
             .iter()
             .position(|&s| s == "KMS › Managed Keys")
             .unwrap();

@@ -4,6 +4,7 @@ pub mod cloudtrail;
 pub mod cw;
 pub mod ec2;
 pub mod ecr;
+pub mod efs;
 mod expanded_view;
 pub mod filter;
 pub mod iam;
@@ -57,6 +58,9 @@ use crate::common::{render_pagination_text, render_scrollbar, translate_column, 
 use crate::cw::alarms::AlarmColumn;
 use crate::ec2::Column as Ec2Column;
 use crate::ecr::{image, repo};
+use crate::efs::access_point::Column as efs_ap_col;
+use crate::efs::fs as efs_fs;
+use crate::efs::mount_target::Column as efs_mt_col;
 use crate::iam::{RoleColumn, UserColumn};
 use crate::keymap::Mode;
 use crate::kms::key as kms_key;
@@ -90,6 +94,20 @@ pub fn labeled_field(label: &str, value: impl Into<String>) -> Line<'static> {
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(display),
+    ])
+}
+
+/// Like `labeled_field` but with a colored value span.
+pub fn labeled_field_colored(label: &str, value: impl Into<String>, color: Color) -> Line<'static> {
+    let val = value.into();
+    let display = if val.is_empty() { "-".to_string() } else { val };
+    let clean_label = label.trim_end_matches(": ").trim_end_matches(':');
+    Line::from(vec![
+        Span::styled(
+            format!("{}: ", clean_label),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(display, Style::default().fg(color)),
     ])
 }
 
@@ -387,7 +405,7 @@ pub fn render_fields_with_dynamic_columns(frame: &mut Frame, area: Rect, fields:
         .constraints(constraints)
         .split(area);
 
-    // Render each column
+    // Render each column — no wrapping to avoid ╰ continuation glyphs on border rows
     for (i, column_fields) in columns.iter().enumerate() {
         if i < column_layout.len() {
             frame.render_widget(Paragraph::new(column_fields.clone()), column_layout[i]);
@@ -853,6 +871,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::KmsKeys => kms::render_keys(frame, app, area),
+        Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
@@ -1232,6 +1251,100 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(ListItem::new(""));
             let (page_items, page_len) =
                 render_page_size_section(app.ecr_state.repositories.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::EfsFileSystems {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        if app.efs_state.current_file_system.is_some()
+            && app.efs_state.detail_tab == efs::DetailTab::Tags
+        {
+            // Tags tab — Key/Value always visible (no toggling), but page size is configurable
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col in &["Key", "Value"] {
+                let mut spans = vec![];
+                spans.extend(render_toggle(true)); // always visible
+                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
+                let text_len = 4 + col.len();
+                all_items.push(ListItem::new(Line::from(spans)));
+                max_len = max_len.max(text_len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.efs_state.tags_table.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.efs_state.current_file_system.is_some()
+            && app.efs_state.detail_tab == efs::DetailTab::AccessPoints
+        {
+            // Access points tab — customizable columns + page size.
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.efs_state.ap_column_ids {
+                if let Some(col) = efs_ap_col::from_id(col_id) {
+                    let is_visible = app.efs_state.ap_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.efs_state.access_points.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if app.efs_state.current_file_system.is_some()
+            && app.efs_state.detail_tab == efs::DetailTab::Network
+        {
+            // Network tab — customizable mount-target columns + page size.
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.efs_state.mt_column_ids {
+                if let Some(col) = efs_mt_col::from_id(col_id) {
+                    let is_visible = app.efs_state.mt_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.efs_state.mount_targets.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else {
+            // File systems list — show file system columns
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.efs_column_ids {
+                if let Some(col) = efs_fs::Column::from_id(col_id) {
+                    let is_visible = app.efs_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.efs_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
@@ -2446,6 +2559,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         }
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::KmsKeys => kms::render_keys(frame, app, area),
+        Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),

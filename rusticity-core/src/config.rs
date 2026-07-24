@@ -245,6 +245,10 @@ impl AwsConfig {
         aws_sdk_efs::Client::new(&self.sdk_config)
     }
 
+    pub fn fsx_client(&self) -> aws_sdk_fsx::Client {
+        aws_sdk_fsx::Client::new(&self.sdk_config)
+    }
+
     pub fn ecr_public_client(&self) -> aws_sdk_ecrpublic::Client {
         // ECR Public is a global service only available in us-east-1.
         // Reuse stored credentials but override region.

@@ -193,6 +193,16 @@ impl<T> TableState<T> {
         self.expanded_item = None;
     }
 
+    /// Change the page size and return to the first page. Keeps the filter,
+    /// so the visible list starts from the top rather than jumping to a sparse
+    /// last page when the selection was near the end.
+    pub fn set_page_size(&mut self, page_size: PageSize) {
+        self.page_size = page_size;
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.expanded_item = None;
+    }
+
     pub fn get_selected<'a>(&self, filtered: &'a [&'a T]) -> Option<&'a T> {
         filtered.get(self.selected).copied()
     }

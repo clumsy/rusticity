@@ -9,6 +9,7 @@ pub mod ec2;
 pub mod ecr;
 pub mod efs;
 pub mod event;
+pub mod fsx;
 pub mod iam;
 pub mod keymap;
 pub mod kms;
@@ -50,6 +51,7 @@ pub fn init() {
     ec2::init(&mut i18n);
     ecr::init(&mut i18n);
     efs::init(&mut i18n);
+    fsx::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);
     sqs::init(&mut i18n);

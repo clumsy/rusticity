@@ -7,6 +7,7 @@ pub mod ecr;
 pub mod efs;
 mod expanded_view;
 pub mod filter;
+pub mod fsx;
 pub mod iam;
 pub mod kms;
 pub mod lambda;
@@ -61,6 +62,7 @@ use crate::ecr::{image, repo};
 use crate::efs::access_point::Column as efs_ap_col;
 use crate::efs::fs as efs_fs;
 use crate::efs::mount_target::Column as efs_mt_col;
+use crate::fsx::fs as fsx_fs;
 use crate::iam::{RoleColumn, UserColumn};
 use crate::keymap::Mode;
 use crate::kms::key as kms_key;
@@ -872,6 +874,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
+        Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
@@ -1345,6 +1348,63 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(ListItem::new(""));
             let (page_items, page_len) =
                 render_page_size_section(app.efs_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::FsxFileSystems {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let fixed = if app.fsx_state.current_file_system.is_some() {
+            fsx::detail_fixed_columns(app.fsx_state.detail_tab)
+        } else {
+            None
+        };
+
+        if let Some(cols) = fixed {
+            // Fixed-column detail table (Tags / Updates / Backups): columns are
+            // always visible; only the page size is configurable.
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col in cols {
+                let mut spans = vec![];
+                spans.extend(render_toggle(true));
+                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
+                all_items.push(ListItem::new(Line::from(spans)));
+                max_len = max_len.max(4 + col.len());
+            }
+
+            let ps = match app.fsx_state.detail_tab {
+                fsx::DetailTab::Updates => app.fsx_state.updates_table.page_size,
+                fsx::DetailTab::Backups => app.fsx_state.backups.page_size,
+                _ => app.fsx_state.tags_table.page_size,
+            };
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(ps, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.fsx_column_ids {
+                if let Some(col) = fsx_fs::Column::from_id(col_id) {
+                    let is_visible = app.fsx_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.fsx_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
@@ -2560,6 +2620,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::EcrRepositories => ecr::render_repositories(frame, app, area),
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
+        Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),

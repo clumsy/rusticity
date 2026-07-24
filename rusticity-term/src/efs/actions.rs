@@ -29,17 +29,20 @@ fn toggle_visible(visible: &mut Vec<ColumnId>, all: &[ColumnId], idx: usize) {
 }
 
 /// Apply a page-size selection when `idx` lands in the page-size section that
-/// follows `n` columns (indices `n+3 ..= n+6`).
-fn set_page_size_by_idx(ps: &mut PageSize, idx: usize, n: usize) {
-    if idx == n + 3 {
-        *ps = PageSize::Ten;
+/// follows `n` columns (indices `n+3 ..= n+6`). Returns to the first page.
+fn set_page_size_by_idx<T>(table: &mut crate::table::TableState<T>, idx: usize, n: usize) {
+    let ps = if idx == n + 3 {
+        PageSize::Ten
     } else if idx == n + 4 {
-        *ps = PageSize::TwentyFive;
+        PageSize::TwentyFive
     } else if idx == n + 5 {
-        *ps = PageSize::Fifty;
+        PageSize::Fifty
     } else if idx == n + 6 {
-        *ps = PageSize::OneHundred;
-    }
+        PageSize::OneHundred
+    } else {
+        return;
+    };
+    table.set_page_size(ps);
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -422,19 +425,19 @@ pub fn toggle_column(app: &mut App) {
         match app.efs_state.detail_tab {
             DetailTab::Tags => {
                 // Key/Value columns are always visible — only page size configurable.
-                set_page_size_by_idx(&mut app.efs_state.tags_table.page_size, idx, 2);
+                set_page_size_by_idx(&mut app.efs_state.tags_table, idx, 2);
                 return;
             }
             DetailTab::AccessPoints => {
                 let all = app.efs_state.ap_column_ids.clone();
                 toggle_visible(&mut app.efs_state.ap_visible_column_ids, &all, idx);
-                set_page_size_by_idx(&mut app.efs_state.access_points.page_size, idx, all.len());
+                set_page_size_by_idx(&mut app.efs_state.access_points, idx, all.len());
                 return;
             }
             DetailTab::Network => {
                 let all = app.efs_state.mt_column_ids.clone();
                 toggle_visible(&mut app.efs_state.mt_visible_column_ids, &all, idx);
-                set_page_size_by_idx(&mut app.efs_state.mount_targets.page_size, idx, all.len());
+                set_page_size_by_idx(&mut app.efs_state.mount_targets, idx, all.len());
                 return;
             }
             _ => return,
@@ -453,7 +456,7 @@ pub fn toggle_column(app: &mut App) {
         }
     } else {
         set_page_size_by_idx(
-            &mut app.efs_state.file_systems.page_size,
+            &mut app.efs_state.file_systems,
             idx,
             app.efs_column_ids.len(),
         );

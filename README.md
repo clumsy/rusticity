@@ -37,6 +37,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🖥️ **EC2**: Instances with tags and monitoring
 - 📦 **ECR**: Elastic Container Registry (public and private repositories)
 - 📂 **EFS**: Elastic File System — file systems with detail view and tags
+- 🗄️ **FSx**: File systems (Windows, Lustre, ONTAP, OpenZFS) — list with customizable columns
 - 👤 **IAM**: Users, roles, groups, policies, and permissions
 - 🔑 **KMS**: Managed Keys — AWS managed and customer managed keys
 - λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring

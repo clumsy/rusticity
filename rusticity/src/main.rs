@@ -54,6 +54,8 @@ async fn main() -> Result<()> {
             || app.cloudtrail_state.table.loading
             || app.apig_state.apis.loading
             || app.efs_state.file_systems.loading
+            || app.fsx_state.file_systems.loading
+            || app.fsx_state.backups_loading
             || app.sqs_state.queues.loading;
 
         tokio::select! {
@@ -613,6 +615,38 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
+                        // Load FSx file systems when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::FsxFileSystems
+                            && ((!prev_service_selected || prev_service != Service::FsxFileSystems)
+                                || app.fsx_state.file_systems.loading) {
+                            app.fsx_state.file_systems.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_fsx_file_systems().await {
+                                app.error_message = Some(format!("Failed to load FSx file systems: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.fsx_state.file_systems.loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        // Load FSx backups when viewing the Backups detail tab
+                        if app.current_service == Service::FsxFileSystems
+                            && app.fsx_state.current_file_system.is_some()
+                            && app.fsx_state.detail_tab == rusticity_term::ui::fsx::DetailTab::Backups
+                            && app.fsx_state.backups_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(fs_id) = app.fsx_state.current_file_system.clone() {
+                                if let Err(e) = app.load_fsx_backups(&fs_id).await {
+                                    app.error_message = Some(format!("Failed to load backups: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.fsx_state.backups_loading = false;
+                        }
+
                         // Load API Gateway APIs when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::ApiGatewayApis
                             && ((!prev_service_selected || prev_service != Service::ApiGatewayApis)
@@ -1114,6 +1148,9 @@ async fn main() -> Result<()> {
                                             }
                                             rusticity_term::app::Service::EfsFileSystems => {
                                                 new_app.efs_state.file_systems.loading = true;
+                                            }
+                                            rusticity_term::app::Service::FsxFileSystems => {
+                                                new_app.fsx_state.file_systems.loading = true;
                                             }
                                             rusticity_term::app::Service::LambdaFunctions => {
                                                 new_app.lambda_state.table.loading = true;

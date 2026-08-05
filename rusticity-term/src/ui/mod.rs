@@ -2,6 +2,7 @@ pub mod apig;
 pub mod cfn;
 pub mod cloudtrail;
 pub mod cw;
+pub mod dynamodb;
 pub mod ec2;
 pub mod ecr;
 pub mod efs;
@@ -57,6 +58,7 @@ use crate::cfn::Column as CfnColumn;
 use crate::cloudtrail::{CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{render_pagination_text, render_scrollbar, translate_column, PageSize};
 use crate::cw::alarms::AlarmColumn;
+use crate::dynamodb::table as ddb_table;
 use crate::ec2::Column as Ec2Column;
 use crate::ecr::{image, repo};
 use crate::efs::access_point::Column as efs_ap_col;
@@ -875,6 +877,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
+        Service::DynamoDbTables => dynamodb::render_tables(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
@@ -1405,6 +1408,90 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
             all_items.push(ListItem::new(""));
             let (page_items, page_len) =
                 render_page_size_section(app.fsx_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        }
+
+        (all_items, " Preferences ", max_len)
+    } else if app.current_service == Service::DynamoDbTables {
+        let mut all_items: Vec<ListItem> = Vec::new();
+        let mut max_len = 0;
+
+        let items_tab = app.dynamodb_state.current_table.is_some()
+            && app.dynamodb_state.detail_tab == dynamodb::DetailTab::Items;
+
+        let fixed = if app.dynamodb_state.current_table.is_some() {
+            dynamodb::detail_fixed_columns(app.dynamodb_state.detail_tab)
+        } else {
+            None
+        };
+
+        if items_tab {
+            // Items tab — the columns are the explored table's own attributes,
+            // discovered from the scanned or queried items, so they are toggled
+            // by attribute name rather than by a static column id.
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            let names = dynamodb::current_table(app)
+                .map(|t| dynamodb::item_column_names(t, app))
+                .unwrap_or_default();
+            for name in &names {
+                let is_visible = !app.dynamodb_state.item_hidden_columns.contains(name);
+                let (item, len) = render_column_toggle_string(name, is_visible);
+                all_items.push(item);
+                max_len = max_len.max(len);
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.dynamodb_state.items.page_size, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else if let Some(cols) = fixed {
+            // Fixed-column detail table (Indexes / Global tables / Backups /
+            // Tags): columns are always visible; only the page size applies.
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col in cols {
+                let mut spans = vec![];
+                spans.extend(render_toggle(true));
+                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
+                all_items.push(ListItem::new(Line::from(spans)));
+                max_len = max_len.max(4 + col.len());
+            }
+
+            let ps = match app.dynamodb_state.detail_tab {
+                dynamodb::DetailTab::Indexes => app.dynamodb_state.indexes_table.page_size,
+                dynamodb::DetailTab::GlobalTables => app.dynamodb_state.replicas_table.page_size,
+                dynamodb::DetailTab::Backups => app.dynamodb_state.backups.page_size,
+                _ => app.dynamodb_state.tags_table.page_size,
+            };
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) = render_page_size_section(ps, PAGE_SIZE_OPTIONS);
+            all_items.extend(page_items);
+            max_len = max_len.max(page_len);
+        } else {
+            let (header, header_len) = render_section_header("Columns");
+            all_items.push(header);
+            max_len = max_len.max(header_len);
+
+            for col_id in &app.dynamodb_column_ids {
+                if let Some(col) = ddb_table::Column::from_id(col_id) {
+                    let is_visible = app.dynamodb_visible_column_ids.contains(col_id);
+                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
+                    all_items.push(item);
+                    max_len = max_len.max(len);
+                }
+            }
+
+            all_items.push(ListItem::new(""));
+            let (page_items, page_len) =
+                render_page_size_section(app.dynamodb_state.tables.page_size, PAGE_SIZE_OPTIONS);
             all_items.extend(page_items);
             max_len = max_len.max(page_len);
         }
@@ -2621,6 +2708,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
+        Service::DynamoDbTables => dynamodb::render_tables(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),

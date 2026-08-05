@@ -56,7 +56,14 @@ async fn main() -> Result<()> {
             || app.efs_state.file_systems.loading
             || app.fsx_state.file_systems.loading
             || app.fsx_state.backups_loading
-            || app.sqs_state.queues.loading;
+            || app.sqs_state.queues.loading
+            || app.dynamodb_state.tables.loading
+            || app.dynamodb_state.items_loading
+            || app.dynamodb_state.backups_loading
+            || app.dynamodb_state.tags_loading
+            || app.dynamodb_state.metrics_loading
+            || app.dynamodb_state.permissions_loading
+            || app.dynamodb_state.settings_loading;
 
         tokio::select! {
             _ = tick_interval.tick(), if any_loading => {
@@ -615,6 +622,123 @@ async fn main() -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
+                        // Load DynamoDB tables when service is switched to, empty, or loading
+                        if app.service_selected && app.current_service == Service::DynamoDbTables
+                            && ((!prev_service_selected || prev_service != Service::DynamoDbTables)
+                                || app.dynamodb_state.tables.loading) {
+                            app.dynamodb_state.tables.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_dynamodb_tables().await {
+                                app.error_message = Some(format!("Failed to load DynamoDB tables: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.dynamodb_state.tables.loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        // Load DynamoDB backups when viewing the Backups detail tab
+                        if app.current_service == Service::DynamoDbTables
+                            && app.dynamodb_state.current_table.is_some()
+                            && app.dynamodb_state.backups_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(name) = app.dynamodb_state.current_table.clone() {
+                                if let Err(e) = app.load_dynamodb_backups(&name).await {
+                                    app.error_message = Some(format!("Failed to load backups: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.dynamodb_state.backups_loading = false;
+                        }
+
+                        // Run the DynamoDB Items scan/query when the Items tab needs data
+                        if app.current_service == Service::DynamoDbTables
+                            && rusticity_term::ui::dynamodb::needs_items_load(&app)
+                        {
+                            app.dynamodb_state.items_loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_dynamodb_items().await {
+                                app.error_message = Some(format!("Failed to read items: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.dynamodb_state.items_loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        // Load DynamoDB tags when viewing the Tags detail tab
+                        if app.current_service == Service::DynamoDbTables
+                            && app.dynamodb_state.tags_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            let arn = rusticity_term::ui::dynamodb::current_table(&app)
+                                .map(|t| t.table_arn.clone())
+                                .unwrap_or_default();
+                            if !arn.is_empty() {
+                                if let Err(e) = app.load_dynamodb_tags(&arn).await {
+                                    app.error_message = Some(format!("Failed to load tags: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.dynamodb_state.tags_loading = false;
+                        }
+
+                        // Load DynamoDB metrics when viewing the Monitor detail tab
+                        if app.current_service == Service::DynamoDbTables
+                            && app.dynamodb_state.current_table.is_some()
+                            && app.dynamodb_state.detail_tab == rusticity_term::ui::dynamodb::DetailTab::Monitor
+                            && app.dynamodb_state.metrics_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(name) = app.dynamodb_state.current_table.clone() {
+                                if let Err(e) = app.load_dynamodb_metrics(&name).await {
+                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.dynamodb_state.metrics_loading = false;
+                        }
+
+                        // Load DynamoDB resource-based policies for the Additional settings tab
+                        if app.current_service == Service::DynamoDbTables
+                            && app.dynamodb_state.permissions_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            let (table_arn, stream_arn) =
+                                rusticity_term::ui::dynamodb::current_table(&app)
+                                    .map(|t| (t.table_arn.clone(), t.latest_stream_arn.clone()))
+                                    .unwrap_or_default();
+                            if !table_arn.is_empty() {
+                                if let Err(e) =
+                                    app.load_dynamodb_permissions(&table_arn, &stream_arn).await
+                                {
+                                    app.error_message = Some(format!("Failed to load policies: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.dynamodb_state.permissions_loading = false;
+                        }
+
+                        // Load DynamoDB TTL/PITR settings (Settings and Backups tabs)
+                        if app.current_service == Service::DynamoDbTables
+                            && app.dynamodb_state.settings_loading
+                        {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(name) = app.dynamodb_state.current_table.clone() {
+                                if let Err(e) = app.load_dynamodb_settings(&name).await {
+                                    app.error_message = Some(format!("Failed to load table settings: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.dynamodb_state.settings_loading = false;
+                        }
+
                         // Load FSx file systems when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::FsxFileSystems
                             && ((!prev_service_selected || prev_service != Service::FsxFileSystems)
@@ -1151,6 +1275,9 @@ async fn main() -> Result<()> {
                                             }
                                             rusticity_term::app::Service::FsxFileSystems => {
                                                 new_app.fsx_state.file_systems.loading = true;
+                                            }
+                                            rusticity_term::app::Service::DynamoDbTables => {
+                                                new_app.dynamodb_state.tables.loading = true;
                                             }
                                             rusticity_term::app::Service::LambdaFunctions => {
                                                 new_app.lambda_state.table.loading = true;

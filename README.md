@@ -35,6 +35,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🛤️ **CloudTrail**: Event history with resource details
 - ☁️ **CloudFormation**: Stacks, resources, outputs, parameters, templates
 - 🖥️ **EC2**: Instances with tags and monitoring
+- 🗄️ **DynamoDB**: Tables with an item explorer (scan/query), indexes, global tables, backups, monitoring, settings and tags
 - 📦 **ECR**: Elastic Container Registry (public and private repositories)
 - 📂 **EFS**: Elastic File System — file systems with detail view and tags
 - 🗄️ **FSx**: File systems (Windows, Lustre, ONTAP, OpenZFS) — list with customizable columns

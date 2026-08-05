@@ -270,11 +270,15 @@ pub fn render_dropdown<T: AsRef<str>>(
         .saturating_add(filter_area.width)
         .saturating_sub(controls_after_width + dropdown_width);
 
+    // Show every option when there is room below the filter row, so the whole
+    // list is visible while the dropdown is open.
+    let y = filter_area.y + filter_area.height;
+    let space_below = frame.area().height.saturating_sub(y);
     let dropdown_area = Rect {
         x: dropdown_x,
-        y: filter_area.y + filter_area.height,
+        y,
         width: dropdown_width,
-        height: dropdown_height.min(10),
+        height: dropdown_height.min(space_below.max(3)),
     };
 
     // Clear the background first

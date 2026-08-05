@@ -245,6 +245,10 @@ impl AwsConfig {
         aws_sdk_efs::Client::new(&self.sdk_config)
     }
 
+    pub fn dynamodb_client(&self) -> aws_sdk_dynamodb::Client {
+        aws_sdk_dynamodb::Client::new(&self.sdk_config)
+    }
+
     pub fn fsx_client(&self) -> aws_sdk_fsx::Client {
         aws_sdk_fsx::Client::new(&self.sdk_config)
     }

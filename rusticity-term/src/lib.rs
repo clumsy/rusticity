@@ -5,6 +5,7 @@ pub mod cfn;
 pub mod cloudtrail;
 pub mod common;
 pub mod cw;
+pub mod dynamodb;
 pub mod ec2;
 pub mod ecr;
 pub mod efs;
@@ -52,6 +53,7 @@ pub fn init() {
     ecr::init(&mut i18n);
     efs::init(&mut i18n);
     fsx::init(&mut i18n);
+    dynamodb::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);
     sqs::init(&mut i18n);

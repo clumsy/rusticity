@@ -1,5 +1,7 @@
 use anyhow::Result;
 use crossterm::event::Event;
+use rusticity_term::dynamodb::actions::is_items_tab;
+use rusticity_term::ui::dynamodb::needs_items_load;
 use rusticity_term::{App, EventHandler, Service, ViewMode};
 use tokio::time::{interval, Duration};
 
@@ -105,8 +107,14 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         if let Some(action) = rusticity_term::keymap::handle_key(key, app.mode) {
                         let should_load = matches!(action, rusticity_term::keymap::Action::Select);
-                        let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh);
-                        let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad);
+                        // Items refresh/retry is handled by its bounded loader below,
+                        // not by the generic CloudWatch refresh/reconnect path.
+                        let items_view = app.current_service == Service::DynamoDbTables
+                            && is_items_tab(&app);
+                        let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
+                            && !(items_view && app.mode == rusticity_term::keymap::Mode::Normal);
+                        let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
+                            && !(items_view && app.dynamodb_state.items_failed);
                         let is_profile_select = should_load && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
                         let is_region_select = should_load && app.mode == rusticity_term::keymap::Mode::RegionPicker && !app.region_filter_active;
                         let is_profile_refresh = should_refresh && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
@@ -657,7 +665,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Run the DynamoDB Items scan/query when the Items tab needs data
                         if app.current_service == Service::DynamoDbTables
-                            && rusticity_term::ui::dynamodb::needs_items_load(&app)
+                            && needs_items_load(&app)
                         {
                             app.dynamodb_state.items_loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;

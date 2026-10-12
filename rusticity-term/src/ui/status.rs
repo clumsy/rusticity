@@ -1,4 +1,5 @@
 use crate::app::{App, Service, ViewMode};
+use crate::dynamodb::{actions::is_items_tab, items::can_load_more};
 use crate::keymap::Mode;
 use crate::ui::cfn::DetailTab;
 use crate::ui::red_text;
@@ -69,6 +70,22 @@ fn common_list_hotkeys() -> Vec<Span<'static>> {
     spans.extend(hint("^w", "close"));
     spans.extend(last_hint("q", "quit"));
     spans
+}
+
+fn dynamodb_items_hotkeys(app: &App) -> Vec<Span<'static>> {
+    let mut hints = vec![];
+    if can_load_more(app) {
+        // Put this first so it is visible even when the remaining hints are clipped.
+        let action = if app.dynamodb_state.items_failed {
+            "retry load more"
+        } else {
+            "load more"
+        };
+        hints.extend(first_hint("m", action));
+        hints.push(Span::raw(" "));
+    }
+    hints.extend(common_detail_hotkeys());
+    hints
 }
 
 pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -150,6 +167,13 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("⇤⇥", "switch"));
         hints.extend(last_hint("^w", "close"));
         hints
+    } else if app.mode == Mode::Normal
+        && app.service_selected
+        && app.current_service == Service::DynamoDbTables
+        && is_items_tab(app)
+    {
+        // Service-specific Items hints must precede the legacy ViewMode branches.
+        dynamodb_items_hotkeys(app)
     } else if app.view_mode == ViewMode::Events {
         let mut hints = vec![];
         hints.extend(first_hint("↑↓", "scroll"));
@@ -772,5 +796,120 @@ mod tests {
                 "Message '{msg}' should be blocked by connection filter"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod dynamodb_hint_tests {
+    use super::*;
+    use crate::dynamodb::items::context;
+    use crate::ui::dynamodb::DetailTab as DdbDetailTab;
+    use aws_sdk_dynamodb::types::AttributeValue;
+    use ratatui::{backend::TestBackend, Terminal};
+    use rusticity_core::dynamodb::DdbTable;
+
+    fn items_app() -> App {
+        let mut app = App::new_without_client("test".into(), Some("us-east-2".into()));
+        app.current_service = Service::DynamoDbTables;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.detail_tab = DdbDetailTab::Items;
+        app.dynamodb_state.tables.items = vec![DdbTable {
+            name: "orders".into(),
+            partition_key: "pk (S)".into(),
+            ..Default::default()
+        }];
+        app.dynamodb_state.items_context = context(&app);
+        app.dynamodb_state.items_cursor = Some(
+            [("pk".into(), AttributeValue::S("next".into()))]
+                .into_iter()
+                .collect(),
+        );
+        app
+    }
+
+    fn status_text(app: &App, width: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 1)).unwrap();
+        terminal
+            .draw(|f| render_bottom_bar(f, app, f.area()))
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn items_load_more_hint_precedes_generic_view_hints() {
+        let mut app = items_app();
+        for mode in [ViewMode::List, ViewMode::Detail, ViewMode::Events] {
+            app.view_mode = mode;
+            let text = status_text(&app, 300);
+            assert!(
+                text.contains("m load more"),
+                "Missing hint with {mode:?}: {text}"
+            );
+            assert!(text.contains("p preferences"));
+            assert!(text.contains("^r refresh"));
+        }
+    }
+
+    #[test]
+    fn items_load_more_hint_is_visible_in_an_eighty_column_terminal() {
+        assert!(status_text(&items_app(), 80).contains("m load more"));
+    }
+
+    #[test]
+    fn items_load_more_hint_only_advertises_an_available_action() {
+        let cases: &[fn(&mut App)] = &[
+            |a| a.current_service = Service::EcrRepositories,
+            |a| a.service_selected = false,
+            |a| a.dynamodb_state.current_table = None,
+            |a| a.dynamodb_state.detail_tab = DdbDetailTab::Settings,
+            |a| a.dynamodb_state.items_cursor = None,
+            |a| a.dynamodb_state.items_context = None,
+            |a| a.dynamodb_state.items_loading = true,
+            |a| a.profile = "another-profile".into(),
+        ];
+        for configure in cases {
+            let mut app = items_app();
+            configure(&mut app);
+            assert!(!status_text(&app, 300).contains("load more"));
+        }
+        for mode in [
+            Mode::FilterInput,
+            Mode::ColumnSelector,
+            Mode::ErrorModal,
+            Mode::HelpModal,
+            Mode::QuitConfirm,
+            Mode::ProfilePicker,
+            Mode::RegionPicker,
+            Mode::CalendarPicker,
+            Mode::TabPicker,
+            Mode::SessionPicker,
+            Mode::SpaceMenu,
+            Mode::EventFilterInput,
+            Mode::InsightsInput,
+        ] {
+            let mut app = items_app();
+            app.mode = mode;
+            assert!(
+                !status_text(&app, 300).contains("load more"),
+                "Unexpected hint in {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn items_failed_continuation_shows_retry_hint_only_with_a_valid_cursor() {
+        let mut app = items_app();
+        app.dynamodb_state.items_failed = true;
+        assert!(status_text(&app, 80).contains("m retry load more"));
+        app.dynamodb_state.items_cursor = None;
+        assert!(!status_text(&app, 300).contains("load more"));
     }
 }

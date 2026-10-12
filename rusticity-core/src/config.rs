@@ -396,6 +396,7 @@ mod tests {
 #[cfg(test)]
 mod pagination_tests {
     use super::*;
+    use crate::dynamodb::DynamoDbClient;
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
@@ -433,6 +434,130 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn dynamodb_scan_preserves_typed_cursor_and_requests_one_page_at_a_time() {
+        let uri = "https://dynamodb.us-east-1.amazonaws.com/";
+        let key = serde_json::json!({
+            "pk": {"S": "customer"},
+            "sk": {"N": "123456789012345678901234567890"},
+            "binary": {"B": "AAEC/w=="},
+        });
+        let request = serde_json::json!({
+            "TableName": "orders", "IndexName": "by-customer", "Limit": 100,
+            "ProjectionExpression": "#p0, #p1",
+            "ExpressionAttributeNames": {"#p0": "pk", "#p1": "sk"},
+        });
+        let mut next_request = request.clone();
+        next_request["ExclusiveStartKey"] = key.clone();
+        let http = StaticReplayClient::new(vec![
+            replay(
+                uri,
+                request.to_string(),
+                200,
+                serde_json::json!({
+                    "Items": [{"pk": {"S": "first"}}], "LastEvaluatedKey": key,
+                })
+                .to_string(),
+            ),
+            replay(
+                uri,
+                next_request.to_string(),
+                200,
+                r#"{"Items": [], "LastEvaluatedKey": {}}"#.into(),
+            ),
+        ]);
+        let client = DynamoDbClient::new(config(&http));
+        let projection = vec!["pk".into(), "sk".into()];
+        let page = client
+            .scan_items("orders", Some("by-customer"), 100, Some(&projection), None)
+            .await
+            .unwrap();
+        assert_eq!(http.actual_requests().count(), 1);
+        assert_eq!(page.items[0].get("pk"), "first");
+        let cursor = page.next_cursor.unwrap();
+        assert_eq!(
+            cursor["sk"].as_n().unwrap(),
+            "123456789012345678901234567890"
+        );
+        assert_eq!(cursor["binary"].as_b().unwrap().as_ref(), &[0, 1, 2, 255]);
+        let page = client
+            .scan_items(
+                "orders",
+                Some("by-customer"),
+                100,
+                Some(&projection),
+                Some(cursor),
+            )
+            .await
+            .unwrap();
+        assert!(page.items.is_empty());
+        assert!(page.next_cursor.is_none());
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn dynamodb_query_continues_after_an_empty_page_without_changing_conditions() {
+        let uri = "https://dynamodb.us-east-1.amazonaws.com/";
+        let key = serde_json::json!({"customer_id": {"N": "42"}, "sk": {"S": "last"}});
+        let request = serde_json::json!({
+            "TableName": "orders", "IndexName": "by-customer", "Limit": 100,
+            "KeyConditionExpression": "#pk = :pk",
+            "ExpressionAttributeNames": {"#pk": "customer_id", "#p0": "customer_id", "#p1": "sk"},
+            "ExpressionAttributeValues": {":pk": {"N": "42"}},
+            "ProjectionExpression": "#p0, #p1",
+        });
+        let mut next_request = request.clone();
+        next_request["ExclusiveStartKey"] = key.clone();
+        let http = StaticReplayClient::new(vec![
+            replay(
+                uri,
+                request.to_string(),
+                200,
+                serde_json::json!({"Items": [], "LastEvaluatedKey": key}).to_string(),
+            ),
+            replay(
+                uri,
+                next_request.to_string(),
+                200,
+                r#"{"Items": [{"customer_id": {"N": "42"}, "sk": {"S": "next"}}]}"#.into(),
+            ),
+        ]);
+        let client = DynamoDbClient::new(config(&http));
+        let projection = vec!["customer_id".into(), "sk".into()];
+        let page = client
+            .query_items(
+                "orders",
+                Some("by-customer"),
+                "customer_id",
+                "42",
+                "N",
+                100,
+                Some(&projection),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(page.items.is_empty());
+        assert!(page.next_cursor.is_some());
+        assert_eq!(http.actual_requests().count(), 1);
+        let page = client
+            .query_items(
+                "orders",
+                Some("by-customer"),
+                "customer_id",
+                "42",
+                "N",
+                100,
+                Some(&projection),
+                page.next_cursor,
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.items[0].get("sk"), "next");
+        assert!(page.next_cursor.is_none());
+        http.assert_requests_match(&[]);
     }
 
     #[tokio::test]

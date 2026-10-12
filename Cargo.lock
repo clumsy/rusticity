@@ -3428,6 +3428,7 @@ name = "rusticity-term"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "aws-sdk-dynamodb",
  "chrono",
  "crossterm",
  "ratatui",

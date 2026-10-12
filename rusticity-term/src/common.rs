@@ -233,6 +233,16 @@ pub fn render_pagination_text(current: usize, total: usize) -> String {
     render_pagination(current, total)
 }
 
+/// Show only navigable, loaded pages, with an unknown remainder. Unlike infinite
+/// pagination, this does not invent a next page that has not been loaded yet.
+pub fn render_partial_pagination(current: usize, loaded_pages: usize) -> String {
+    if loaded_pages == 0 {
+        "...".to_string()
+    } else {
+        format!("{} ...", render_pagination_text(current, loaded_pages))
+    }
+}
+
 pub fn render_dropdown<T: AsRef<str>>(
     frame: &mut ratatui::Frame,
     items: &[T],
@@ -795,5 +805,29 @@ where
                     .any(|field| field.to_lowercase().contains(&filter_lower))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod partial_pagination_tests {
+    use super::*;
+
+    #[test]
+    fn partial_pagination_never_invents_an_unloaded_page() {
+        assert_eq!(render_partial_pagination(0, 0), "...");
+        assert_eq!(render_partial_pagination(0, 1), "[1] ...");
+        assert_eq!(render_partial_pagination(0, 2), "[1] 2 ...");
+        assert_eq!(render_partial_pagination(1, 2), "1 [2] ...");
+        assert_eq!(
+            render_partial_pagination(19, 20),
+            "12 13 14 15 16 17 18 19 [20] ..."
+        );
+    }
+
+    #[test]
+    fn finite_pagination_is_unchanged() {
+        assert_eq!(render_pagination_text(0, 2), "[1] 2");
+        assert_eq!(render_pagination_text(3, 4), "1 2 3 [4]");
+        assert_eq!(render_pagination_text(0, 0), "[1]");
     }
 }

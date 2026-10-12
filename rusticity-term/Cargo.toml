@@ -25,3 +25,7 @@ time = { workspace = true }
 urlencoding = { workspace = true }
 ureq = { workspace = true }
 webbrowser = { workspace = true }
+
+[dev-dependencies]
+# Construct typed continuation keys in offline Items state tests.
+aws-sdk-dynamodb = { workspace = true }

@@ -9,6 +9,7 @@ pub use crate::cw::insights::InsightsFocus;
 use crate::cw::insights::InsightsState;
 pub use crate::cw::{Alarm, AlarmColumn};
 use crate::dynamodb::table::Column as DynamoDbColumn;
+use crate::dynamodb::{actions as ddb_actions, items as ddb_items};
 pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
 use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
@@ -55,6 +56,7 @@ pub use crate::ui::cw::logs::{
     DetailTab as CwLogsDetailTab, EventFilterFocus, FILTER_CONTROLS as LOG_FILTER_CONTROLS,
 };
 pub use crate::ui::dynamodb::State as DynamoDbState;
+use crate::ui::dynamodb::{ItemOperation, ItemProjection, ITEM_LIMIT};
 pub use crate::ui::ec2::{
     DetailTab as Ec2DetailTab, State as Ec2State, StateFilter as Ec2StateFilter,
     STATE_FILTER as EC2_STATE_FILTER,
@@ -87,6 +89,7 @@ pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
     StreamColumn, StreamSort, TimeUnit,
 };
+use rusticity_core::dynamodb::DdbItemsPage;
 #[cfg(test)]
 use rusticity_core::LogStream;
 use rusticity_core::{
@@ -504,7 +507,7 @@ impl App {
         } else if self.current_service == Service::EfsFileSystems {
             crate::efs::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::DynamoDbTables {
-            crate::dynamodb::actions::get_active_filter_mut(self)
+            ddb_actions::get_active_filter_mut(self)
         } else if self.current_service == Service::FsxFileSystems {
             crate::fsx::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudFormationStacks {
@@ -582,7 +585,7 @@ impl App {
             } else if self.current_service == Service::EfsFileSystems {
                 crate::efs::actions::apply_filter_reset(self);
             } else if self.current_service == Service::DynamoDbTables {
-                crate::dynamodb::actions::apply_filter_reset(self)
+                ddb_actions::apply_filter_reset(self)
             } else if self.current_service == Service::FsxFileSystems {
                 crate::fsx::actions::apply_filter_reset(self);
             } else if self.current_service == Service::SqsQueues {
@@ -1274,7 +1277,7 @@ impl App {
                         crate::efs::actions::apply_filter_reset(self);
                     }
                     Service::DynamoDbTables => {
-                        crate::dynamodb::actions::apply_filter_reset(self);
+                        ddb_actions::apply_filter_reset(self);
                     }
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
@@ -1531,7 +1534,7 @@ impl App {
                     } else if self.current_service == Service::EfsFileSystems {
                         crate::efs::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::DynamoDbTables {
-                        crate::dynamodb::actions::is_pagination_focused(self)
+                        ddb_actions::is_pagination_focused(self)
                     } else if self.current_service == Service::FsxFileSystems {
                         crate::fsx::actions::is_pagination_focused(self)
                     } else if self.current_service == Service::LambdaFunctions {
@@ -2282,7 +2285,7 @@ impl App {
                 } else if self.current_service == Service::DynamoDbTables
                     && self.dynamodb_state.current_table.is_some()
                 {
-                    crate::dynamodb::actions::next_detail_tab(self);
+                    ddb_actions::next_detail_tab(self);
                 } else if self.current_service == Service::FsxFileSystems
                     && self.fsx_state.current_file_system.is_some()
                 {
@@ -2349,7 +2352,7 @@ impl App {
                 } else if self.current_service == Service::DynamoDbTables
                     && self.dynamodb_state.current_table.is_some()
                 {
-                    crate::dynamodb::actions::prev_detail_tab(self);
+                    ddb_actions::prev_detail_tab(self);
                 } else if self.current_service == Service::FsxFileSystems
                     && self.fsx_state.current_file_system.is_some()
                 {
@@ -2401,7 +2404,7 @@ impl App {
                     } else if self.current_service == Service::EfsFileSystems {
                         crate::efs::actions::start_filter(self);
                     } else if self.current_service == Service::DynamoDbTables {
-                        crate::dynamodb::actions::start_filter(self)
+                        ddb_actions::start_filter(self)
                     } else if self.current_service == Service::FsxFileSystems {
                         crate::fsx::actions::start_filter(self);
                     }
@@ -2528,7 +2531,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::DynamoDbTables
                 {
-                    crate::dynamodb::actions::next_filter_focus(self);
+                    ddb_actions::next_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::FsxFileSystems
                 {
@@ -2615,7 +2618,7 @@ impl App {
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::DynamoDbTables
                 {
-                    crate::dynamodb::actions::prev_filter_focus(self);
+                    ddb_actions::prev_filter_focus(self);
                 } else if self.mode == Mode::FilterInput
                     && self.current_service == Service::FsxFileSystems
                 {
@@ -2729,7 +2732,7 @@ impl App {
                     && self.dynamodb_state.detail_tab == crate::ui::dynamodb::DetailTab::Monitor
                     && !self.dynamodb_state.is_metrics_loading()
                 {
-                    crate::dynamodb::actions::scroll_up_detail(self);
+                    ddb_actions::scroll_up_detail(self);
                 } else if self.current_service == Service::EfsFileSystems
                     && self.efs_state.current_file_system.is_some()
                     && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
@@ -2800,7 +2803,7 @@ impl App {
                     && self.dynamodb_state.detail_tab == crate::ui::dynamodb::DetailTab::Monitor
                     && !self.dynamodb_state.is_metrics_loading()
                 {
-                    crate::dynamodb::actions::scroll_down_detail(self);
+                    ddb_actions::scroll_down_detail(self);
                 } else if self.current_service == Service::EfsFileSystems
                     && self.efs_state.current_file_system.is_some()
                     && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
@@ -2853,6 +2856,7 @@ impl App {
                     self.measure_region_latencies();
                 }
             }
+            Action::LoadMore => ddb_items::load_more(self),
             Action::Refresh => {
                 if self.mode == Mode::ProfilePicker {
                     self.log_groups_state.loading = true;
@@ -2860,6 +2864,10 @@ impl App {
                     // Ctrl+R in region picker just refreshes — latency is via Ctrl+L
                 } else if self.mode == Mode::SessionPicker {
                     self.sessions = Session::list_all().unwrap_or_default();
+                } else if self.current_service == Service::DynamoDbTables
+                    && ddb_actions::is_items_tab(self)
+                {
+                    ddb_actions::reload_items(self);
                 } else if self.current_service == Service::CloudWatchAlarms
                     && self.alarms_state.current_alarm.is_some()
                 {
@@ -2900,7 +2908,7 @@ impl App {
                 } else if self.current_service == Service::EfsFileSystems {
                     crate::efs::actions::yank(self);
                 } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::yank(self)
+                    ddb_actions::yank(self)
                 } else if self.current_service == Service::FsxFileSystems {
                     crate::fsx::actions::yank(self);
                 } else if self.current_service == Service::LambdaFunctions {
@@ -2962,7 +2970,14 @@ impl App {
             Action::RetryLoad => {
                 self.error_message = None;
                 self.mode = Mode::Normal;
-                self.log_groups_state.loading = true;
+                if self.current_service == Service::DynamoDbTables
+                    && ddb_actions::is_items_tab(self)
+                    && self.dynamodb_state.items_failed
+                {
+                    ddb_items::retry(self);
+                } else {
+                    self.log_groups_state.loading = true;
+                }
             }
             Action::ApplyFilter => {
                 if self.mode == Mode::FilterInput
@@ -3080,7 +3095,7 @@ impl App {
                 } else if self.current_service == Service::DynamoDbTables
                     && self.dynamodb_state.current_table.is_some()
                 {
-                    crate::dynamodb::actions::go_back(self);
+                    ddb_actions::go_back(self);
                 } else if self.current_service == Service::FsxFileSystems
                     && self.fsx_state.current_file_system.is_some()
                 {
@@ -3340,7 +3355,7 @@ impl App {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
             Service::DynamoDbTables => {
-                parts.extend(crate::dynamodb::actions::breadcrumb(self));
+                parts.extend(ddb_actions::breadcrumb(self));
             }
             Service::LambdaFunctions => {
                 parts.extend(crate::lambda::functions::breadcrumb(self));
@@ -3431,7 +3446,7 @@ impl App {
             Service::KmsKeys => crate::kms::actions::console_url(self),
             Service::EfsFileSystems => crate::efs::actions::console_url(self),
             Service::FsxFileSystems => crate::fsx::actions::console_url(self),
-            Service::DynamoDbTables => crate::dynamodb::actions::console_url(self),
+            Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
             Service::CloudFormationStacks => crate::cfn::actions::console_url(self),
@@ -3562,7 +3577,7 @@ impl App {
                 {
                     crate::iam::actions::next_item_filter_input_roles(self);
                 } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::next_dropdown_value(self);
+                    ddb_actions::next_dropdown_value(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_state_filter_next(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -3666,7 +3681,7 @@ impl App {
                 } else if self.current_service == Service::EfsFileSystems {
                     crate::efs::actions::next_item(self);
                 } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::next_item(self)
+                    ddb_actions::next_item(self)
                 } else if self.current_service == Service::FsxFileSystems {
                     crate::fsx::actions::next_item(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -3717,7 +3732,7 @@ impl App {
                 {
                     crate::iam::actions::prev_item_filter_input_roles(self);
                 } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::prev_dropdown_value(self);
+                    ddb_actions::prev_dropdown_value(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_state_filter_prev(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -3827,7 +3842,7 @@ impl App {
                 } else if self.current_service == Service::EfsFileSystems {
                     crate::efs::actions::prev_item(self);
                 } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::prev_item(self)
+                    ddb_actions::prev_item(self)
                 } else if self.current_service == Service::FsxFileSystems {
                     crate::fsx::actions::prev_item(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -3905,7 +3920,7 @@ impl App {
             crate::efs::actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::DynamoDbTables
         {
-            crate::dynamodb::actions::page_down_filter_input(self);
+            ddb_actions::page_down_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::FsxFileSystems
         {
             crate::fsx::actions::page_down_filter_input(self);
@@ -3935,7 +3950,7 @@ impl App {
             && self.dynamodb_state.detail_tab == crate::ui::dynamodb::DetailTab::Monitor
             && !self.dynamodb_state.is_metrics_loading()
         {
-            crate::dynamodb::actions::scroll_down_detail(self);
+            ddb_actions::scroll_down_detail(self);
         } else if self.current_service == Service::EfsFileSystems
             && self.efs_state.current_file_system.is_some()
             && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
@@ -3981,7 +3996,7 @@ impl App {
             } else if self.current_service == Service::EfsFileSystems {
                 crate::efs::actions::page_down_normal(self);
             } else if self.current_service == Service::DynamoDbTables {
-                crate::dynamodb::actions::page_down_normal(self)
+                ddb_actions::page_down_normal(self)
             } else if self.current_service == Service::FsxFileSystems {
                 crate::fsx::actions::page_down_normal(self);
             } else if self.current_service == Service::SqsQueues {
@@ -4051,7 +4066,7 @@ impl App {
             crate::efs::actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::DynamoDbTables
         {
-            crate::dynamodb::actions::page_up_filter_input(self);
+            ddb_actions::page_up_filter_input(self);
         } else if self.mode == Mode::FilterInput && self.current_service == Service::FsxFileSystems
         {
             crate::fsx::actions::page_up_filter_input(self);
@@ -4078,7 +4093,7 @@ impl App {
             && self.dynamodb_state.detail_tab == crate::ui::dynamodb::DetailTab::Monitor
             && !self.dynamodb_state.is_metrics_loading()
         {
-            crate::dynamodb::actions::scroll_up_detail(self);
+            ddb_actions::scroll_up_detail(self);
         } else if self.current_service == Service::EfsFileSystems
             && self.efs_state.current_file_system.is_some()
             && (self.efs_state.detail_tab == crate::ui::efs::DetailTab::Monitoring
@@ -4120,7 +4135,7 @@ impl App {
             } else if self.current_service == Service::EfsFileSystems {
                 crate::efs::actions::page_up_normal(self);
             } else if self.current_service == Service::DynamoDbTables {
-                crate::dynamodb::actions::page_up_normal(self)
+                ddb_actions::page_up_normal(self)
             } else if self.current_service == Service::FsxFileSystems {
                 crate::fsx::actions::page_up_normal(self);
             } else if self.current_service == Service::Ec2Instances {
@@ -4173,7 +4188,7 @@ impl App {
         } else if self.current_service == Service::EfsFileSystems {
             crate::efs::actions::expand_row(self);
         } else if self.current_service == Service::DynamoDbTables {
-            crate::dynamodb::actions::expand_row(self)
+            ddb_actions::expand_row(self)
         } else if self.current_service == Service::FsxFileSystems {
             crate::fsx::actions::expand_row(self);
         } else if self.current_service == Service::SqsQueues {
@@ -4246,7 +4261,7 @@ impl App {
                 crate::efs::actions::go_to_page(self, page);
             }
             Service::DynamoDbTables => {
-                crate::dynamodb::actions::go_to_page(self, page);
+                ddb_actions::go_to_page(self, page);
             }
             Service::FsxFileSystems => {
                 crate::fsx::actions::go_to_page(self, page);
@@ -4303,7 +4318,7 @@ impl App {
         } else if self.current_service == Service::EfsFileSystems {
             crate::efs::actions::prev_pane(self);
         } else if self.current_service == Service::DynamoDbTables {
-            crate::dynamodb::actions::prev_pane(self)
+            ddb_actions::prev_pane(self)
         } else if self.current_service == Service::FsxFileSystems {
             crate::fsx::actions::prev_pane(self);
         } else if self.current_service == Service::SqsQueues {
@@ -4363,7 +4378,7 @@ impl App {
                 crate::efs::actions::collapse_row(self);
             }
             Service::DynamoDbTables => {
-                crate::dynamodb::actions::collapse_row(self);
+                ddb_actions::collapse_row(self);
             }
             Service::FsxFileSystems => {
                 crate::fsx::actions::collapse_row(self);
@@ -4685,7 +4700,7 @@ impl App {
             } else if self.current_service == Service::EfsFileSystems {
                 crate::efs::actions::select_item(self);
             } else if self.current_service == Service::DynamoDbTables {
-                crate::dynamodb::actions::select_item(self)
+                ddb_actions::select_item(self)
             } else if self.current_service == Service::FsxFileSystems {
                 crate::fsx::actions::select_item(self);
             } else if self.current_service == Service::Ec2Instances {
@@ -5168,63 +5183,63 @@ impl App {
         Ok(())
     }
 
-    /// Run the Items tab's Scan or Query for the open table.
+    /// Run exactly one bounded Items request. Only explicit LoadMore appends.
     pub async fn load_dynamodb_items(&mut self) -> anyhow::Result<()> {
-        use crate::ui::dynamodb::{
-            key_attribute_name, key_attribute_type, selected_item_index, selected_key_attributes,
-            ItemOperation, ItemProjection, ITEM_LIMIT,
-        };
-
-        let Some(table) = crate::ui::dynamodb::current_table(self).cloned() else {
+        let Some(request) = ddb_items::context(self) else {
+            self.dynamodb_state.clear_items_result();
             return Ok(());
         };
-        let index_idx = self.dynamodb_state.item_index;
-        let index = selected_item_index(&table, index_idx);
-        let projection = match self.dynamodb_state.item_projection {
+        let cursor = self.dynamodb_state.begin_items_request(request.clone());
+        let projection = match request.projection {
             ItemProjection::AllAttributes => None,
-            ItemProjection::KeysOnly => Some(selected_key_attributes(&table, index_idx)),
+            ItemProjection::KeysOnly => Some(request.keys.as_slice()),
         };
-        let value = self.dynamodb_state.item_filter.clone();
-
-        let items = match self.dynamodb_state.item_operation {
+        let result = match request.operation {
             ItemOperation::Scan => {
                 self.dynamodb_client
                     .scan_items(
-                        &table.name,
-                        index.as_deref(),
+                        &request.table,
+                        request.index.as_deref(),
                         ITEM_LIMIT,
-                        projection.as_deref(),
+                        projection,
+                        cursor,
                     )
-                    .await?
+                    .await
             }
             ItemOperation::Query => {
-                let keys = selected_key_attributes(&table, index_idx);
-                let Some(pk) = keys.first() else {
-                    return Ok(());
-                };
-                // The key type comes from the selected table or index schema.
-                let pk_type = key_attribute_type(
-                    &crate::ui::dynamodb::selected_partition_key_label(&table, index_idx),
-                );
-                self.dynamodb_client
-                    .query_items(
-                        &table.name,
-                        index.as_deref(),
-                        key_attribute_name(pk),
-                        &value,
-                        &pk_type,
-                        ITEM_LIMIT,
-                        projection.as_deref(),
-                    )
-                    .await?
+                let value = request.query.as_deref().unwrap_or_default();
+                if value.is_empty() {
+                    Ok(DdbItemsPage::default())
+                } else if let Some(pk) = request.keys.first() {
+                    self.dynamodb_client
+                        .query_items(
+                            &request.table,
+                            request.index.as_deref(),
+                            pk,
+                            value,
+                            &request.partition_type,
+                            ITEM_LIMIT,
+                            projection,
+                            cursor,
+                        )
+                        .await
+                } else {
+                    Err(anyhow::anyhow!(
+                        "The selected table or index has no partition key"
+                    ))
+                }
             }
         };
-
-        self.dynamodb_state.items.items = items;
-        self.dynamodb_state.items.selected = 0;
-        self.dynamodb_state.items.expanded_item = None;
-        self.dynamodb_state.executed_query = value;
-        Ok(())
+        match result {
+            Ok(page) => {
+                self.dynamodb_state.finish_items_request(page);
+                Ok(())
+            }
+            Err(error) => {
+                self.dynamodb_state.fail_items_request();
+                Err(error)
+            }
+        }
     }
 
     pub async fn load_dynamodb_tags(&mut self, table_arn: &str) -> anyhow::Result<()> {

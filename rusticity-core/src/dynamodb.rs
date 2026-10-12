@@ -296,9 +296,14 @@ impl DynamoDbClient {
         index_name: Option<&str>,
         limit: i32,
         projected_attributes: Option<&[String]>,
-    ) -> Result<Vec<DdbItem>> {
+        cursor: Option<DdbItemCursor>,
+    ) -> Result<DdbItemsPage> {
         let client = self.config.dynamodb_client();
-        let mut req = client.scan().table_name(table_name).limit(limit);
+        let mut req = client
+            .scan()
+            .table_name(table_name)
+            .limit(limit)
+            .set_exclusive_start_key(cursor);
         if let Some(index) = index_name {
             req = req.index_name(index);
         }
@@ -310,7 +315,10 @@ impl DynamoDbClient {
             }
         }
         let resp = req.send().await?;
-        Ok(resp.items().iter().map(item_from_attributes).collect())
+        Ok(DdbItemsPage {
+            items: resp.items().iter().map(item_from_attributes).collect(),
+            next_cursor: resp.last_evaluated_key.filter(|key| !key.is_empty()),
+        })
     }
 
     /// Query items by partition-key value from a table or one of its indexes.
@@ -324,7 +332,8 @@ impl DynamoDbClient {
         partition_type: &str,
         limit: i32,
         projected_attributes: Option<&[String]>,
-    ) -> Result<Vec<DdbItem>> {
+        cursor: Option<DdbItemCursor>,
+    ) -> Result<DdbItemsPage> {
         use aws_sdk_dynamodb::types::AttributeValue;
 
         let client = self.config.dynamodb_client();
@@ -338,6 +347,7 @@ impl DynamoDbClient {
             .query()
             .table_name(table_name)
             .limit(limit)
+            .set_exclusive_start_key(cursor)
             .key_condition_expression("#pk = :pk")
             .expression_attribute_names("#pk", partition_key)
             .expression_attribute_values(":pk", value);
@@ -352,7 +362,10 @@ impl DynamoDbClient {
             }
         }
         let resp = req.send().await?;
-        Ok(resp.items().iter().map(item_from_attributes).collect())
+        Ok(DdbItemsPage {
+            items: resp.items().iter().map(item_from_attributes).collect(),
+            next_cursor: resp.last_evaluated_key.filter(|key| !key.is_empty()),
+        })
     }
 
     /// CloudWatch time series for the Monitor tab (last 3 hours, 1-minute period).
@@ -503,6 +516,17 @@ pub struct DdbMonitoringData {
     pub latency_put_item: Vec<(i64, f64)>,
     pub latency_query: Vec<(i64, f64)>,
     pub latency_scan: Vec<(i64, f64)>,
+}
+
+/// Resume key kept in the SDK's original types, never reconstructed from display values.
+/// In particular, binary keys and numeric strings must survive pagination unchanged.
+pub type DdbItemCursor = std::collections::HashMap<String, aws_sdk_dynamodb::types::AttributeValue>;
+
+/// Exactly one bounded Scan/Query response, including an optional continuation key.
+#[derive(Debug, Default)]
+pub struct DdbItemsPage {
+    pub items: Vec<DdbItem>,
+    pub next_cursor: Option<DdbItemCursor>,
 }
 
 /// A single item returned by Scan or Query, with values rendered for display.

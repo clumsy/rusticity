@@ -76,6 +76,21 @@ pub fn prev_item(app: &mut App) {
 }
 
 pub fn page_down_filter_input(app: &mut App) {
+    if is_items_tab(app) {
+        if app.dynamodb_state.input_focus == InputFocus::Filter {
+            page_down_normal(app);
+        } else {
+            let count = filtered_items(app).len();
+            let state = &mut app.dynamodb_state;
+            state.input_focus.handle_page_down(
+                &mut state.items.selected,
+                &mut state.items.scroll_offset,
+                state.items.page_size.value(),
+                count,
+            );
+        }
+        return;
+    }
     if app.dynamodb_state.input_focus == InputFocus::Filter {
         let filtered = filtered_dynamodb_tables(app);
         app.dynamodb_state.tables.page_down(filtered.len());
@@ -102,6 +117,19 @@ pub fn page_down_normal(app: &mut App) {
 }
 
 pub fn page_up_filter_input(app: &mut App) {
+    if is_items_tab(app) {
+        if app.dynamodb_state.input_focus == InputFocus::Filter {
+            page_up_normal(app);
+        } else {
+            let state = &mut app.dynamodb_state;
+            state.input_focus.handle_page_up(
+                &mut state.items.selected,
+                &mut state.items.scroll_offset,
+                state.items.page_size.value(),
+            );
+        }
+        return;
+    }
     if app.dynamodb_state.input_focus == InputFocus::Filter {
         app.dynamodb_state.tables.page_up();
     } else {
@@ -162,6 +190,11 @@ pub fn collapse_row(app: &mut App) {
 }
 
 pub fn go_to_page(app: &mut App, page: usize) {
+    if is_items_tab(app) {
+        let count = filtered_items(app).len();
+        app.dynamodb_state.items.goto_page(page.max(1), count);
+        return;
+    }
     let filtered_count = filtered_dynamodb_tables(app).len();
     app.dynamodb_state.tables.goto_page(page, filtered_count);
 }
@@ -252,9 +285,7 @@ fn cycle_dropdown(app: &mut App, forward: bool) {
 
 /// Drop the current result set and schedule a fresh Scan or Query.
 pub fn reload_items(app: &mut App) {
-    app.dynamodb_state.items.reset();
-    app.dynamodb_state.items.items.clear();
-    app.dynamodb_state.executed_query.clear();
+    app.dynamodb_state.clear_items_result();
     // A Query with no partition-key value yet has nothing to run.
     app.dynamodb_state.items_loading = app.dynamodb_state.item_operation == ItemOperation::Scan
         || !app.dynamodb_state.item_filter.is_empty();

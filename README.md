@@ -110,6 +110,17 @@ rusticity
 AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 ```
 
+### DynamoDB Items
+
+Press `m` in Normal mode to load the next Scan/Query page. Each request evaluates
+at most 100 items and is also subject to DynamoDB's response-size limit. Page
+navigation and Preferences only affect already-loaded items; they do not fetch
+more data. `Ctrl+R` restarts the scan/query, or retries the failed page when the
+error dialog is open. Changing the table, account context, index, projection,
+operation, or query key starts a new result set. Pagination shows only loaded
+pages followed by `...` while the total is unknown; the ellipsis disappears
+only after the final result page has loaded successfully.
+
 ## Development
 
 The project uses a Cargo workspace with three crates:

@@ -1,8 +1,9 @@
 use crate::app::App;
 use crate::common::{
-    format_bytes, format_iso_timestamp, render_pagination_text, CyclicEnum, InputFocus,
-    SortDirection, UTC_TIMESTAMP_WIDTH,
+    format_bytes, format_iso_timestamp, render_pagination_text, render_partial_pagination,
+    CyclicEnum, InputFocus, SortDirection, UTC_TIMESTAMP_WIDTH,
 };
+use crate::dynamodb::items::{self, ItemRequestContext};
 use crate::dynamodb::table;
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
@@ -12,7 +13,8 @@ use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig}
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use rusticity_core::dynamodb::{
-    DdbBackup, DdbIndex, DdbItem, DdbMonitoringData, DdbReplica, DdbTable, DdbTableSettings,
+    DdbBackup, DdbIndex, DdbItem, DdbItemCursor, DdbMonitoringData, DdbReplica, DdbTable,
+    DdbTableSettings,
 };
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -32,7 +34,7 @@ pub const ITEMS_FILTER_CONTROLS: [InputFocus; 5] = [
     InputFocus::Pagination,
 ];
 
-/// How many items a single Scan or Query reads.
+/// Maximum evaluated items per request; AWS may stop earlier at its response-size limit.
 pub const ITEM_LIMIT: i32 = 100;
 
 /// Items tab operation. Scan is the default, matching the console.
@@ -181,6 +183,11 @@ pub struct State {
     pub detail_tab: DetailTab,
     pub items: TableState<DdbItem>,
     pub items_loading: bool,
+    pub items_cursor: Option<DdbItemCursor>,
+    pub items_context: Option<ItemRequestContext>,
+    /// Whether the scheduled/failed request continues the current result set.
+    pub items_append: bool,
+    pub items_failed: bool,
     /// Items tab text input: a client-side filter for Scan, the partition-key
     /// value for Query. Kept apart from the table-list filter.
     pub item_filter: String,
@@ -251,6 +258,10 @@ impl State {
             detail_tab: DetailTab::Items,
             items: TableState::new(),
             items_loading: false,
+            items_cursor: None,
+            items_context: None,
+            items_append: false,
+            items_failed: false,
             item_filter: String::new(),
             item_operation: ItemOperation::default(),
             item_index: 0,
@@ -304,22 +315,10 @@ pub fn current_table(app: &App) -> Option<&DdbTable> {
         })
 }
 
-/// True when the Items tab has to run a Scan or Query: either it was flagged for
-/// a reload, or the Query partition-key value changed since the last run (once
-/// the user has left the filter input).
+/// True for a queued Items request or changed server request context. Local
+/// Scan filtering and navigation do not fetch additional pages.
 pub fn needs_items_load(app: &App) -> bool {
-    if app.dynamodb_state.current_table.is_none()
-        || app.dynamodb_state.detail_tab != DetailTab::Items
-    {
-        return false;
-    }
-    if app.dynamodb_state.items_loading {
-        return true;
-    }
-    app.dynamodb_state.item_operation == ItemOperation::Query
-        && app.mode != crate::keymap::Mode::FilterInput
-        && !app.dynamodb_state.item_filter.is_empty()
-        && app.dynamodb_state.executed_query != app.dynamodb_state.item_filter
+    items::needs_load(app)
 }
 
 pub fn render_tables(frame: &mut Frame, app: &App, area: Rect) {
@@ -422,7 +421,7 @@ pub fn render_table_detail(frame: &mut Frame, app: &App, area: Rect) {
     let field_lines = build_summary_lines(t);
     let content_rows =
         crate::ui::calculate_dynamic_height(&field_lines, area.width.saturating_sub(2));
-    let summary_height = (content_rows + 3).min(area.height.saturating_sub(2));
+    let summary_height = (content_rows + 2).min(area.height.saturating_sub(2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -517,7 +516,7 @@ fn render_settings(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
     ];
 
     let w = area.width.saturating_sub(2);
-    let h1 = (calculate_dynamic_height(&general, w) + 3).min(area.height);
+    let h1 = (calculate_dynamic_height(&general, w) + 2).min(area.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(h1), Constraint::Min(0)])
@@ -1158,7 +1157,11 @@ fn render_items_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
     let view = state
         .items
         .prepare_view(filtered_items(app), TableWindow::SelectedPage);
-    let pagination = render_pagination_text(view.current_page, view.total_pages);
+    let pagination = if items::results_complete(app) {
+        render_pagination_text(view.current_page, view.total_pages)
+    } else {
+        render_partial_pagination(view.current_page, view.total_pages)
+    };
 
     let placeholder = if state.item_operation == ItemOperation::Query {
         "Enter a partition key value to query"
@@ -1195,8 +1198,8 @@ fn render_items_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
         },
     );
 
-    if state.items_loading {
-        let block = crate::ui::titled_block(format!(" {} ", t.name));
+    if state.items_loading && !state.items_append {
+        let block = crate::ui::titled_block(t.name.clone());
         let inner = block.inner(chunks[1]);
         frame.render_widget(block, chunks[1]);
         let p = Paragraph::new("Loading items...")
@@ -1208,7 +1211,7 @@ fn render_items_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
 
     // Query needs a partition-key value before it can return anything.
     if state.item_operation == ItemOperation::Query && state.item_filter.is_empty() {
-        let block = crate::ui::titled_block(format!(" {} ", t.name));
+        let block = crate::ui::titled_block(t.name.clone());
         let inner = block.inner(chunks[1]);
         frame.render_widget(block, chunks[1]);
         let key = selected_key_attributes(t, state.item_index)
@@ -1441,6 +1444,162 @@ mod tests {
             Some("unchanged-server-cursor")
         );
         assert!(!app.dynamodb_state.items_loading);
+    }
+
+    #[test]
+    fn test_summary_and_general_borders_follow_content_without_blank_rows() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.detail_tab = DetailTab::Settings;
+        app.dynamodb_state.tables.items[0].creation_time = "2026-07-27T15:11:44Z".into();
+        app.dynamodb_state.tables.items[0].encryption_type = "Owned by Amazon DynamoDB".into();
+        app.dynamodb_state.settings.ttl_status = "Enabled".into();
+        app.dynamodb_state.settings.ttl_attribute = "expires_at".into();
+
+        for width in [90, 160, 300] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
+            // Also exercise a pane that does not start at the terminal origin.
+            let area = Rect::new(2, 1, width - 4, 58);
+            terminal
+                .draw(|f| render_table_detail(f, &app, area))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let rows: Vec<String> = (area.y..area.bottom())
+                .map(|y| {
+                    (area.x..area.right())
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect()
+                })
+                .collect();
+            for title in ["Summary", "General information"] {
+                let top = rows.iter().position(|row| row.contains(title)).unwrap();
+                let bottom = (top + 1..rows.len())
+                    .find(|&y| rows[y].starts_with('╰'))
+                    .unwrap();
+                assert!(bottom > top + 1);
+                assert!(
+                    rows[bottom - 1]
+                        .chars()
+                        .any(|c| !c.is_whitespace() && c != '│'),
+                    "{title} has a blank row above its bottom border at width {width}"
+                );
+                for row in &rows[top + 1..bottom] {
+                    assert!(!row.contains('╰'), "Content overlaps a border: {row}");
+                }
+            }
+            let content = rows.join("\n");
+            for label in [
+                "Table name:",
+                "Status:",
+                "Partition key:",
+                "Sort key:",
+                "Read capacity mode:",
+                "Write capacity mode:",
+                "Table class:",
+                "Total size:",
+                "Item count:",
+                "Indexes:",
+                "Creation time:",
+                "ARN:",
+                "Table ID:",
+                "Encryption type:",
+                "KMS key ARN:",
+                "Time to Live (TTL):",
+                "TTL attribute:",
+            ] {
+                assert!(content.contains(label), "Missing {label} at width {width}");
+            }
+            assert_eq!(content.matches("Deletion protection:").count(), 2);
+            let summary_bottom = rows.iter().position(|row| row.starts_with('╰')).unwrap();
+            assert!(rows[summary_bottom + 1].starts_with("Items"));
+            assert!(rows[summary_bottom + 2].contains("General information"));
+            let general_top = rows
+                .iter()
+                .position(|row| row.contains("General information"))
+                .unwrap();
+            let general_bottom = (general_top + 1..rows.len())
+                .find(|&y| rows[y].starts_with('╰'))
+                .unwrap();
+            assert!(rows[general_bottom + 1].contains("Capacity"));
+            if width == 300 {
+                assert_eq!(summary_bottom, 5, "Four content rows plus two borders");
+                assert_eq!(
+                    general_bottom - general_top,
+                    4,
+                    "Three content rows plus two borders"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_summary_and_general_render_in_tiny_viewports() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.detail_tab = DetailTab::Settings;
+        for width in [1, 2, 12, 80] {
+            for height in [1, 2, 3, 8] {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|f| render_table_detail(f, &app, f.area()))
+                    .unwrap();
+            }
+        }
+    }
+
+    fn items_rows(app: &App) -> Vec<String> {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut terminal = Terminal::new(TestBackend::new(220, 20)).unwrap();
+        let table = current_table(app).unwrap();
+        terminal
+            .draw(|f| render_items_tab(f, app, table, f.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..20)
+            .map(|y| (0..220).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn test_items_plain_title_has_no_result_summary_or_status_row() {
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.items.items = (0..152)
+            .map(|i| item_with(&[("order_id", &format!("record{i:03}"))]))
+            .collect();
+        app.dynamodb_state.items_context = items::context(&app);
+        let rows = items_rows(&app);
+        // Filter consumes three rows; the table border is immediately next.
+        assert!(rows[3].starts_with("╭─ orders ─"));
+        let border = rows[3].strip_prefix("╭─ orders ─").unwrap();
+        assert!(border.strip_suffix('╮').unwrap().chars().all(|c| c == '─'));
+        assert!(rows[4].contains("order_id"));
+        assert!(rows[5].contains("record000"));
+        let screen = rows.join("\n");
+        assert!(!screen.contains("loaded"));
+        assert!(!screen.contains("matching"));
+        assert!(!screen.contains("No more pages"));
+    }
+
+    #[test]
+    fn test_items_placeholders_keep_messages_in_body_not_title() {
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.items_loading = true;
+        let rows = items_rows(&app);
+        assert!(rows[3].starts_with("╭─ orders ─"));
+        assert!(!rows[3].contains("Loading"));
+        assert!(rows[4].contains("Loading items..."));
+
+        app.dynamodb_state.items_loading = false;
+        app.dynamodb_state.item_operation = ItemOperation::Query;
+        let rows = items_rows(&app);
+        assert!(rows[3].starts_with("╭─ orders ─"));
+        assert!(!rows[3].contains("query"));
+        assert!(rows[4].contains("to run the query"));
     }
 
     #[test]

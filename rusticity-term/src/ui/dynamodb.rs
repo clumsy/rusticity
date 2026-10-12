@@ -4,7 +4,7 @@ use crate::common::{
     SortDirection, UTC_TIMESTAMP_WIDTH,
 };
 use crate::dynamodb::table;
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::format_title;
 use crate::ui::render_tabs;
@@ -1155,11 +1155,10 @@ fn render_items_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
         .cloned()
         .unwrap_or_else(|| index_options[0].clone());
 
-    let items = filtered_items(app);
-    let page_size = state.items.page_size.value();
-    let total_pages = items.len().div_ceil(page_size.max(1));
-    let current_page = state.items.selected.checked_div(page_size).unwrap_or(0);
-    let pagination = render_pagination_text(current_page, total_pages);
+    let view = state
+        .items
+        .prepare_view(filtered_items(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     let placeholder = if state.item_operation == ItemOperation::Query {
         "Enter a partition key value to query"
@@ -1223,27 +1222,12 @@ fn render_items_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
         return;
     }
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(items.len());
-    let paginated: Vec<&DdbItem> = if start_idx < items.len() {
-        items[start_idx..end_idx].to_vec()
-    } else {
-        vec![]
-    };
-
     let columns = item_columns(t, app);
-    let expanded_index = state.items.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
 
     let config = TableConfig {
-        items: paginated,
-        selected_index: state.items.selected.saturating_sub(start_idx),
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
@@ -1354,18 +1338,11 @@ pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let filtered = filtered_dynamodb_tables(app);
-    let filtered_count = filtered.len();
-
-    let page_size = app.dynamodb_state.tables.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size.max(1));
-    let current_page = app
+    let view = app
         .dynamodb_state
         .tables
-        .selected
-        .checked_div(page_size)
-        .unwrap_or(0);
-    let pagination = render_pagination_text(current_page, total_pages);
+        .prepare_view(filtered_dynamodb_tables(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -1380,15 +1357,7 @@ pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered_count);
-    let paginated: Vec<_> = if start_idx < filtered_count {
-        filtered[start_idx..end_idx].to_vec()
-    } else {
-        vec![]
-    };
-
-    let title = format_title(&format!("Tables ({})", filtered_count));
+    let title = format_title(&format!("Tables ({})", view.total_items));
 
     let columns: Vec<Box<dyn Column<DdbTable>>> = app
         .dynamodb_visible_column_ids
@@ -1398,20 +1367,10 @@ pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let expanded_index = app.dynamodb_state.tables.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-
-    let selected_index = app.dynamodb_state.tables.selected.saturating_sub(start_idx);
-
     let config = TableConfig {
-        items: paginated,
-        selected_index,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Name",
         sort_direction: SortDirection::Asc,
@@ -1440,6 +1399,48 @@ mod tests {
             deletion_protection: "Disabled".to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_prepared_items_second_page_and_stale_selection() {
+        use crate::common::PageSize;
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.detail_tab = DetailTab::Items;
+        app.dynamodb_state.items.items = (0..25)
+            .map(|i| item_with(&[("order_id", &format!("record{i:02}")), ("status", "MATCH")]))
+            .collect();
+        app.dynamodb_state
+            .items
+            .items
+            .push(item_with(&[("order_id", "excluded")]));
+        app.dynamodb_state.item_filter = "match".into();
+        app.dynamodb_state.items.page_size = PageSize::Ten;
+        app.dynamodb_state.items.selected = 12;
+        app.dynamodb_state.items.expanded_item = Some(11);
+        app.dynamodb_state.items.next_token = Some("unchanged-server-cursor".into());
+
+        let content = render_to_string(&app, 200, 45);
+        assert!(content.contains(&render_pagination_text(1, 3)));
+        assert!(content.contains("record10"));
+        assert!(content.contains("record19"));
+        assert!(content.contains("▼ record11"));
+        assert!(content.contains("► record12"));
+        assert!(!content.contains("record09"));
+        assert!(!content.contains("record20"));
+        assert!(!content.contains("excluded"));
+
+        // A narrower result set can arrive before navigation state is reset.
+        app.dynamodb_state.item_filter = "missing".into();
+        let content = render_to_string(&app, 200, 45);
+        assert!(!content.contains("record12"));
+        assert_eq!(app.dynamodb_state.items.selected, 12);
+        assert_eq!(app.dynamodb_state.items.expanded_item, Some(11));
+        assert_eq!(
+            app.dynamodb_state.items.next_token.as_deref(),
+            Some("unchanged-server-cursor")
+        );
+        assert!(!app.dynamodb_state.items_loading);
     }
 
     #[test]

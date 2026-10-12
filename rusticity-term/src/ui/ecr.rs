@@ -5,7 +5,7 @@ use crate::common::{
 use crate::ecr::image::{self, Image as EcrImage};
 use crate::ecr::repo::{self, Repository as EcrRepository};
 use crate::keymap::Mode;
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{format_title, render_tabs};
@@ -109,30 +109,15 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    // Tabs
     let tabs: Vec<(&str, Tab)> = Tab::ALL.iter().map(|tab| (tab.name(), *tab)).collect();
     render_tabs(frame, chunks[0], &tabs, &app.ecr_state.tab);
 
-    // Calculate pagination
-    let filtered_count: usize = app
+    let view = app
         .ecr_state
         .repositories
-        .items
-        .iter()
-        .filter(|r| {
-            app.ecr_state.repositories.filter.is_empty()
-                || r.name
-                    .to_lowercase()
-                    .contains(&app.ecr_state.repositories.filter.to_lowercase())
-        })
-        .count();
+        .prepare_view(filtered_ecr_repositories(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
-    let page_size = app.ecr_state.repositories.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.ecr_state.repositories.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
-
-    // Filter
     render_simple_filter(
         frame,
         chunks[1],
@@ -146,34 +131,15 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    // Table
-    let filtered: Vec<_> = app
-        .ecr_state
-        .repositories
-        .items
-        .iter()
-        .filter(|r| {
-            app.ecr_state.repositories.filter.is_empty()
-                || r.name
-                    .to_lowercase()
-                    .contains(&app.ecr_state.repositories.filter.to_lowercase())
-        })
-        .collect();
-
-    // Apply pagination
-    let page_size = app.ecr_state.repositories.page_size.value();
-    let current_page = app.ecr_state.repositories.selected / page_size;
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered.len());
-    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
     let tab_label = match app.ecr_state.tab {
         Tab::Private => "Private",
         Tab::Public => "Public",
     };
-    let title = format_title(&format!("{} repositories ({})", tab_label, filtered.len()));
+    let title = format_title(&format!(
+        "{} repositories ({})",
+        tab_label, view.total_items
+    ));
 
-    // Define columns
     let columns: Vec<Box<dyn Column<EcrRepository>>> = app
         .ecr_repo_visible_column_ids
         .iter()
@@ -182,18 +148,10 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let expanded_index = app.ecr_state.repositories.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-
     let config = TableConfig {
-        items: paginated,
-        selected_index: app.ecr_state.repositories.selected % page_size,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Repository name",
         sort_direction: SortDirection::Asc,

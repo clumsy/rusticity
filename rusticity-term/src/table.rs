@@ -1,5 +1,31 @@
 use crate::common::PageSize;
 
+/// Which in-memory window an existing table renders. This does not fetch data
+/// or interpret a service's continuation token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableWindow {
+    /// A page aligned to the current selection (most service tables).
+    SelectedPage,
+    /// A sliding window starting at scroll_offset (e.g. CloudWatch log groups).
+    ScrollOffset,
+}
+
+/// Render-ready rows and metadata from one filtered, ordered result set.
+///
+/// The vector owns references, not resources, and reuses the caller's allocation.
+/// Indices refer to this visible window; counts refer to the full result set.
+#[derive(Debug)]
+pub struct PreparedTableView<'a, T> {
+    pub items: Vec<&'a T>,
+    pub total_items: usize,
+    pub current_page: usize,
+    pub total_pages: usize,
+    /// Preserves the renderer's saturating selection-offset convention. A stale
+    /// selection may be outside items; preparation never changes navigation state.
+    pub selected_index: usize,
+    pub expanded_index: Option<usize>,
+}
+
 /// Generic table state for list-based services
 #[derive(Debug, Clone)]
 pub struct TableState<T> {
@@ -40,10 +66,53 @@ impl<T> TableState<T> {
         self.items.iter().filter(|item| predicate(item)).collect()
     }
 
-    pub fn paginate<'a>(&self, filtered: &'a [&'a T]) -> &'a [&'a T] {
+    /// Prepare an already filtered and sorted result set for rendering.
+    ///
+    /// Keep service-specific filtering/sorting in the caller so rendering and
+    /// actions continue to use the same ordering. Only in-memory windowing lives
+    /// here: no loading, cursor advancement, selection reset, or resource clones.
+    /// Stale positions produce an empty window instead of panicking.
+    pub fn prepare_view<'a>(
+        &self,
+        mut items: Vec<&'a T>,
+        window: TableWindow,
+    ) -> PreparedTableView<'a, T> {
+        let total_items = items.len();
         let page_size = self.page_size.value();
-        let end_idx = (self.scroll_offset + page_size).min(filtered.len());
-        &filtered[self.scroll_offset..end_idx]
+        let start = match window {
+            TableWindow::SelectedPage => self.selected / page_size * page_size,
+            TableWindow::ScrollOffset => self.scroll_offset,
+        };
+        let range = self.window_range(start, total_items);
+        let expanded_index = self
+            .expanded_item
+            .filter(|idx| range.contains(idx))
+            .map(|idx| idx - start);
+
+        // Truncate before draining so only visible references need to be shifted.
+        // No second page-sized Vec allocation (unlike slice.to_vec()).
+        items.truncate(range.end);
+        items.drain(..range.start);
+
+        PreparedTableView {
+            items,
+            total_items,
+            current_page: start / page_size,
+            total_pages: self.total_pages(total_items),
+            selected_index: self.selected.saturating_sub(start),
+            expanded_index,
+        }
+    }
+
+    fn window_range(&self, start: usize, total_items: usize) -> std::ops::Range<usize> {
+        start.min(total_items)
+            ..start
+                .saturating_add(self.page_size.value())
+                .min(total_items)
+    }
+
+    pub fn paginate<'a>(&self, filtered: &'a [&'a T]) -> &'a [&'a T] {
+        &filtered[self.window_range(self.scroll_offset, filtered.len())]
     }
 
     pub fn current_page(&self, _total_items: usize) -> usize {
@@ -334,5 +403,185 @@ mod tests {
             state.scroll_offset,
             state.scroll_offset + 10
         );
+    }
+}
+
+#[cfg(test)]
+mod prepared_view_tests {
+    use super::*;
+
+    #[test]
+    fn preparation_reuses_allocation_and_keeps_filtered_sorted_order() {
+        // Deliberately not Clone: preparing a view must only move references.
+        #[derive(Debug)]
+        struct Item(usize);
+        let state = TableState {
+            items: (0..30).map(Item).collect(),
+            selected: 12,
+            expanded_item: Some(11),
+            page_size: PageSize::Ten,
+            ..TableState::new()
+        };
+        let mut filtered = state.filtered(|item| item.0 % 2 == 0);
+        filtered.sort_by_key(|item| std::cmp::Reverse(item.0));
+        let allocation = filtered.as_ptr();
+        let capacity = filtered.capacity();
+        let view = state.prepare_view(filtered, TableWindow::SelectedPage);
+        assert_eq!(view.items.as_ptr(), allocation);
+        assert_eq!(view.items.capacity(), capacity);
+        assert_eq!(
+            view.items.iter().map(|item| item.0).collect::<Vec<_>>(),
+            [8, 6, 4, 2, 0]
+        );
+        assert_eq!(
+            (view.total_items, view.current_page, view.total_pages),
+            (15, 1, 2)
+        );
+        assert_eq!(view.selected_index, 2);
+        assert_eq!(view.expanded_index, Some(1));
+    }
+
+    #[test]
+    fn window_modes_preserve_page_vs_sliding_scroll_behavior() {
+        let state = TableState {
+            items: (0..25).collect::<Vec<_>>(),
+            selected: 14,
+            scroll_offset: 7,
+            expanded_item: Some(9),
+            page_size: PageSize::Ten,
+            ..TableState::new()
+        };
+        let page = state.prepare_view(state.items.iter().collect(), TableWindow::SelectedPage);
+        let scroll = state.prepare_view(state.items.iter().collect(), TableWindow::ScrollOffset);
+        assert_eq!(
+            page.items,
+            (10..20).collect::<Vec<_>>().iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            scroll.items,
+            (7..17).collect::<Vec<_>>().iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            (page.current_page, page.selected_index, page.expanded_index),
+            (1, 4, None)
+        );
+        assert_eq!(
+            (
+                scroll.current_page,
+                scroll.selected_index,
+                scroll.expanded_index
+            ),
+            (0, 7, Some(2))
+        );
+        assert_eq!(
+            state.paginate(&state.items.iter().collect::<Vec<_>>()),
+            scroll.items
+        );
+    }
+
+    #[test]
+    fn expansion_is_relative_and_only_present_inside_the_window() {
+        let mut state = TableState {
+            items: (0..25).collect::<Vec<_>>(),
+            selected: 12,
+            page_size: PageSize::Ten,
+            ..TableState::new()
+        };
+        for (expanded, expected) in [
+            (None, None),
+            (Some(9), None),
+            (Some(10), Some(0)),
+            (Some(19), Some(9)),
+            (Some(20), None),
+            (Some(usize::MAX), None),
+        ] {
+            state.expanded_item = expanded;
+            let view = state.prepare_view(state.items.iter().collect(), TableWindow::SelectedPage);
+            assert_eq!(view.expanded_index, expected);
+        }
+    }
+
+    #[test]
+    fn empty_and_stale_positions_are_safe_and_do_not_mutate_state() {
+        for window in [TableWindow::SelectedPage, TableWindow::ScrollOffset] {
+            for len in [0, 3, 10] {
+                let state = TableState {
+                    items: (0..len).collect::<Vec<_>>(),
+                    selected: usize::MAX,
+                    scroll_offset: usize::MAX,
+                    expanded_item: Some(usize::MAX),
+                    filter: "unchanged".into(),
+                    next_token: Some("server-cursor".into()),
+                    page_size: PageSize::Ten,
+                    ..TableState::new()
+                };
+                let view = state.prepare_view(state.items.iter().collect(), window);
+                assert!(view.items.is_empty());
+                assert_eq!(view.expanded_index, None);
+                assert_eq!(view.total_items, len);
+                assert_eq!(view.total_pages, len.div_ceil(10));
+                assert!(state
+                    .paginate(&state.items.iter().collect::<Vec<_>>())
+                    .is_empty());
+                assert_eq!(state.selected, usize::MAX);
+                assert_eq!(state.scroll_offset, usize::MAX);
+                assert_eq!(state.expanded_item, Some(usize::MAX));
+                assert_eq!(state.filter, "unchanged");
+                assert_eq!(state.next_token.as_deref(), Some("server-cursor"));
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_views_match_existing_arithmetic_at_all_page_sizes() {
+        for page_size in [
+            PageSize::Ten,
+            PageSize::TwentyFive,
+            PageSize::Fifty,
+            PageSize::OneHundred,
+        ] {
+            let size = page_size.value();
+            for len in [0, 1, size - 1, size, size + 1, 2 * size + 3] {
+                let mut state = TableState {
+                    items: (0..len).collect::<Vec<_>>(),
+                    page_size,
+                    ..TableState::new()
+                };
+                for selected in 0..len.max(1) {
+                    state.selected = selected;
+                    state.scroll_offset = selected.saturating_sub(3);
+                    for window in [TableWindow::SelectedPage, TableWindow::ScrollOffset] {
+                        let start = match window {
+                            TableWindow::SelectedPage => selected / size * size,
+                            TableWindow::ScrollOffset => state.scroll_offset,
+                        };
+                        let end = (start + size).min(len);
+                        let view = state.prepare_view(state.items.iter().collect(), window);
+                        assert_eq!(
+                            view.items,
+                            state.items[start..end].iter().collect::<Vec<_>>()
+                        );
+                        assert_eq!(view.selected_index, selected.saturating_sub(start));
+                        assert_eq!(view.current_page, start / size);
+                        assert_eq!(view.total_pages, len.div_ceil(size));
+                        assert!(view.items.len() <= size);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scrolling_selection_before_window_keeps_saturating_convention() {
+        let state = TableState {
+            items: (0..20).collect::<Vec<_>>(),
+            selected: 3,
+            scroll_offset: 7,
+            page_size: PageSize::Ten,
+            ..TableState::new()
+        };
+        let view = state.prepare_view(state.items.iter().collect(), TableWindow::ScrollOffset);
+        assert_eq!(view.items[0], &7);
+        assert_eq!(view.selected_index, 0);
     }
 }

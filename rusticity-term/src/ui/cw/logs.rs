@@ -7,6 +7,7 @@ use crate::common::{
 use crate::cw::insights::{DateRangeType, TimeUnit};
 use crate::cw::logs::{EventColumn, LogGroupColumn, StreamColumn};
 use crate::keymap::Mode;
+use crate::table::TableWindow;
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
 use crate::ui::{
     calculate_dynamic_height, filter_area, format_title, get_cursor, labeled_field,
@@ -271,12 +272,11 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let placeholder = "Filter loaded log groups or try prefix search";
-    let filtered_groups = filtered_log_groups(app);
-    let filtered_count = filtered_groups.len();
-    let page_size = app.log_groups_state.log_groups.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.log_groups_state.log_groups.scroll_offset / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
+    let view = app
+        .log_groups_state
+        .log_groups
+        .prepare_view(filtered_log_groups(app), TableWindow::ScrollOffset);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     crate::ui::filter::render_simple_filter(
         frame,
@@ -291,11 +291,6 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let scroll_offset = app.log_groups_state.log_groups.scroll_offset;
-    let start_idx = scroll_offset;
-    let end_idx = (start_idx + page_size).min(filtered_groups.len());
-    let paginated: Vec<&LogGroup> = filtered_groups[start_idx..end_idx].to_vec();
-
     let mut columns: Vec<Box<dyn TableColumn<LogGroup>>> = vec![];
 
     for col_id in &app.cw_log_group_visible_column_ids {
@@ -305,30 +300,14 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
         columns.push(Box::new(col));
     }
 
-    let expanded_index = app
-        .log_groups_state
-        .log_groups
-        .expanded_item
-        .and_then(|idx| {
-            if idx >= start_idx && idx < end_idx {
-                Some(idx - start_idx)
-            } else {
-                None
-            }
-        });
-
     let config = TableConfig {
-        items: paginated,
-        selected_index: app
-            .log_groups_state
-            .log_groups
-            .selected
-            .saturating_sub(start_idx),
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "",
         sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Log groups ({})", filtered_count)),
+        title: format_title(&format!("Log groups ({})", view.total_items)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|group: &LogGroup| {
             expanded_from_columns(&columns, group)
@@ -1146,6 +1125,64 @@ mod tests {
 
     fn test_app() -> App {
         App::new_without_client("test".to_string(), Some("us-east-1".to_string()))
+    }
+
+    #[test]
+    fn test_prepared_groups_uses_scroll_offset_and_handles_stale_window() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = test_app();
+        app.mode = Mode::Normal;
+        app.log_groups_state.log_groups.items = (0..25)
+            .map(|i| LogGroup {
+                name: format!("group{i:02}"),
+                creation_time: None,
+                stored_bytes: None,
+                retention_days: None,
+                log_class: None,
+                arn: None,
+                log_group_arn: None,
+                deletion_protection_enabled: None,
+            })
+            .collect();
+        app.log_groups_state.log_groups.page_size = crate::common::PageSize::Ten;
+        app.log_groups_state.log_groups.scroll_offset = 7;
+        app.log_groups_state.log_groups.selected = 14;
+        app.log_groups_state.log_groups.expanded_item = Some(9);
+        let mut terminal = Terminal::new(TestBackend::new(200, 45)).unwrap();
+        terminal
+            .draw(|f| render_groups_list(f, &app, f.area()))
+            .unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("Log groups (25)"));
+        assert!(content.contains(&render_pagination_text(0, 3)));
+        assert!(content.contains("group07"));
+        assert!(content.contains("group16"));
+        assert!(content.contains("► group14"));
+        assert!(content.contains("▼ group09"));
+        assert!(!content.contains("group06"));
+        assert!(!content.contains("group17"));
+
+        app.log_groups_state.log_groups.filter = "no-match".into();
+        terminal
+            .draw(|f| render_groups_list(f, &app, f.area()))
+            .unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("Log groups (0)"));
+        assert!(!content.contains("group14"));
+        assert_eq!(app.log_groups_state.log_groups.scroll_offset, 7);
+        assert_eq!(app.log_groups_state.log_groups.selected, 14);
     }
 
     #[test]

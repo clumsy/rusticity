@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::efs::fs::{self, FileSystem as EfsFileSystem};
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::format_title;
 use crate::ui::render_tabs;
@@ -491,18 +491,11 @@ fn render_access_points_tab(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let filtered = filtered_access_points(app);
-    let filtered_count = filtered.len();
-
-    let page_size = app.efs_state.access_points.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size.max(1));
-    let current_page = app
+    let view = app
         .efs_state
         .access_points
-        .selected
-        .checked_div(page_size)
-        .unwrap_or(0);
-    let pagination = render_pagination_text(current_page, total_pages);
+        .prepare_view(filtered_access_points(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -517,14 +510,6 @@ fn render_access_points_tab(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered_count);
-    let paginated: Vec<_> = if start_idx < filtered_count {
-        filtered[start_idx..end_idx].to_vec()
-    } else {
-        vec![]
-    };
-
     let columns: Vec<Box<dyn Column<EfsAccessPoint>>> = app
         .efs_state
         .ap_visible_column_ids
@@ -535,27 +520,14 @@ fn render_access_points_tab(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let expanded_index = app.efs_state.access_points.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-    let selected_index = app
-        .efs_state
-        .access_points
-        .selected
-        .saturating_sub(start_idx);
-
     let config = TableConfig {
-        items: paginated,
-        selected_index,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Name",
         sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Access points ({})", filtered_count)),
+        title: format_title(&format!("Access points ({})", view.total_items)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|ap: &EfsAccessPoint| {
             expanded_from_columns(&columns, ap)
@@ -848,18 +820,11 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    let filtered = filtered_efs_file_systems(app);
-    let filtered_count = filtered.len();
-
-    let page_size = app.efs_state.file_systems.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app
+    let view = app
         .efs_state
         .file_systems
-        .selected
-        .checked_div(page_size)
-        .unwrap_or(0);
-    let pagination = render_pagination_text(current_page, total_pages);
+        .prepare_view(filtered_efs_file_systems(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -874,15 +839,7 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered_count);
-    let paginated: Vec<_> = if start_idx < filtered_count {
-        filtered[start_idx..end_idx].to_vec()
-    } else {
-        vec![]
-    };
-
-    let title = format_title(&format!("File Systems ({})", filtered_count));
+    let title = format_title(&format!("File Systems ({})", view.total_items));
 
     let columns: Vec<Box<dyn Column<EfsFileSystem>>> = app
         .efs_visible_column_ids
@@ -892,24 +849,10 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let expanded_index = app.efs_state.file_systems.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-
-    let selected_index = app
-        .efs_state
-        .file_systems
-        .selected
-        .saturating_sub(start_idx);
-
     let config = TableConfig {
-        items: paginated,
-        selected_index,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Creation time",
         sort_direction: SortDirection::Desc,

@@ -4,7 +4,7 @@ use crate::common::{
 use crate::ec2::tag::{Column as TagColumn, InstanceTag};
 use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
 use crate::ui::{
@@ -615,7 +615,10 @@ fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let filtered = filtered_tags(app);
+    let view = app
+        .ec2_state
+        .tags
+        .prepare_view(filtered_tags(app), TableWindow::SelectedPage);
 
     let columns: Vec<Box<dyn TableColumn<InstanceTag>>> = app
         .ec2_state
@@ -625,10 +628,7 @@ fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
         .map(|col| Box::new(col) as Box<dyn TableColumn<InstanceTag>>)
         .collect();
 
-    let page_size = app.ec2_state.tags.page_size.value();
-    let total_pages = filtered.len().div_ceil(page_size.max(1));
-    let current_page = app.ec2_state.tags.selected / page_size.max(1);
-    let pagination = render_pagination_text(current_page, total_pages);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -643,30 +643,18 @@ fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
         },
     );
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered.len());
-    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-    let expanded_index = app.ec2_state.tags.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-
     render_table(
         frame,
         TableConfig {
             area: chunks[1],
             columns: &columns,
-            items: paginated,
-            selected_index: app.ec2_state.tags.selected % page_size.max(1),
+            items: view.items,
+            selected_index: view.selected_index,
             is_active: app.mode != Mode::FilterInput,
-            title: format_title(&format!("Tags ({})", filtered.len())),
+            title: format_title(&format!("Tags ({})", view.total_items)),
             sort_column: "value",
             sort_direction: SortDirection::Asc,
-            expanded_index,
+            expanded_index: view.expanded_index,
             get_expanded_content: Some(Box::new(|tag: &InstanceTag| {
                 expanded_from_columns(&columns, tag)
             })),
@@ -886,6 +874,47 @@ mod tests {
         assert_eq!(StateFilter::ALL.len(), 7);
         assert_eq!(StateFilter::ALL[0], StateFilter::AllStates);
         assert_eq!(StateFilter::ALL[6], StateFilter::Stopping);
+    }
+
+    #[test]
+    fn test_prepared_tags_preserve_filtering_and_value_sort_before_paging() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = crate::app::App::new_without_client("test".into(), None);
+        app.mode = Mode::Normal;
+        app.ec2_state.tags.items = (0..25)
+            .rev()
+            .map(|i| InstanceTag {
+                key: format!("wanted-{i:02}"),
+                value: format!("rank{i:02}"),
+            })
+            .collect();
+        app.ec2_state.tags.items.push(InstanceTag {
+            key: "excluded".into(),
+            value: "rank-negative".into(),
+        });
+        app.ec2_state.tags.filter = "WANTED".into();
+        app.ec2_state.tags.page_size = crate::common::PageSize::Ten;
+        app.ec2_state.tags.selected = 12;
+        let mut terminal = Terminal::new(TestBackend::new(140, 35)).unwrap();
+        terminal
+            .draw(|f| render_tags_tab(f, &app, f.area()))
+            .unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("Tags (25)"));
+        assert!(content.contains(&render_pagination_text(1, 3)));
+        assert!(content.contains("rank10"));
+        assert!(content.contains("rank19"));
+        assert!(content.contains("► wanted-12"));
+        assert!(content.find("rank10").unwrap() < content.find("rank19").unwrap());
+        assert!(!content.contains("rank09"));
+        assert!(!content.contains("rank20"));
+        assert!(!content.contains("rank-negative"));
     }
 
     #[test]

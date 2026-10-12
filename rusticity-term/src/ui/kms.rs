@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::common::{render_pagination_text, ColumnId, CyclicEnum, InputFocus, SortDirection};
 use crate::kms::key::{self, Key as KmsKey};
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{format_title, render_tabs};
@@ -128,18 +128,11 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
     render_tabs(frame, chunks[0], &tabs, &app.kms_state.tab);
 
     // Filtered keys for current tab
-    let filtered = filtered_kms_keys(app);
-    let filtered_count = filtered.len();
-
-    let page_size = app.kms_state.keys.page_size.value();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app
+    let view = app
         .kms_state
         .keys
-        .selected
-        .checked_div(page_size)
-        .unwrap_or(0);
-    let pagination = render_pagination_text(current_page, total_pages);
+        .prepare_view(filtered_kms_keys(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     // Filter bar
     render_simple_filter(
@@ -155,19 +148,10 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    // Paginate
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered_count);
-    let paginated: Vec<_> = if start_idx < filtered_count {
-        filtered[start_idx..end_idx].to_vec()
-    } else {
-        vec![]
-    };
-
     let title = format_title(&format!(
         "{} ({})",
         app.kms_state.tab.name(),
-        filtered_count
+        view.total_items
     ));
 
     let columns: Vec<Box<dyn Column<KmsKey>>> = app
@@ -179,24 +163,10 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let expanded_index = app.kms_state.keys.expanded_item.and_then(|idx| {
-        if idx >= start_idx && idx < end_idx {
-            Some(idx - start_idx)
-        } else {
-            None
-        }
-    });
-
-    let selected_index = if page_size > 0 {
-        app.kms_state.keys.selected.saturating_sub(start_idx)
-    } else {
-        0
-    };
-
     let config = TableConfig {
-        items: paginated,
-        selected_index,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Alias",
         sort_direction: SortDirection::Asc,

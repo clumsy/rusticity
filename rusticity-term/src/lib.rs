@@ -15,6 +15,7 @@ pub mod iam;
 pub mod keymap;
 pub mod kms;
 pub mod lambda;
+pub mod preferences;
 pub mod s3;
 pub mod session;
 pub mod sqs;

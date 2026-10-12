@@ -1,49 +1,9 @@
-use crate::app::App;
-use crate::common::{ColumnId, InputFocus, PageSize};
+use crate::app::{App, Service};
+use crate::common::InputFocus;
+use crate::preferences::bindings;
 use crate::ui::efs::{
     filtered_access_points, filtered_efs_file_systems, DetailTab, FILTER_CONTROLS,
 };
-
-/// Number of access-point columns visible in the preferences selector.
-fn ap_col_count(app: &App) -> usize {
-    app.efs_state.ap_column_ids.len()
-}
-
-/// Number of mount-target columns visible in the preferences selector.
-fn mt_col_count(app: &App) -> usize {
-    app.efs_state.mt_column_ids.len()
-}
-
-/// Toggle a column's visibility within `visible`, keeping at least one visible.
-fn toggle_visible(visible: &mut Vec<ColumnId>, all: &[ColumnId], idx: usize) {
-    if idx > 0 && idx <= all.len() {
-        let col = all[idx - 1];
-        if let Some(pos) = visible.iter().position(|c| *c == col) {
-            if visible.len() > 1 {
-                visible.remove(pos);
-            }
-        } else {
-            visible.push(col);
-        }
-    }
-}
-
-/// Apply a page-size selection when `idx` lands in the page-size section that
-/// follows `n` columns (indices `n+3 ..= n+6`). Returns to the first page.
-fn set_page_size_by_idx<T>(table: &mut crate::table::TableState<T>, idx: usize, n: usize) {
-    let ps = if idx == n + 3 {
-        PageSize::Ten
-    } else if idx == n + 4 {
-        PageSize::TwentyFive
-    } else if idx == n + 5 {
-        PageSize::Fifty
-    } else if idx == n + 6 {
-        PageSize::OneHundred
-    } else {
-        return;
-    };
-    table.set_page_size(ps);
-}
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -420,85 +380,21 @@ pub fn console_url(app: &App) -> String {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.efs_state.current_file_system.is_some() {
-        match app.efs_state.detail_tab {
-            DetailTab::Tags => {
-                // Key/Value columns are always visible — only page size configurable.
-                set_page_size_by_idx(&mut app.efs_state.tags_table, idx, 2);
-                return;
-            }
-            DetailTab::AccessPoints => {
-                let all = app.efs_state.ap_column_ids.clone();
-                toggle_visible(&mut app.efs_state.ap_visible_column_ids, &all, idx);
-                set_page_size_by_idx(&mut app.efs_state.access_points, idx, all.len());
-                return;
-            }
-            DetailTab::Network => {
-                let all = app.efs_state.mt_column_ids.clone();
-                toggle_visible(&mut app.efs_state.mt_visible_column_ids, &all, idx);
-                set_page_size_by_idx(&mut app.efs_state.mount_targets, idx, all.len());
-                return;
-            }
-            _ => return,
-        }
-    }
-    // File systems list.
-    if idx > 0 && idx <= app.efs_column_ids.len() {
-        if let Some(col) = app.efs_column_ids.get(idx - 1) {
-            if let Some(pos) = app.efs_visible_column_ids.iter().position(|c| c == col) {
-                if app.efs_visible_column_ids.len() > 1 {
-                    app.efs_visible_column_ids.remove(pos);
-                }
-            } else {
-                app.efs_visible_column_ids.push(*col);
-            }
-        }
-    } else {
-        set_page_size_by_idx(
-            &mut app.efs_state.file_systems,
-            idx,
-            app.efs_column_ids.len(),
-        );
-    }
-}
-
-/// Number of toggleable columns for the active view (used by the prefs cursor).
-fn active_prefs_col_count(app: &App) -> usize {
-    if app.efs_state.current_file_system.is_some() {
-        match app.efs_state.detail_tab {
-            DetailTab::Tags => 2,
-            DetailTab::AccessPoints => ap_col_count(app),
-            DetailTab::Network => mt_col_count(app),
-            _ => app.efs_column_ids.len(),
-        }
-    } else {
-        app.efs_column_ids.len()
-    }
+    bindings::activate_for(app, Service::EfsFileSystems);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    bindings::move_section_for(app, Service::EfsFileSystems, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    bindings::move_section_for(app, Service::EfsFileSystems, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    active_prefs_col_count(app) + 6
+    bindings::model_for(app, Service::EfsFileSystems).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    active_prefs_col_count(app)
+    bindings::model_for(app, Service::EfsFileSystems).column_count()
 }

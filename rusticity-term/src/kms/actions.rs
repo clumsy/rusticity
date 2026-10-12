@@ -1,5 +1,6 @@
-use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::app::{App, Service};
+use crate::common::{CyclicEnum, InputFocus};
+use crate::preferences::bindings;
 use crate::ui::kms::{filtered_kms_keys, FILTER_CONTROLS};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -144,65 +145,21 @@ pub fn console_url(app: &App) -> String {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    let tab_cols = app.kms_state.tab_column_ids();
-    // idx 0 = Alias (locked, always visible — skip)
-    // idx 1..N = columns (1-based into tab's column list, col at tab_cols[idx-1])
-    // idx N+2 = PageSize section header
-    // idx N+3..N+6 = Ten, TwentyFive, Fifty, OneHundred
-    if idx > 0 && idx <= tab_cols.len() {
-        if let Some(col_id) = tab_cols.get(idx - 1) {
-            // Alias is always visible — don't allow toggling it off
-            if *col_id == crate::kms::key::Column::Alias.id() {
-                return;
-            }
-            let visible = app.kms_state.visible_column_ids_mut();
-            if let Some(pos) = visible.iter().position(|c| c == col_id) {
-                if visible.len() > 1 {
-                    visible.remove(pos);
-                }
-            } else {
-                visible.push(col_id);
-            }
-        }
-    } else {
-        let n = tab_cols.len();
-        if idx == n + 3 {
-            app.kms_state.keys.page_size = PageSize::Ten;
-        } else if idx == n + 4 {
-            app.kms_state.keys.page_size = PageSize::TwentyFive;
-        } else if idx == n + 5 {
-            app.kms_state.keys.page_size = PageSize::Fifty;
-        } else if idx == n + 6 {
-            app.kms_state.keys.page_size = PageSize::OneHundred;
-        }
-    }
+    bindings::activate_for(app, Service::KmsKeys);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let n = app.kms_state.tab_column_ids().len();
-    let page_size_idx = n + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    bindings::move_section_for(app, Service::KmsKeys, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let n = app.kms_state.tab_column_ids().len();
-    let page_size_idx = n + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    bindings::move_section_for(app, Service::KmsKeys, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.kms_state.tab_column_ids().len() + 6
+    bindings::model_for(app, Service::KmsKeys).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.kms_state.tab_column_ids().len()
+    bindings::model_for(app, Service::KmsKeys).column_count()
 }

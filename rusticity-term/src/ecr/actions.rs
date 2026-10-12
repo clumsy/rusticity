@@ -1,5 +1,6 @@
-use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::app::{App, Service};
+use crate::common::{CyclicEnum, InputFocus};
+use crate::preferences::bindings;
 use crate::ui::ecr::{filtered_ecr_images, filtered_ecr_repositories, FILTER_CONTROLS};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -236,83 +237,23 @@ pub fn scroll_down(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.ecr_state.current_repository.is_some() {
-        // Images view — idx is 0-based
-        if let Some(col) = app.ecr_image_column_ids.get(idx) {
-            if let Some(pos) = app
-                .ecr_image_visible_column_ids
-                .iter()
-                .position(|c| c == col)
-            {
-                if app.ecr_image_visible_column_ids.len() > 1 {
-                    app.ecr_image_visible_column_ids.remove(pos);
-                }
-            } else {
-                app.ecr_image_visible_column_ids.push(*col);
-            }
-        }
-    } else {
-        // Repositories view — idx is 1-based (0 = header)
-        if idx > 0 && idx <= app.ecr_repo_column_ids.len() {
-            if let Some(col) = app.ecr_repo_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .ecr_repo_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.ecr_repo_visible_column_ids.len() > 1 {
-                        app.ecr_repo_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.ecr_repo_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.ecr_repo_column_ids.len() + 3 {
-            app.ecr_state.repositories.page_size = PageSize::Ten;
-        } else if idx == app.ecr_repo_column_ids.len() + 4 {
-            app.ecr_state.repositories.page_size = PageSize::TwentyFive;
-        } else if idx == app.ecr_repo_column_ids.len() + 5 {
-            app.ecr_state.repositories.page_size = PageSize::Fifty;
-        } else if idx == app.ecr_repo_column_ids.len() + 6 {
-            app.ecr_state.repositories.page_size = PageSize::OneHundred;
-        }
-    }
+    bindings::activate_for(app, Service::EcrRepositories);
 }
 
 pub fn next_preferences(app: &mut App) {
-    // Images view only — repos view handled by generic logic
-    let page_size_idx = app.ecr_image_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    bindings::move_section_for(app, Service::EcrRepositories, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = app.ecr_image_column_ids.len() + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    bindings::move_section_for(app, Service::EcrRepositories, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    if app.ecr_state.current_repository.is_some() {
-        app.ecr_image_column_ids.len() + 6
-    } else {
-        app.ecr_repo_column_ids.len() + 6
-    }
+    bindings::model_for(app, Service::EcrRepositories).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    if app.ecr_state.current_repository.is_some() {
-        app.ecr_image_column_ids.len()
-    } else {
-        app.ecr_repo_column_ids.len()
-    }
+    bindings::model_for(app, Service::EcrRepositories).column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

@@ -1,5 +1,6 @@
-use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::app::{App, Service};
+use crate::common::{CyclicEnum, InputFocus};
+use crate::preferences::bindings;
 use crate::ui::fsx::{filtered_fsx_file_systems, DetailTab, FILTER_CONTROLS};
 
 /// Tags on the currently-open file system (Tags detail tab).
@@ -263,102 +264,21 @@ fn maybe_load_backups(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.fsx_state.current_file_system.is_some() {
-        // Fixed-column detail tables: only the page size is configurable.
-        match app.fsx_state.detail_tab {
-            DetailTab::Tags => {
-                set_page_size_by_idx(&mut app.fsx_state.tags_table, idx, TAGS_N);
-                return;
-            }
-            DetailTab::Updates => {
-                set_page_size_by_idx(&mut app.fsx_state.updates_table, idx, UPDATES_N);
-                return;
-            }
-            DetailTab::Backups => {
-                set_page_size_by_idx(&mut app.fsx_state.backups, idx, BACKUPS_N);
-                return;
-            }
-            _ => return,
-        }
-    }
-    if idx > 0 && idx <= app.fsx_column_ids.len() {
-        if let Some(col) = app.fsx_column_ids.get(idx - 1) {
-            if let Some(pos) = app.fsx_visible_column_ids.iter().position(|c| c == col) {
-                if app.fsx_visible_column_ids.len() > 1 {
-                    app.fsx_visible_column_ids.remove(pos);
-                }
-            } else {
-                app.fsx_visible_column_ids.push(*col);
-            }
-        }
-    } else {
-        set_page_size_by_idx(
-            &mut app.fsx_state.file_systems,
-            idx,
-            app.fsx_column_ids.len(),
-        );
-    }
-}
-
-/// Apply a page-size selection when `idx` lands in the page-size section that
-/// follows `n` columns (indices `n+3 ..= n+6`). Returns to the first page.
-fn set_page_size_by_idx<T>(table: &mut crate::table::TableState<T>, idx: usize, n: usize) {
-    let ps = if idx == n + 3 {
-        PageSize::Ten
-    } else if idx == n + 4 {
-        PageSize::TwentyFive
-    } else if idx == n + 5 {
-        PageSize::Fifty
-    } else if idx == n + 6 {
-        PageSize::OneHundred
-    } else {
-        return;
-    };
-    table.set_page_size(ps);
-}
-
-const TAGS_N: usize = 2;
-const UPDATES_N: usize = 5;
-const BACKUPS_N: usize = 15;
-
-/// Number of toggleable columns for the active view. Fixed-column detail tables
-/// (Tags/Updates/Backups) expose only their own columns — never the list columns.
-fn active_prefs_col_count(app: &App) -> usize {
-    if app.fsx_state.current_file_system.is_some() {
-        match app.fsx_state.detail_tab {
-            DetailTab::Tags => TAGS_N,
-            DetailTab::Updates => UPDATES_N,
-            DetailTab::Backups => BACKUPS_N,
-            _ => app.fsx_column_ids.len(),
-        }
-    } else {
-        app.fsx_column_ids.len()
-    }
+    bindings::activate_for(app, Service::FsxFileSystems);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    bindings::move_section_for(app, Service::FsxFileSystems, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    bindings::move_section_for(app, Service::FsxFileSystems, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    active_prefs_col_count(app) + 6
+    bindings::model_for(app, Service::FsxFileSystems).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    active_prefs_col_count(app)
+    bindings::model_for(app, Service::FsxFileSystems).column_count()
 }

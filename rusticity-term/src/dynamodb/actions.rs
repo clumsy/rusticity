@@ -1,5 +1,6 @@
-use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::app::{App, Service};
+use crate::common::{CyclicEnum, InputFocus};
+use crate::preferences::bindings;
 use crate::ui::dynamodb::{
     current_table, filtered_dynamodb_tables, filtered_items, DetailTab, ItemOperation,
     ItemProjection, FILTER_CONTROLS, ITEMS_FILTER_CONTROLS, ITEM_INDEX, ITEM_OPERATION,
@@ -425,142 +426,22 @@ pub fn scroll_up_detail(app: &mut App) {
 
 // ── Column preferences ────────────────────────────────────────────────────────
 
-const INDEXES_N: usize = 10;
-const REPLICAS_N: usize = 5;
-const BACKUPS_N: usize = 6;
-const TAGS_N: usize = 2;
-
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.dynamodb_state.current_table.is_some() {
-        // Fixed-column detail tables: only the page size is configurable.
-        match app.dynamodb_state.detail_tab {
-            DetailTab::Indexes => {
-                set_page_size_by_idx(&mut app.dynamodb_state.indexes_table, idx, INDEXES_N)
-            }
-            DetailTab::GlobalTables => {
-                set_page_size_by_idx(&mut app.dynamodb_state.replicas_table, idx, REPLICAS_N)
-            }
-            DetailTab::Backups => {
-                set_page_size_by_idx(&mut app.dynamodb_state.backups, idx, BACKUPS_N)
-            }
-            DetailTab::Tags => {
-                set_page_size_by_idx(&mut app.dynamodb_state.tags_table, idx, TAGS_N)
-            }
-            DetailTab::Items => toggle_item_column(app, idx),
-            _ => {}
-        }
-        return;
-    }
-    if idx > 0 && idx <= app.dynamodb_column_ids.len() {
-        if let Some(col) = app.dynamodb_column_ids.get(idx - 1) {
-            if let Some(pos) = app
-                .dynamodb_visible_column_ids
-                .iter()
-                .position(|c| c == col)
-            {
-                if app.dynamodb_visible_column_ids.len() > 1 {
-                    app.dynamodb_visible_column_ids.remove(pos);
-                }
-            } else {
-                app.dynamodb_visible_column_ids.push(*col);
-            }
-        }
-    } else {
-        set_page_size_by_idx(
-            &mut app.dynamodb_state.tables,
-            idx,
-            app.dynamodb_column_ids.len(),
-        );
-    }
-}
-
-/// Items tab: attribute columns come from the data, so they are toggled by name
-/// against the hidden set. Indices past the columns fall through to page size.
-fn toggle_item_column(app: &mut App, idx: usize) {
-    let names = item_column_names(app);
-    let n = names.len();
-    if idx == 0 || idx > n {
-        set_page_size_by_idx(&mut app.dynamodb_state.items, idx, n);
-        return;
-    }
-    let name = names[idx - 1].clone();
-    let hidden = &mut app.dynamodb_state.item_hidden_columns;
-    match hidden.iter().position(|c| *c == name) {
-        Some(pos) => {
-            hidden.remove(pos);
-        }
-        // Keep at least one column visible.
-        None if hidden.len() + 1 < n => hidden.push(name),
-        None => {}
-    }
-}
-
-/// Attribute columns of the table open in the Items tab.
-fn item_column_names(app: &App) -> Vec<String> {
-    match current_table(app) {
-        Some(t) => crate::ui::dynamodb::item_column_names(t, app),
-        None => Vec::new(),
-    }
-}
-
-/// Apply a page-size selection when `idx` lands in the page-size section that
-/// follows `n` columns (indices `n+3 ..= n+6`).
-fn set_page_size_by_idx<T>(table: &mut crate::table::TableState<T>, idx: usize, n: usize) {
-    let ps = if idx == n + 3 {
-        PageSize::Ten
-    } else if idx == n + 4 {
-        PageSize::TwentyFive
-    } else if idx == n + 5 {
-        PageSize::Fifty
-    } else if idx == n + 6 {
-        PageSize::OneHundred
-    } else {
-        return;
-    };
-    table.set_page_size(ps);
-}
-
-/// Number of toggleable columns for the active view. Fixed-column detail tables
-/// expose only their own columns — never the list columns.
-fn active_prefs_col_count(app: &App) -> usize {
-    if app.dynamodb_state.current_table.is_some() {
-        match app.dynamodb_state.detail_tab {
-            DetailTab::Indexes => INDEXES_N,
-            DetailTab::GlobalTables => REPLICAS_N,
-            DetailTab::Backups => BACKUPS_N,
-            DetailTab::Tags => TAGS_N,
-            // Item columns are the table's own attributes, read from the data.
-            DetailTab::Items => item_column_names(app).len(),
-            _ => app.dynamodb_column_ids.len(),
-        }
-    } else {
-        app.dynamodb_column_ids.len()
-    }
+    bindings::activate_for(app, Service::DynamoDbTables);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    bindings::move_section_for(app, Service::DynamoDbTables, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = active_prefs_col_count(app) + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    bindings::move_section_for(app, Service::DynamoDbTables, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    active_prefs_col_count(app) + 6
+    bindings::model_for(app, Service::DynamoDbTables).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    active_prefs_col_count(app)
+    bindings::model_for(app, Service::DynamoDbTables).column_count()
 }

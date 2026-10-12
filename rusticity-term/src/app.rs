@@ -1837,7 +1837,9 @@ impl App {
                 }
             }
             Action::ToggleColumn => {
-                if self.current_service == Service::S3Buckets
+                if crate::preferences::bindings::activate_active(self) {
+                    // The same model supplies rows, navigation, and actions.
+                } else if self.current_service == Service::S3Buckets
                     && self.s3_state.current_bucket.is_none()
                 {
                     crate::s3::actions::toggle_column(self);
@@ -1912,16 +1914,6 @@ impl App {
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
                     crate::apig::actions::toggle_column(self);
-                } else if self.current_service == Service::EcrRepositories {
-                    crate::ecr::actions::toggle_column(self);
-                } else if self.current_service == Service::KmsKeys {
-                    crate::kms::actions::toggle_column(self);
-                } else if self.current_service == Service::EfsFileSystems {
-                    crate::efs::actions::toggle_column(self);
-                } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::toggle_column(self)
-                } else if self.current_service == Service::FsxFileSystems {
-                    crate::fsx::actions::toggle_column(self);
                 } else if self.current_service == Service::Ec2Instances {
                     crate::ec2::actions::toggle_column(self);
                 } else if self.current_service == Service::SqsQueues {
@@ -2030,22 +2022,12 @@ impl App {
                 }
             }
             Action::NextPreferences => {
-                if self.current_service == Service::ApiGatewayApis {
+                if crate::preferences::bindings::move_section_active(self, true) {
+                    // The same model supplies rows, navigation, and actions.
+                } else if self.current_service == Service::ApiGatewayApis {
                     crate::apig::actions::next_preferences(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     crate::cw::actions::alarms_next_preferences(self);
-                } else if self.current_service == Service::EcrRepositories
-                    && self.ecr_state.current_repository.is_some()
-                {
-                    crate::ecr::actions::next_preferences(self);
-                } else if self.current_service == Service::KmsKeys {
-                    crate::kms::actions::next_preferences(self);
-                } else if self.current_service == Service::EfsFileSystems {
-                    crate::efs::actions::next_preferences(self);
-                } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::next_preferences(self)
-                } else if self.current_service == Service::FsxFileSystems {
-                    crate::fsx::actions::next_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::next_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -2154,22 +2136,12 @@ impl App {
                 }
             }
             Action::PrevPreferences => {
-                if self.current_service == Service::ApiGatewayApis {
+                if crate::preferences::bindings::move_section_active(self, false) {
+                    // The same model supplies rows, navigation, and actions.
+                } else if self.current_service == Service::ApiGatewayApis {
                     crate::apig::actions::prev_preferences(self);
                 } else if self.current_service == Service::CloudWatchAlarms {
                     crate::cw::actions::alarms_prev_preferences(self);
-                } else if self.current_service == Service::EcrRepositories
-                    && self.ecr_state.current_repository.is_some()
-                {
-                    crate::ecr::actions::prev_preferences(self);
-                } else if self.current_service == Service::KmsKeys {
-                    crate::kms::actions::prev_preferences(self);
-                } else if self.current_service == Service::EfsFileSystems {
-                    crate::efs::actions::prev_preferences(self);
-                } else if self.current_service == Service::DynamoDbTables {
-                    crate::dynamodb::actions::prev_preferences(self)
-                } else if self.current_service == Service::FsxFileSystems {
-                    crate::fsx::actions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::prev_preferences(self);
                 } else if self.current_service == Service::LambdaApplications {
@@ -3480,7 +3452,9 @@ impl App {
     }
 
     fn get_column_selector_max(&self) -> usize {
-        if self.current_service == Service::ApiGatewayApis {
+        if let Some(model) = crate::preferences::bindings::active(self) {
+            model.max_index()
+        } else if self.current_service == Service::ApiGatewayApis {
             crate::apig::actions::column_selector_max(self)
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
@@ -3496,16 +3470,6 @@ impl App {
             crate::cloudtrail::actions::column_selector_max(self)
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::column_selector_max(self)
-        } else if self.current_service == Service::EcrRepositories {
-            crate::ecr::actions::column_selector_max(self)
-        } else if self.current_service == Service::KmsKeys {
-            crate::kms::actions::column_selector_max(self)
-        } else if self.current_service == Service::EfsFileSystems {
-            crate::efs::actions::column_selector_max(self)
-        } else if self.current_service == Service::DynamoDbTables {
-            crate::dynamodb::actions::column_selector_max(self)
-        } else if self.current_service == Service::FsxFileSystems {
-            crate::fsx::actions::column_selector_max(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_selector_max(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3524,7 +3488,9 @@ impl App {
     }
 
     fn get_column_count(&self) -> usize {
-        if self.current_service == Service::ApiGatewayApis {
+        if let Some(model) = crate::preferences::bindings::active(self) {
+            model.column_count()
+        } else if self.current_service == Service::ApiGatewayApis {
             crate::apig::actions::column_count(self)
         } else if self.current_service == Service::S3Buckets
             && self.s3_state.current_bucket.is_none()
@@ -3540,16 +3506,6 @@ impl App {
             crate::cloudtrail::actions::column_count(self)
         } else if self.current_service == Service::Ec2Instances {
             crate::ec2::actions::column_count(self)
-        } else if self.current_service == Service::EcrRepositories {
-            crate::ecr::actions::column_count(self)
-        } else if self.current_service == Service::KmsKeys {
-            crate::kms::actions::column_count(self)
-        } else if self.current_service == Service::EfsFileSystems {
-            crate::efs::actions::column_count(self)
-        } else if self.current_service == Service::DynamoDbTables {
-            crate::dynamodb::actions::column_count(self)
-        } else if self.current_service == Service::FsxFileSystems {
-            crate::fsx::actions::column_count(self)
         } else if self.current_service == Service::SqsQueues {
             crate::sqs::actions::column_count(self)
         } else if self.current_service == Service::LambdaFunctions {
@@ -3568,6 +3524,9 @@ impl App {
     }
 
     fn is_blank_row_index(&self, idx: usize) -> bool {
+        if let Some(model) = crate::preferences::bindings::active(self) {
+            return model.is_separator(idx);
+        }
         let column_count = self.get_column_count();
         // Blank row is at: header(0) + columns(1..=column_count) + blank(column_count+1)
         idx == column_count + 1
@@ -3635,13 +3594,17 @@ impl App {
                 crate::cw::actions::insights_next_item_dropdown(self);
             }
             Mode::ColumnSelector => {
-                let max = self.get_column_selector_max();
-                let mut next_idx = (self.column_selector_index + 1).min(max);
-                // Skip blank row
-                if self.is_blank_row_index(next_idx) {
-                    next_idx = (next_idx + 1).min(max);
+                if let Some(model) = crate::preferences::bindings::active(self) {
+                    self.column_selector_index = model.move_row(self.column_selector_index, true);
+                } else {
+                    let max = self.get_column_selector_max();
+                    let mut next_idx = (self.column_selector_index + 1).min(max);
+                    // Skip blank row
+                    if self.is_blank_row_index(next_idx) {
+                        next_idx = (next_idx + 1).min(max);
+                    }
+                    self.column_selector_index = next_idx;
                 }
-                self.column_selector_index = next_idx;
             }
             Mode::ServicePicker => {
                 let filtered = self.filtered_services();
@@ -3781,12 +3744,16 @@ impl App {
                 crate::cw::actions::insights_prev_item_dropdown(self);
             }
             Mode::ColumnSelector => {
-                let mut prev_idx = self.column_selector_index.saturating_sub(1);
-                // Skip blank row
-                if self.is_blank_row_index(prev_idx) {
-                    prev_idx = prev_idx.saturating_sub(1);
+                if let Some(model) = crate::preferences::bindings::active(self) {
+                    self.column_selector_index = model.move_row(self.column_selector_index, false);
+                } else {
+                    let mut prev_idx = self.column_selector_index.saturating_sub(1);
+                    // Skip blank row
+                    if self.is_blank_row_index(prev_idx) {
+                        prev_idx = prev_idx.saturating_sub(1);
+                    }
+                    self.column_selector_index = prev_idx;
                 }
-                self.column_selector_index = prev_idx;
             }
             Mode::ServicePicker => {
                 self.service_picker.selected = self.service_picker.selected.saturating_sub(1);
@@ -10238,8 +10205,13 @@ mod region_latency_tests {
         app.ecr_image_visible_column_ids = ImageColumn::ids();
         let initial_count = app.ecr_image_visible_column_ids.len();
 
-        // Select first column (index 0) and toggle it
+        // Row 0 is the rendered Columns header and must not toggle anything.
         app.column_selector_index = 0;
+        app.handle_action(Action::ToggleColumn);
+        assert_eq!(app.ecr_image_visible_column_ids.len(), initial_count);
+
+        // The first rendered column is row 1, just like the repositories view.
+        app.column_selector_index = 1;
         app.handle_action(Action::ToggleColumn);
 
         // First column should be removed

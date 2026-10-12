@@ -14,6 +14,7 @@ pub mod kms;
 pub mod lambda;
 pub mod monitoring;
 mod pagination;
+mod preferences;
 pub mod prefs;
 mod query_editor;
 pub mod s3;
@@ -35,12 +36,7 @@ pub use query_editor::{render_query_editor, QueryEditorConfig};
 pub use status::{first_hint, hint, last_hint, SPINNER_FRAMES};
 pub use table::{format_expandable, CURSOR_COLLAPSED, CURSOR_EXPANDED};
 
-pub const PAGE_SIZE_OPTIONS: &[(PageSize, &str)] = &[
-    (PageSize::Ten, "10"),
-    (PageSize::TwentyFive, "25"),
-    (PageSize::Fifty, "50"),
-    (PageSize::OneHundred, "100"),
-];
+pub use crate::preferences::PAGE_SIZE_OPTIONS;
 
 pub const PAGE_SIZE_OPTIONS_SMALL: &[(PageSize, &str)] = &[
     (PageSize::Ten, "10"),
@@ -58,16 +54,9 @@ use crate::cfn::Column as CfnColumn;
 use crate::cloudtrail::{CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{render_pagination_text, render_scrollbar, translate_column, PageSize};
 use crate::cw::alarms::AlarmColumn;
-use crate::dynamodb::table as ddb_table;
 use crate::ec2::Column as Ec2Column;
-use crate::ecr::{image, repo};
-use crate::efs::access_point::Column as efs_ap_col;
-use crate::efs::fs as efs_fs;
-use crate::efs::mount_target::Column as efs_mt_col;
-use crate::fsx::fs as fsx_fs;
 use crate::iam::{RoleColumn, UserColumn};
 use crate::keymap::Mode;
-use crate::kms::key as kms_key;
 use crate::lambda::{ApplicationColumn, DeploymentColumn, FunctionColumn, ResourceColumn};
 use crate::s3::BucketColumn;
 use crate::sqs::pipe::Column as SqsPipeColumn;
@@ -891,9 +880,10 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
-    let (items, title, max_text_len) = if app.current_service == Service::S3Buckets
-        && app.s3_state.current_bucket.is_none()
-    {
+    let model = crate::preferences::bindings::active(app);
+    let (items, title, max_text_len) = if let Some(ref model) = model {
+        preferences::render_rows(model)
+    } else if app.current_service == Service::S3Buckets && app.s3_state.current_bucket.is_none() {
         let mut all_items: Vec<ListItem> = Vec::new();
         let mut max_len = 0;
 
@@ -1217,324 +1207,6 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 }
             }
         }
-
-        (all_items, " Preferences ", max_len)
-    } else if app.current_service == Service::EcrRepositories {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
-
-        let (header, header_len) = render_section_header("Columns");
-        all_items.push(header);
-        max_len = max_len.max(header_len);
-
-        if app.ecr_state.current_repository.is_some() {
-            // ECR images columns
-            for col_id in &app.ecr_image_column_ids {
-                if let Some(col) = image::Column::from_id(col_id) {
-                    let is_visible = app.ecr_image_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.ecr_state.images.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else {
-            // ECR repository columns
-            for col_id in &app.ecr_repo_column_ids {
-                if let Some(col) = repo::Column::from_id(col_id) {
-                    let is_visible = app.ecr_repo_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.ecr_state.repositories.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        }
-
-        (all_items, " Preferences ", max_len)
-    } else if app.current_service == Service::EfsFileSystems {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
-
-        if app.efs_state.current_file_system.is_some()
-            && app.efs_state.detail_tab == efs::DetailTab::Tags
-        {
-            // Tags tab — Key/Value always visible (no toggling), but page size is configurable
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in &["Key", "Value"] {
-                let mut spans = vec![];
-                spans.extend(render_toggle(true)); // always visible
-                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
-                let text_len = 4 + col.len();
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(text_len);
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.efs_state.tags_table.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else if app.efs_state.current_file_system.is_some()
-            && app.efs_state.detail_tab == efs::DetailTab::AccessPoints
-        {
-            // Access points tab — customizable columns + page size.
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col_id in &app.efs_state.ap_column_ids {
-                if let Some(col) = efs_ap_col::from_id(col_id) {
-                    let is_visible = app.efs_state.ap_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.efs_state.access_points.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else if app.efs_state.current_file_system.is_some()
-            && app.efs_state.detail_tab == efs::DetailTab::Network
-        {
-            // Network tab — customizable mount-target columns + page size.
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col_id in &app.efs_state.mt_column_ids {
-                if let Some(col) = efs_mt_col::from_id(col_id) {
-                    let is_visible = app.efs_state.mt_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.efs_state.mount_targets.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else {
-            // File systems list — show file system columns
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col_id in &app.efs_column_ids {
-                if let Some(col) = efs_fs::Column::from_id(col_id) {
-                    let is_visible = app.efs_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.efs_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        }
-
-        (all_items, " Preferences ", max_len)
-    } else if app.current_service == Service::FsxFileSystems {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
-
-        let fixed = if app.fsx_state.current_file_system.is_some() {
-            fsx::detail_fixed_columns(app.fsx_state.detail_tab)
-        } else {
-            None
-        };
-
-        if let Some(cols) = fixed {
-            // Fixed-column detail table (Tags / Updates / Backups): columns are
-            // always visible; only the page size is configurable.
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in cols {
-                let mut spans = vec![];
-                spans.extend(render_toggle(true));
-                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(4 + col.len());
-            }
-
-            let ps = match app.fsx_state.detail_tab {
-                fsx::DetailTab::Updates => app.fsx_state.updates_table.page_size,
-                fsx::DetailTab::Backups => app.fsx_state.backups.page_size,
-                _ => app.fsx_state.tags_table.page_size,
-            };
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(ps, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else {
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col_id in &app.fsx_column_ids {
-                if let Some(col) = fsx_fs::Column::from_id(col_id) {
-                    let is_visible = app.fsx_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.fsx_state.file_systems.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        }
-
-        (all_items, " Preferences ", max_len)
-    } else if app.current_service == Service::DynamoDbTables {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
-
-        let items_tab = app.dynamodb_state.current_table.is_some()
-            && app.dynamodb_state.detail_tab == dynamodb::DetailTab::Items;
-
-        let fixed = if app.dynamodb_state.current_table.is_some() {
-            dynamodb::detail_fixed_columns(app.dynamodb_state.detail_tab)
-        } else {
-            None
-        };
-
-        if items_tab {
-            // Items tab — the columns are the explored table's own attributes,
-            // discovered from the scanned or queried items, so they are toggled
-            // by attribute name rather than by a static column id.
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            let names = dynamodb::current_table(app)
-                .map(|t| dynamodb::item_column_names(t, app))
-                .unwrap_or_default();
-            for name in &names {
-                let is_visible = !app.dynamodb_state.item_hidden_columns.contains(name);
-                let (item, len) = render_column_toggle_string(name, is_visible);
-                all_items.push(item);
-                max_len = max_len.max(len);
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.dynamodb_state.items.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else if let Some(cols) = fixed {
-            // Fixed-column detail table (Indexes / Global tables / Backups /
-            // Tags): columns are always visible; only the page size applies.
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col in cols {
-                let mut spans = vec![];
-                spans.extend(render_toggle(true));
-                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(*col, Style::default().fg(Color::DarkGray)));
-                all_items.push(ListItem::new(Line::from(spans)));
-                max_len = max_len.max(4 + col.len());
-            }
-
-            let ps = match app.dynamodb_state.detail_tab {
-                dynamodb::DetailTab::Indexes => app.dynamodb_state.indexes_table.page_size,
-                dynamodb::DetailTab::GlobalTables => app.dynamodb_state.replicas_table.page_size,
-                dynamodb::DetailTab::Backups => app.dynamodb_state.backups.page_size,
-                _ => app.dynamodb_state.tags_table.page_size,
-            };
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) = render_page_size_section(ps, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        } else {
-            let (header, header_len) = render_section_header("Columns");
-            all_items.push(header);
-            max_len = max_len.max(header_len);
-
-            for col_id in &app.dynamodb_column_ids {
-                if let Some(col) = ddb_table::Column::from_id(col_id) {
-                    let is_visible = app.dynamodb_visible_column_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-
-            all_items.push(ListItem::new(""));
-            let (page_items, page_len) =
-                render_page_size_section(app.dynamodb_state.tables.page_size, PAGE_SIZE_OPTIONS);
-            all_items.extend(page_items);
-            max_len = max_len.max(page_len);
-        }
-
-        (all_items, " Preferences ", max_len)
-    } else if app.current_service == Service::KmsKeys {
-        let mut all_items: Vec<ListItem> = Vec::new();
-        let mut max_len = 0;
-
-        let (header, header_len) = render_section_header("Columns");
-        all_items.push(header);
-        max_len = max_len.max(header_len);
-
-        let tab_col_ids = app.kms_state.tab_column_ids();
-        let visible_ids = app.kms_state.visible_column_ids();
-
-        for (i, col_id) in tab_col_ids.iter().enumerate() {
-            if let Some(col) = kms_key::Column::from_id(col_id) {
-                if i == 0 {
-                    // Alias is always visible — show grayed-out disabled toggle
-                    let col_name = col.name();
-                    let spans = vec![
-                        Span::styled("◼", Style::default().fg(Color::DarkGray)),
-                        Span::styled("⬜", Style::default().fg(Color::DarkGray)),
-                        Span::raw(" "),
-                        Span::styled(col_name.clone(), Style::default().fg(Color::DarkGray)),
-                    ];
-                    all_items.push(ListItem::new(Line::from(spans)));
-                    max_len = max_len.max(4 + col_name.len());
-                } else {
-                    let is_visible = visible_ids.contains(col_id);
-                    let (item, len) = render_column_toggle_string(&col.name(), is_visible);
-                    all_items.push(item);
-                    max_len = max_len.max(len);
-                }
-            }
-        }
-
-        all_items.push(ListItem::new(""));
-        let (page_items, page_len) =
-            render_page_size_section(app.kms_state.keys.page_size, PAGE_SIZE_OPTIONS);
-        all_items.extend(page_items);
-        max_len = max_len.max(page_len);
 
         (all_items, " Preferences ", max_len)
     } else if app.current_service == Service::Ec2Instances {
@@ -2310,8 +1982,12 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("► ");
 
+    let selected_index = model
+        .as_ref()
+        .map(|p| app.column_selector_index.min(p.max_index()))
+        .unwrap_or(app.column_selector_index);
     let mut state = ListState::default();
-    state.select(Some(app.column_selector_index));
+    state.select(Some(selected_index));
 
     frame.render_widget(Clear, popup_area);
     frame.render_stateful_widget(list, popup_area, &mut state);
@@ -2325,7 +2001,7 @@ fn render_column_selector(frame: &mut Frame, app: &App, area: Rect) {
                 horizontal: 0,
             }),
             item_count,
-            app.column_selector_index,
+            selected_index,
         );
     }
 }

@@ -11,40 +11,63 @@ version = "0.1.8"
 authors = ["Your Name <your.email@example.com>"]
 edition = "2021"
 license = "Apache-2.0"
-rust-version = "1.75"
+rust-version = "1.94.1"
 repository = "https://github.com/clumsy/rusticity"
 homepage = "https://github.com/clumsy/rusticity"
 documentation = "https://docs.rs/rusticity"
 
 [workspace.dependencies]
-# Async runtime
-tokio = { version = "1.41", features = ["full"] }
+# Keep external versions in one place; Cargo.lock pins the full dependency graph.
+tokio = { version = "=1.53.2", features = ["macros", "rt-multi-thread", "time"] }
 
-# AWS SDK
-aws-config = "1.5"
-aws-sdk-cloudwatchlogs = "1.49"
-aws-sdk-cloudwatch = "1.49"
-aws-sdk-s3 = "1.49"
-aws-sdk-sts = "1.49"
+# AWS SDK (requires Rust 1.94.1)
+aws-config = "=1.12.0"
+aws-sdk-apigateway = "=1.120.0"
+aws-sdk-apigatewayv2 = "=1.118.0"
+aws-sdk-cloudformation = "=1.131.0"
+aws-sdk-cloudtrail = "=1.125.0"
+aws-sdk-cloudwatch = "=1.134.0"
+aws-sdk-cloudwatchlogs = "=1.156.0"
+aws-sdk-dynamodb = "=1.130.0"
+aws-sdk-ec2 = "=1.267.0"
+aws-sdk-ecr = "=1.132.0"
+aws-sdk-ecrpublic = "=1.117.0"
+aws-sdk-efs = "=1.118.0"
+aws-sdk-fsx = "=1.128.0"
+aws-sdk-iam = "=1.128.0"
+aws-sdk-kms = "=1.123.0"
+aws-sdk-lambda = "=1.150.0"
+aws-sdk-pipes = "=1.117.0"
+aws-sdk-s3 = "=1.152.0"
+aws-sdk-sqs = "=1.114.0"
+aws-sdk-sts = "=1.119.0"
+aws-smithy-types = "=1.8.1"
 
-# TUI
-ratatui = { version = "0.29", features = ["widget-calendar"] }
-crossterm = "0.28"
+# TUI: select the same Crossterm backend version used by the event handler.
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color", "widget-calendar"] }
+crossterm = "=0.29.0"
 
-# Error handling
-anyhow = "1.0"
-thiserror = "1.0"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
+# Error handling and serialization
+anyhow = "=1.0.104"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "serde"] }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 
 # Utilities
-chrono = { version = "0.4", features = ["serde"] }
-time = { version = "0.3", features = ["macros", "formatting", "parsing"] }
-futures = "0.3"
+chrono = { version = "=0.4.45", features = ["serde"] }
+time = "=0.3.55"
+futures = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
+percent-encoding = "=2.3.2"
+urlencoding = "=2.1.3"
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+# Only clipboard text is used; avoid the image decoding dependency tree.
+arboard = { version = "=3.6.1", default-features = false }
+webbrowser = "=1.2.4"
+
+# Test-only HTTP replay: exercise SDK pagination without sockets or AWS credentials.
+aws-smithy-http-client = { version = "=1.5.0", features = ["test-util"] }
+http = "=1.5.0"

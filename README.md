@@ -123,12 +123,15 @@ rusticity/
 
 ### Setup
 
+Requires **Rust 1.94.1 or newer** (the AWS SDK minimum). External dependency versions
+are centralized in the workspace `Cargo.toml`; `Cargo.lock` is tracked for reproducible builds.
+
 ```bash
-# Clone and build
-cargo build
+# Clone and build using the checked-in dependency resolution
+cargo build --locked
 
 # Run tests (also installs git hooks automatically)
-cargo test
+cargo test --workspace --locked
 ```
 
 Git hooks will automatically check formatting and linting before commits.

@@ -2722,34 +2722,14 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+    r.centered(
+        Constraint::Percentage(percent_x.min(100)),
+        Constraint::Percentage(percent_y.min(100)),
+    )
 }
 
 fn centered_rect_absolute(width: u16, height: u16, r: Rect) -> Rect {
-    let x = (r.width.saturating_sub(width)) / 2;
-    let y = (r.height.saturating_sub(height)) / 2;
-    Rect {
-        x: r.x + x,
-        y: r.y + y,
-        width: width.min(r.width),
-        height: height.min(r.height),
-    }
+    r.centered(Constraint::Length(width), Constraint::Length(height))
 }
 
 fn bottom_right_rect(width: u16, height: u16, r: Rect) -> Rect {
@@ -7325,5 +7305,42 @@ mod tests {
         let line = labeled_field("Description: ", "");
         let value_span = &line.spans[1];
         assert_eq!(value_span.content, "-");
+    }
+}
+
+#[cfg(test)]
+mod upstream_layout_tests {
+    use super::*;
+
+    #[test]
+    fn centered_popups_respect_parent_origin() {
+        let area = Rect::new(10, 20, 100, 80);
+        assert_eq!(centered_rect(60, 50, area), Rect::new(30, 40, 60, 40));
+        assert_eq!(
+            centered_rect_absolute(60, 40, area),
+            Rect::new(30, 40, 60, 40)
+        );
+    }
+
+    #[test]
+    fn centered_popups_clip_to_small_or_empty_terminal() {
+        for area in [Rect::new(5, 7, 9, 3), Rect::new(5, 7, 0, 0)] {
+            assert_eq!(centered_rect_absolute(120, 50, area), area);
+            assert_eq!(centered_rect(100, 100, area), area);
+            assert_eq!(centered_rect(150, 200, area), area);
+        }
+    }
+
+    #[test]
+    fn centered_popups_round_odd_sizes_without_leaving_parent() {
+        let area = Rect::new(11, 13, 101, 41);
+        let popup = centered_rect_absolute(60, 20, area);
+        assert_eq!((popup.width, popup.height), (60, 20));
+        let left = popup.x - area.x;
+        let right = area.right() - popup.right();
+        let top = popup.y - area.y;
+        let bottom = area.bottom() - popup.bottom();
+        assert!(left.abs_diff(right) <= 1);
+        assert!(top.abs_diff(bottom) <= 1);
     }
 }

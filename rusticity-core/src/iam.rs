@@ -10,90 +10,39 @@ impl IamClient {
     }
 
     pub async fn list_users(&self) -> Result<Vec<aws_sdk_iam::types::User>, String> {
-        let client = self.config.iam_client();
-
-        let mut users = Vec::new();
-        let mut marker = None;
-
-        loop {
-            let mut request = client.list_users();
-            if let Some(m) = marker {
-                request = request.marker(m);
-            }
-
-            let response = request
-                .send()
-                .await
-                .map_err(|e| format!("Failed to list users: {}", e))?;
-
-            let is_truncated = response.is_truncated();
-            marker = response.marker;
-            users.extend(response.users);
-
-            if !is_truncated {
-                break;
-            }
-        }
-
-        Ok(users)
+        self.config
+            .iam_client()
+            .list_users()
+            .into_paginator()
+            .items()
+            .send()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .map_err(|e| format!("Failed to list users: {}", e))
     }
 
     pub async fn list_roles(&self) -> Result<Vec<aws_sdk_iam::types::Role>, String> {
-        let client = self.config.iam_client();
-
-        let mut roles = Vec::new();
-        let mut marker = None;
-
-        loop {
-            let mut request = client.list_roles();
-            if let Some(m) = marker {
-                request = request.marker(m);
-            }
-
-            let response = request
-                .send()
-                .await
-                .map_err(|e| format!("Failed to list roles: {}", e))?;
-
-            let is_truncated = response.is_truncated();
-            marker = response.marker;
-            roles.extend(response.roles);
-
-            if !is_truncated {
-                break;
-            }
-        }
-
-        Ok(roles)
+        self.config
+            .iam_client()
+            .list_roles()
+            .into_paginator()
+            .items()
+            .send()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .map_err(|e| format!("Failed to list roles: {}", e))
     }
 
     pub async fn list_groups(&self) -> Result<Vec<aws_sdk_iam::types::Group>, String> {
-        let client = self.config.iam_client();
-
-        let mut groups = Vec::new();
-        let mut marker = None;
-
-        loop {
-            let mut request = client.list_groups();
-            if let Some(m) = marker {
-                request = request.marker(m);
-            }
-
-            let response = request
-                .send()
-                .await
-                .map_err(|e| format!("Failed to list groups: {}", e))?;
-
-            let is_truncated = response.is_truncated();
-            marker = response.marker;
-            groups.extend(response.groups);
-
-            if !is_truncated {
-                break;
-            }
-        }
-
-        Ok(groups)
+        self.config
+            .iam_client()
+            .list_groups()
+            .into_paginator()
+            .items()
+            .send()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .map_err(|e| format!("Failed to list groups: {}", e))
     }
 
     pub async fn list_attached_role_policies(

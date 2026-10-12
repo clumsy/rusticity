@@ -8489,7 +8489,9 @@ impl App {
                     let start = Instant::now();
 
                     match ureq::get(&endpoint)
-                        .timeout(std::time::Duration::from_secs(2))
+                        .config()
+                        .timeout_global(Some(std::time::Duration::from_secs(2)))
+                        .build()
                         .call()
                     {
                         Ok(_) => {

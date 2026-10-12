@@ -94,7 +94,7 @@ impl Session {
 
     fn session_dir() -> Result<PathBuf> {
         let home =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+            std::env::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         Ok(home.join(".rusticity").join("sessions"))
     }
 }

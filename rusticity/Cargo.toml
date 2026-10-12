@@ -22,10 +22,9 @@ rusticity-core = { version = "0.1.8", path = "../rusticity-core" }
 rusticity-term = { version = "0.1.8", path = "../rusticity-term" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
-tracing = { workspace = true }
 chrono = { workspace = true }
 tracing-subscriber = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
-arboard = "3.4"
+arboard = { workspace = true }
 

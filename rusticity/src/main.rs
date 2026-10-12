@@ -1,16 +1,18 @@
 use anyhow::Result;
-use crossterm::{event::Event, execute, terminal::*};
-use ratatui::prelude::*;
+use crossterm::event::Event;
 use rusticity_term::{App, EventHandler, Service, ViewMode};
 use tokio::time::{interval, Duration};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     rusticity_term::init();
 
-    let mut terminal = setup_terminal()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    // Ratatui restores the terminal on normal exit, errors, and panics.
+    ratatui::run(|terminal| runtime.block_on(run(terminal)))
+}
 
+async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let app_result = App::new(None, None).await;
 
     let mut app = match app_result {
@@ -1470,20 +1472,5 @@ async fn main() -> Result<()> {
         }
     }
 
-    restore_terminal(terminal)?;
-    Ok(())
-}
-
-fn setup_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    Ok(Terminal::new(CrosstermBackend::new(stdout))?)
-}
-
-fn restore_terminal(mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
     Ok(())
 }

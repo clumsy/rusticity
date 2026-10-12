@@ -12,29 +12,32 @@ tokio = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-cloudwatchlogs = { workspace = true }
 aws-sdk-cloudwatch = { workspace = true }
-aws-sdk-apigateway = "1"
-aws-sdk-apigatewayv2 = "1"
-aws-sdk-cloudformation = "1"
-aws-sdk-cloudtrail = "1"
-aws-sdk-dynamodb = "1"
-aws-sdk-ec2 = "1"
-aws-sdk-ecr = "1.52"
-aws-sdk-ecrpublic = "1.49"
-aws-sdk-iam = "1"
-aws-sdk-efs = "1"
-aws-sdk-fsx = "1"
-aws-sdk-kms = "1"
-aws-sdk-lambda = "1"
-aws-sdk-pipes = "1"
+aws-sdk-apigateway = { workspace = true }
+aws-sdk-apigatewayv2 = { workspace = true }
+aws-sdk-cloudformation = { workspace = true }
+aws-sdk-cloudtrail = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+aws-sdk-ec2 = { workspace = true }
+aws-sdk-ecr = { workspace = true }
+aws-sdk-ecrpublic = { workspace = true }
+aws-sdk-iam = { workspace = true }
+aws-sdk-efs = { workspace = true }
+aws-sdk-fsx = { workspace = true }
+aws-sdk-kms = { workspace = true }
+aws-sdk-lambda = { workspace = true }
+aws-sdk-pipes = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-aws-sdk-sqs = "1"
+aws-sdk-sqs = { workspace = true }
 aws-sdk-sts = { workspace = true }
-aws-smithy-types = "1.2"
+aws-smithy-types = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-percent-encoding = "2.3.2"
+percent-encoding = { workspace = true }
+
+[dev-dependencies]
+aws-smithy-http-client = { workspace = true }
+http = { workspace = true }

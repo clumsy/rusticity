@@ -54,22 +54,17 @@ impl CloudWatchClient {
 
     pub async fn list_log_streams(&self, log_group: &str) -> Result<Vec<LogStream>> {
         let mut streams = Vec::new();
-        let mut next_token: Option<String> = None;
+        let mut pages = self
+            .client
+            .describe_log_streams()
+            .log_group_name(log_group)
+            .order_by(aws_sdk_cloudwatchlogs::types::OrderBy::LastEventTime)
+            .descending(true)
+            .into_paginator()
+            .send();
 
-        loop {
-            let mut request = self
-                .client
-                .describe_log_streams()
-                .log_group_name(log_group)
-                .order_by(aws_sdk_cloudwatchlogs::types::OrderBy::LastEventTime)
-                .descending(true);
-
-            if let Some(token) = next_token {
-                request = request.next_token(token);
-            }
-
-            let resp = request.send().await?;
-
+        while let Some(resp) = pages.next().await {
+            let resp = resp?;
             streams.extend(resp.log_streams().iter().map(|s| {
                 LogStream {
                     name: s.log_stream_name().unwrap_or("").to_string(),
@@ -82,12 +77,8 @@ impl CloudWatchClient {
                 }
             }));
 
+            // Preserve the existing bounded, page-granular load.
             if streams.len() >= 100 {
-                break;
-            }
-
-            next_token = resp.next_token().map(|s| s.to_string());
-            if next_token.is_none() {
                 break;
             }
         }

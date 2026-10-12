@@ -1,6 +1,6 @@
 # Rust
 /target/
-Cargo.lock
+# This workspace ships a binary; keep Cargo.lock for reproducible upgrades.
 *.pdb
 
 # IDE

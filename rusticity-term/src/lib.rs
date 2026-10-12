@@ -87,3 +87,46 @@ fn flatten_toml(
 
 pub use event::EventHandler;
 pub use session::Session;
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn toml_column_overrides_preserve_nested_unicode_and_quoted_keys() {
+        let config: toml::Table = r#"
+            [columns.lambda.function]
+            name = "Function Name"
+            description = "説明"
+            [columns.dynamodb.table]
+            "partition_key" = "Order identifier"
+            ignored_number = 3
+        "#
+        .parse()
+        .unwrap();
+        let mut overrides = HashMap::new();
+        flatten_toml(
+            config["columns"].as_table().unwrap(),
+            "column",
+            &mut overrides,
+        );
+        assert_eq!(overrides.len(), 3);
+        assert_eq!(overrides["column.lambda.function.name"], "Function Name");
+        assert_eq!(overrides["column.lambda.function.description"], "説明");
+        assert_eq!(
+            overrides["column.dynamodb.table.partition_key"],
+            "Order identifier"
+        );
+        // Service defaults must not replace user customizations.
+        dynamodb::init(&mut overrides);
+        assert_eq!(
+            overrides["column.dynamodb.table.partition_key"],
+            "Order identifier"
+        );
+    }
+
+    #[test]
+    fn malformed_toml_still_returns_an_error() {
+        assert!("[columns\nname =".parse::<toml::Table>().is_err());
+    }
+}

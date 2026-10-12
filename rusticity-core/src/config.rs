@@ -392,3 +392,182 @@ mod tests {
         let _ = config.ec2_client();
     }
 }
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::*;
+    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_types::body::SdkBody;
+
+    fn replay(uri: &str, request: String, status: u16, response: String) -> ReplayEvent {
+        ReplayEvent::new(
+            http::Request::builder()
+                .method("POST")
+                .uri(uri)
+                .body(SdkBody::from(request))
+                .unwrap(),
+            http::Response::builder()
+                .status(status)
+                .body(SdkBody::from(response))
+                .unwrap(),
+        )
+    }
+
+    fn config(http_client: &StaticReplayClient) -> AwsConfig {
+        let sdk_config = aws_config::SdkConfig::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_iam::config::SharedCredentialsProvider::new(
+                aws_sdk_iam::config::Credentials::new(
+                    "test-key",
+                    "test-secret",
+                    None,
+                    None,
+                    "test",
+                ),
+            ))
+            .retry_config(aws_config::retry::RetryConfig::disabled())
+            .http_client(http_client.clone())
+            .build();
+        AwsConfig {
+            sdk_config,
+            ..AwsConfig::dummy(Some("us-east-1".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn iam_paginators_follow_markers_and_collect_items() {
+        for (operation, collection, name, id) in [
+            ("ListUsers", "Users", "UserName", "UserId"),
+            ("ListRoles", "Roles", "RoleName", "RoleId"),
+            ("ListGroups", "Groups", "GroupName", "GroupId"),
+        ] {
+            let page = |item: &str, more: &str| {
+                format!(
+                    "<{operation}Response><{operation}Result><{collection}>\
+                 <member><Path>/</Path><{name}>{item}</{name}><{id}>{item}</{id}>\
+                 <Arn>arn:aws:iam::123456789012:test/{item}</Arn>\
+                 <CreateDate>2026-01-01T00:00:00Z</CreateDate></member>\
+                 </{collection}>{more}</{operation}Result></{operation}Response>"
+                )
+            };
+            let body = format!("Action={operation}&Version=2010-05-08");
+            let http = StaticReplayClient::new(vec![
+                replay(
+                    "https://iam.amazonaws.com/",
+                    body.clone(),
+                    200,
+                    page(
+                        "first",
+                        "<IsTruncated>true</IsTruncated><Marker>page2</Marker>",
+                    ),
+                ),
+                replay(
+                    "https://iam.amazonaws.com/",
+                    format!("{body}&Marker=page2"),
+                    200,
+                    page("second", "<IsTruncated>false</IsTruncated>"),
+                ),
+            ]);
+            let client = crate::iam::IamClient::new(config(&http));
+            let names: Vec<String> = match operation {
+                "ListUsers" => client
+                    .list_users()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|u| u.user_name)
+                    .collect(),
+                "ListRoles" => client
+                    .list_roles()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.role_name)
+                    .collect(),
+                _ => client
+                    .list_groups()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|g| g.group_name)
+                    .collect(),
+            };
+            assert_eq!(names, ["first", "second"]);
+            http.assert_requests_match(&[]);
+        }
+    }
+
+    #[tokio::test]
+    async fn iam_paginator_stops_on_duplicate_marker_even_for_empty_pages() {
+        let response = "<ListUsersResponse><ListUsersResult><Users/>\
+            <IsTruncated>true</IsTruncated><Marker>same</Marker>\
+            </ListUsersResult></ListUsersResponse>";
+        let body = "Action=ListUsers&Version=2010-05-08";
+        let http = StaticReplayClient::new(vec![
+            replay(
+                "https://iam.amazonaws.com/",
+                body.into(),
+                200,
+                response.into(),
+            ),
+            replay(
+                "https://iam.amazonaws.com/",
+                format!("{body}&Marker=same"),
+                200,
+                response.into(),
+            ),
+        ]);
+        let client = crate::iam::IamClient::new(config(&http));
+        assert!(client.list_users().await.unwrap().is_empty());
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn iam_paginator_propagates_errors() {
+        let http = StaticReplayClient::new(vec![replay(
+            "https://iam.amazonaws.com/",
+            "Action=ListUsers&Version=2010-05-08".into(),
+            403,
+            "<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code>\
+             <Message>denied</Message></Error></ErrorResponse>"
+                .into(),
+        )]);
+        let client = crate::iam::IamClient::new(config(&http));
+        assert!(client
+            .list_users()
+            .await
+            .unwrap_err()
+            .starts_with("Failed to list users:"));
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn log_stream_paginator_keeps_order_and_stops_at_existing_limit() {
+        let page = |start: usize, token: &str| {
+            serde_json::json!({
+                "logStreams": (start..start + 50).map(|i| serde_json::json!({
+                    "logStreamName": format!("stream-{i}"), "creationTime": 0,
+                    "lastEventTimestamp": 1000
+                })).collect::<Vec<_>>(),
+                "nextToken": token,
+            })
+            .to_string()
+        };
+        let uri = "https://logs.us-east-1.amazonaws.com/";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, r#"{"logGroupName":"group","orderBy":"LastEventTime","descending":true}"#.into(), 200, page(0, "page2")),
+            replay(uri, r#"{"logGroupName":"group","orderBy":"LastEventTime","descending":true,"nextToken":"page2"}"#.into(), 200, page(50, "page3")),
+        ]);
+        let client = crate::cw::CloudWatchClient::new(config(&http))
+            .await
+            .unwrap();
+        let streams = client.list_log_streams("group").await.unwrap();
+        assert_eq!(streams.len(), 100);
+        assert_eq!(streams[0].name, "stream-0");
+        assert_eq!(streams[99].name, "stream-99");
+        assert_eq!(streams[0].last_event_time.unwrap().timestamp(), 1);
+        // A third request would fail the replay, even though page2 has a token.
+        http.assert_requests_match(&[]);
+    }
+}

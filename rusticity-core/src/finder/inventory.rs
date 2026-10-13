@@ -22,6 +22,20 @@ pub(super) async fn fetch(config: &AwsConfig, kind: ResourceKind) -> Result<(Vec
         }};
     }
     match kind {
+        ResourceKind::Vpc => collect!(
+            config.ec2_client().describe_vpcs(),
+            vpc,
+            Resource::new(
+                kind,
+                vpc.vpc_id().unwrap_or_default(),
+                vpc.tags()
+                    .iter()
+                    .find(|tag| tag.key() == Some("Name"))
+                    .and_then(|tag| tag.value())
+                    .unwrap_or_default(),
+                region
+            )
+        ),
         ResourceKind::Table => collect!(
             config.dynamodb_client().list_tables(),
             table,

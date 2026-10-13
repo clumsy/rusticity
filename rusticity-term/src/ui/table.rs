@@ -114,6 +114,14 @@ pub trait Column<T> {
     }
 
     fn width(&self) -> u16;
+
+    /// Opt into compact sizing based on the rendered rows. width() caps data
+    /// width, including the two-cell prefix; the full header always takes priority.
+    /// Other columns retain the existing widest-column auto-fill behavior.
+    fn fit_content(&self) -> bool {
+        false
+    }
+
     fn render(&self, item: &T) -> (String, Style);
 }
 
@@ -138,6 +146,64 @@ pub fn expanded_from_columns<T>(columns: &[Box<dyn Column<T>>], item: &T) -> Vec
         .collect()
 }
 
+fn formatted_column_header(
+    name: &str,
+    index: usize,
+    sort_column: &str,
+    direction: SortDirection,
+) -> String {
+    let name = if !sort_column.is_empty() && sort_column == name {
+        format!(
+            "{} {}",
+            name,
+            if direction == SortDirection::Asc {
+                "↑"
+            } else {
+                "↓"
+            }
+        )
+    } else {
+        name.to_string()
+    };
+    format_header_cell(&name, index)
+}
+
+fn column_constraints<T>(
+    columns: &[Box<dyn Column<T>>],
+    items: &[&T],
+    sort_column: &str,
+    direction: SortDirection,
+) -> Vec<Constraint> {
+    let stretch_width = columns
+        .iter()
+        .filter(|c| !c.fit_content())
+        .map(|c| c.width())
+        .max();
+    columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            if column.fit_content() {
+                let header = formatted_column_header(column.name(), index, sort_column, direction);
+                let header_width = Line::raw(header).width();
+                let data_width = items
+                    .iter()
+                    .map(|item| Line::raw(column.render(item).0).width().saturating_add(2))
+                    .max()
+                    .unwrap_or(0);
+                let width = header_width.max(data_width.min(column.width() as usize));
+                Constraint::Length(width.min(u16::MAX as usize) as u16)
+            } else if Some(column.width()) == stretch_width {
+                Constraint::Fill(1)
+            } else {
+                // Preserve existing layouts for columns that have not opted in.
+                let header_width = format_header_cell(column.name(), index).chars().count() as u16;
+                Constraint::Length(column.width().max(header_width))
+            }
+        })
+        .collect()
+}
+
 pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     let border_style = if config.is_active {
         styles::active_border()
@@ -152,18 +218,14 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     };
 
     // Headers with sort indicators
-    let header_cells = config.columns.iter().enumerate().map(|(i, col)| {
-        let mut name = col.name().to_string();
-        if !config.sort_column.is_empty() && config.sort_column == name {
-            let arrow = if config.sort_direction == SortDirection::Asc {
-                " ↑"
-            } else {
-                " ↓"
-            };
-            name.push_str(arrow);
-        }
-        name = format_header_cell(&name, i);
-        Cell::from(name).style(Style::default().add_modifier(Modifier::BOLD))
+    let header_cells = config.columns.iter().enumerate().map(|(index, column)| {
+        Cell::from(formatted_column_header(
+            column.name(),
+            index,
+            config.sort_column,
+            config.sort_direction,
+        ))
+        .style(Style::default().add_modifier(Modifier::BOLD))
     });
     let header = Row::new(header_cells)
         .style(Style::default().bg(Color::White).fg(Color::Black))
@@ -287,31 +349,12 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
         }
     }
 
-    // Find the widest column — it becomes the stretch column that absorbs remaining space.
-    let max_declared_width = config
-        .columns
-        .iter()
-        .map(|col| col.width())
-        .max()
-        .unwrap_or(0);
-
-    let widths: Vec<Constraint> = config
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            // Calculate the actual formatted header width
-            let formatted_header = format_header_cell(col.name(), i);
-            let header_width = formatted_header.chars().count() as u16;
-            let width = col.width().max(header_width);
-            // The widest column (typically Message) stretches to fill available space.
-            if col.width() == max_declared_width {
-                Constraint::Fill(1)
-            } else {
-                Constraint::Length(width)
-            }
-        })
-        .collect();
+    let widths = column_constraints(
+        config.columns,
+        &config.items,
+        config.sort_column,
+        config.sort_direction,
+    );
 
     let table = Table::new(all_rows, widths)
         .header(header)
@@ -704,5 +747,97 @@ mod tests {
             3,
             "items.len() must equal page_size — no placeholder rows added for expanded content"
         );
+    }
+}
+
+#[cfg(test)]
+mod compact_column_tests {
+    use super::*;
+
+    struct TestColumn {
+        label: &'static str,
+        width: u16,
+        compact: bool,
+    }
+    impl Column<String> for TestColumn {
+        fn name(&self) -> &str {
+            self.label
+        }
+        fn width(&self) -> u16 {
+            self.width
+        }
+        fn fit_content(&self) -> bool {
+            self.compact
+        }
+        fn render(&self, item: &String) -> (String, Style) {
+            (item.clone(), Style::default())
+        }
+    }
+    fn col(label: &'static str, width: u16, compact: bool) -> Box<dyn Column<String>> {
+        Box::new(TestColumn {
+            label,
+            width,
+            compact,
+        })
+    }
+
+    #[test]
+    fn legacy_columns_keep_widest_auto_fill_and_ties() {
+        let columns = vec![
+            col("ID", 20, false),
+            col("Message", 80, false),
+            col("Other", 80, false),
+        ];
+        assert_eq!(
+            column_constraints(&columns, &[], "ID", SortDirection::Asc),
+            vec![
+                Constraint::Length(20),
+                Constraint::Fill(1),
+                Constraint::Fill(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn compact_columns_do_not_compete_for_auto_fill() {
+        let columns = vec![
+            col("ID", 20, false),
+            col("IPv6 CIDR", 45, true),
+            col("Text", 30, false),
+        ];
+        let value = "-".to_string();
+        assert_eq!(
+            column_constraints(&columns, &[&value], "", SortDirection::Asc),
+            vec![
+                Constraint::Length(20),
+                Constraint::Length(11),
+                Constraint::Fill(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn compact_width_counts_display_cells_prefix_and_sort_arrow() {
+        let columns = vec![col("ID", 20, true)];
+        let value = "界界e\u{301}".to_string(); // Five display cells, not six scalars or eleven bytes.
+        assert_eq!(
+            column_constraints(&columns, &[&value], "ID", SortDirection::Asc),
+            vec![Constraint::Length(7)]
+        );
+        assert_eq!(
+            column_constraints(&columns, &[], "ID", SortDirection::Desc),
+            vec![Constraint::Length(6)]
+        );
+    }
+
+    #[test]
+    fn compact_data_is_capped_but_headers_are_not() {
+        let columns = vec![col("Value", 12, true), col("A long header", 5, true)];
+        let value = "x".repeat(200);
+        assert_eq!(
+            column_constraints(&columns, &[&value], "A long header", SortDirection::Asc),
+            vec![Constraint::Length(12), Constraint::Length(17)]
+        );
+        assert!(column_constraints::<String>(&[], &[], "", SortDirection::Asc).is_empty());
     }
 }

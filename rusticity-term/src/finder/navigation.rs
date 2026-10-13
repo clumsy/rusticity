@@ -22,6 +22,7 @@ pub fn service(kind: ResourceKind) -> Service {
         ResourceKind::Key => Service::KmsKeys,
         ResourceKind::Function => Service::LambdaFunctions,
         ResourceKind::Database => Service::RdsInstances,
+        ResourceKind::Vpc => Service::VpcVpcs,
         ResourceKind::Bucket => Service::S3Buckets,
         ResourceKind::Queue => Service::SqsQueues,
     }
@@ -107,6 +108,14 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
                 }
             }
             app.load_s3_objects().await?;
+        }
+        ResourceKind::Vpc => {
+            app.load_vpcs().await?;
+            focus!(app.vpc_state.vpcs, vpc_id);
+            app.vpc_state.vpcs.selected = ui::vpc::filtered_vpcs(app)
+                .iter()
+                .position(|vpc| vpc.vpc_id == resource.id)
+                .unwrap_or(0);
         }
         ResourceKind::Database => {
             app.load_rds_instances().await?;

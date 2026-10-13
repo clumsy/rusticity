@@ -62,6 +62,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.cloudtrail_state.table.loading
             || app.apig_state.apis.loading
             || app.efs_state.file_systems.loading
+            || app.vpc_state.vpcs.loading
             || app.rds_state.instances.loading
             || app.fsx_state.file_systems.loading
             || app.fsx_state.backups_loading
@@ -133,11 +134,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let rds_view = app.service_selected && app.current_service == Service::RdsInstances;
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs);
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
-                            && !((items_view || rds_view) && app.mode == rusticity_term::keymap::Mode::Normal);
+                            && !((items_view || inventory_view) && app.mode == rusticity_term::keymap::Mode::Normal);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
-                            && !(items_view && app.dynamodb_state.items_failed) && !rds_view;
+                            && !(items_view && app.dynamodb_state.items_failed) && !inventory_view;
                         let is_profile_select = should_load && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
                         let is_region_select = should_load && app.mode == rusticity_term::keymap::Mode::RegionPicker && !app.region_filter_active;
                         let is_profile_refresh = should_refresh && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
@@ -656,6 +657,19 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
                             app.efs_state.file_systems.loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        if app.service_selected && app.current_service == Service::VpcVpcs
+                            && ((!prev_service_selected || prev_service != Service::VpcVpcs)
+                                || app.vpc_state.vpcs.loading) {
+                            app.vpc_state.vpcs.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(error) = app.load_vpcs().await {
+                                app.error_message = Some(format!("Failed to load VPCs: {error:#}"));
+                                app.error_scroll = 0;
+                                app.mode = Mode::ErrorModal;
+                            }
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
@@ -1323,6 +1337,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                             rusticity_term::app::Service::EfsFileSystems => {
                                                 new_app.efs_state.file_systems.loading = true;
                                             }
+                                            Service::VpcVpcs => { new_app.vpc_state.vpcs.loading = true; }
                                             Service::RdsInstances => {
                                                 new_app.rds_state.instances.loading = true;
                                             }

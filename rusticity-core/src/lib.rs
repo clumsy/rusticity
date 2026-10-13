@@ -17,6 +17,7 @@ pub mod rds;
 pub mod s3;
 pub mod sqs;
 pub mod types;
+pub mod vpc;
 
 pub use alarms::{AlarmData, AlarmsClient, MetricStatsRequest, SubMetric};
 pub use apig::ApiGatewayClient;
@@ -36,3 +37,4 @@ pub use rds::RdsClient;
 pub use s3::S3Client;
 pub use sqs::SqsClient;
 pub use types::*;
+pub use vpc::VpcClient;

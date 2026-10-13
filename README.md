@@ -45,6 +45,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
 - 🪣 **S3**: Buckets and objects with navigation
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
+- 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns
 
 **Want to see support for another AWS service?** [Request it here](../../issues/new?template=feature_request.md) or upvote existing requests!
 
@@ -115,7 +116,7 @@ AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 
 Press `Space`, then `f` to search supported AWS resource inventories in the current
 profile and Region. Type at least three search characters (excluding qualifiers),
-optionally adding `@s3`, `@dynamodb`/`@ddb`, `@ec2`, `@rds`, `@iam`, `@lambda`, or
+optionally adding `@s3`, `@dynamodb`/`@ddb`, `@ec2`, `@vpc`, `@rds`, `@iam`, `@lambda`, or
 another supported service. The filter starts focused. Enter moves to the results;
 there, use arrows to select and Enter to open. Tab/Shift+Tab switches focus,
 `i` returns to the filter, Esc cancels, and `Ctrl+R` refreshes.

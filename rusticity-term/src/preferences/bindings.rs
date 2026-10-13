@@ -26,6 +26,7 @@ enum Source {
     DdbTags,
     KmsKeys,
     RdsInstances,
+    VpcVpcs,
 }
 
 fn columns(
@@ -108,6 +109,7 @@ impl Source {
             }
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances => Self::RdsInstances,
+            Service::VpcVpcs => Self::VpcVpcs,
             _ => return None,
         })
     }
@@ -178,6 +180,12 @@ impl Source {
             Self::DdbReplicas => fixed(&dynamodb::REPLICAS_COLUMNS),
             Self::DdbBackups => fixed(&dynamodb::BACKUPS_COLUMNS),
             Self::DdbTags => fixed(&dynamodb::TAGS_COLUMNS),
+            Self::VpcVpcs => columns(
+                &app.vpc_state.column_ids,
+                &app.vpc_state.visible_column_ids,
+                |id| crate::vpc::columns::Column::from_id(id).map(|c| c.name()),
+                Some(crate::vpc::columns::Column::VpcId.id()),
+            ),
             Self::RdsInstances => columns(
                 &app.rds_state.column_ids,
                 &app.rds_state.visible_column_ids,
@@ -226,6 +234,7 @@ impl Source {
             Self::DdbTags => app.dynamodb_state.tags_table.page_size,
             Self::KmsKeys => app.kms_state.keys.page_size,
             Self::RdsInstances => app.rds_state.instances.page_size,
+            Self::VpcVpcs => app.vpc_state.vpcs.page_size,
         }
     }
 
@@ -249,6 +258,7 @@ impl Source {
             Self::DdbTags => app.dynamodb_state.tags_table.set_page_size(size),
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
             Self::RdsInstances => app.rds_state.instances.set_page_size(size),
+            Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
         }
     }
 
@@ -263,6 +273,7 @@ impl Source {
             Self::DdbTables => &mut app.dynamodb_visible_column_ids,
             Self::KmsKeys => app.kms_state.visible_column_ids_mut(),
             Self::RdsInstances => &mut app.rds_state.visible_column_ids,
+            Self::VpcVpcs => &mut app.vpc_state.visible_column_ids,
             _ => return None,
         })
     }

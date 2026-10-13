@@ -13,6 +13,7 @@ pub mod event;
 pub mod finder;
 pub mod fsx;
 pub mod iam;
+pub mod inventory;
 pub mod keymap;
 pub mod kms;
 pub mod lambda;
@@ -23,6 +24,7 @@ pub mod session;
 pub mod sqs;
 pub mod table;
 pub mod ui;
+pub mod vpc;
 
 pub use app::{
     App, DetailTab, EventColumn, EventFilterFocus, LogGroupColumn, Service, StreamSort, ViewMode,
@@ -58,6 +60,7 @@ pub fn init() {
     fsx::init(&mut i18n);
     dynamodb::init(&mut i18n);
     rds::init(&mut i18n);
+    vpc::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);
     sqs::init(&mut i18n);

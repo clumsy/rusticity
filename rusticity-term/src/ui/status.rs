@@ -191,7 +191,10 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         dynamodb_items_hotkeys(app)
     } else if app.mode == Mode::Normal
         && app.service_selected
-        && app.current_service == Service::RdsInstances
+        && matches!(
+            app.current_service,
+            Service::RdsInstances | Service::VpcVpcs
+        )
     {
         let mut hints = first_hint("↑↓", "scroll");
         hints.extend(hint("⏎ / ←→", "toggle"));
@@ -390,6 +393,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Any service loading → show generic spinner inline with version on the right
     let is_loading = app.log_groups_state.loading
+        || app.vpc_state.vpcs.loading
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading

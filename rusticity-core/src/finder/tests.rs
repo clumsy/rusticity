@@ -179,3 +179,24 @@ async fn finder_short_queries_do_not_send_requests() {
     .await;
     assert!(rx.recv().await.is_none());
 }
+
+#[test]
+fn finder_vpc_qualifier_and_ec2_resource_type_are_supported() {
+    let query = SearchQuery::parse("@vpc network").unwrap();
+    assert_eq!(query.kinds, [ResourceKind::Vpc]);
+    assert!(query
+        .index_query("us-east-2")
+        .contains("resourcetype:ec2:vpc"));
+    let ec2 = SearchQuery::parse("@ec2 vpc").unwrap();
+    assert!(ec2.kinds.contains(&ResourceKind::Vpc));
+    assert!(ec2.kinds.contains(&ResourceKind::Instance));
+    let resource = Resource::from_index(
+        "ec2:vpc",
+        "arn:aws:ec2:us-east-2:123456789012:vpc/vpc-test",
+        "us-east-2",
+    )
+    .unwrap();
+    assert_eq!(resource.kind, ResourceKind::Vpc);
+    assert_eq!(resource.kind.service(), "vpc");
+    assert_eq!(resource.id, "vpc-test");
+}

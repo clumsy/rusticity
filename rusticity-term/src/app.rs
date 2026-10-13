@@ -87,19 +87,21 @@ pub use crate::ui::sqs::{
     State as SqsState, FILTER_CONTROLS as SQS_FILTER_CONTROLS,
     SUBSCRIPTION_FILTER_CONTROLS as SQS_SUBSCRIPTION_FILTER_CONTROLS, SUBSCRIPTION_REGION,
 };
+use crate::ui::vpc::State as VpcState;
 pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
     StreamColumn, StreamSort, TimeUnit,
 };
+use crate::vpc::actions as vpc_actions;
 use rusticity_core::dynamodb::DdbItemsPage;
 #[cfg(test)]
 use rusticity_core::LogStream;
-use rusticity_core::RdsClient;
 use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
     CloudWatchClient, DynamoDbClient, Ec2Client, EcrClient, EfsClient, FsxClient, IamClient,
     KmsClient, LambdaClient, S3Client, SqsClient,
 };
+use rusticity_core::{RdsClient, VpcClient};
 
 #[derive(Clone)]
 pub struct Tab {
@@ -123,6 +125,7 @@ pub struct App {
     pub efs_client: EfsClient,
     pub fsx_client: FsxClient,
     pub rds_client: RdsClient,
+    pub vpc_client: VpcClient,
     pub dynamodb_client: DynamoDbClient,
     pub apig_client: ApiGatewayClient,
     pub iam_client: IamClient,
@@ -146,6 +149,7 @@ pub struct App {
     pub efs_state: EfsState,
     pub fsx_state: FsxState,
     pub rds_state: RdsState,
+    pub vpc_state: VpcState,
     pub resource_finder: crate::finder::State,
     pub dynamodb_state: DynamoDbState,
     pub apig_state: ApigState,
@@ -338,6 +342,7 @@ pub enum Service {
     RdsInstances,
     S3Buckets,
     SqsQueues,
+    VpcVpcs,
     Ec2Instances,
     EcrRepositories,
     KmsKeys,
@@ -363,6 +368,7 @@ impl Service {
             Service::RdsInstances => "RDS › Databases",
             Service::S3Buckets => "S3 › Buckets",
             Service::SqsQueues => "SQS › Queues",
+            Service::VpcVpcs => "VPC › VPCs",
             Service::Ec2Instances => "EC2 › Instances",
             Service::EcrRepositories => "ECR › Repositories",
             Service::KmsKeys => "KMS › Managed Keys",
@@ -484,6 +490,9 @@ impl App {
     }
 
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
+        if self.current_service == Service::VpcVpcs {
+            return Some(&mut self.vpc_state.vpcs.filter);
+        }
         if self.current_service == Service::RdsInstances {
             return Some(&mut self.rds_state.instances.filter);
         }
@@ -582,6 +591,8 @@ impl App {
             op(filter);
             if self.current_service == Service::RdsInstances {
                 self.rds_state.instances.reset();
+            } else if self.current_service == Service::VpcVpcs {
+                self.vpc_state.vpcs.reset();
             }
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
@@ -648,6 +659,7 @@ impl App {
         let efs_client = EfsClient::new(config.clone());
         let fsx_client = FsxClient::new(config.clone());
         let rds_client = RdsClient::new(config.clone());
+        let vpc_client = VpcClient::new(config.clone());
         let dynamodb_client = DynamoDbClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
         let cloudformation_client = CloudFormationClient::new(config.clone());
@@ -668,6 +680,7 @@ impl App {
             efs_client,
             fsx_client,
             rds_client,
+            vpc_client,
             dynamodb_client,
             apig_client,
             iam_client,
@@ -699,6 +712,7 @@ impl App {
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
             rds_state: RdsState::default(),
+            vpc_state: VpcState::default(),
             resource_finder: crate::finder::State::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
@@ -900,6 +914,7 @@ impl App {
             efs_client: EfsClient::new(config.clone()),
             fsx_client: FsxClient::new(config.clone()),
             rds_client: RdsClient::new(config.clone()),
+            vpc_client: VpcClient::new(config.clone()),
             dynamodb_client: DynamoDbClient::new(config.clone()),
             apig_client: ApiGatewayClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
@@ -931,6 +946,7 @@ impl App {
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
             rds_state: RdsState::default(),
+            vpc_state: VpcState::default(),
             resource_finder: crate::finder::State::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
@@ -1119,7 +1135,7 @@ impl App {
         if crate::finder::handle_action(self, &action) {
             return;
         }
-        if rds_actions::handle_action(self, &action) {
+        if vpc_actions::handle_action(self, &action) || rds_actions::handle_action(self, &action) {
             return;
         }
         match action {
@@ -1307,6 +1323,7 @@ impl App {
                         ddb_actions::apply_filter_reset(self);
                     }
                     Service::RdsInstances => self.rds_state.instances.reset(),
+                    Service::VpcVpcs => self.vpc_state.vpcs.reset(),
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
                     }
@@ -1399,6 +1416,7 @@ impl App {
                             "EfsFileSystems" => Service::EfsFileSystems,
                             "FsxFileSystems" => Service::FsxFileSystems,
                             "RdsInstances" => Service::RdsInstances,
+                            "VpcVpcs" => Service::VpcVpcs,
                             "DynamoDbTables" => Service::DynamoDbTables,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
@@ -3389,6 +3407,7 @@ impl App {
                 parts.extend(crate::efs::actions::breadcrumb(self));
             }
             Service::RdsInstances => parts.extend(["RDS".into(), "Databases".into()]),
+            Service::VpcVpcs => parts.extend(["VPC".into(), "VPCs".into()]),
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
@@ -3485,6 +3504,7 @@ impl App {
             Service::EfsFileSystems => crate::efs::actions::console_url(self),
             Service::FsxFileSystems => crate::fsx::actions::console_url(self),
             Service::RdsInstances => rds_actions::console_url(self),
+            Service::VpcVpcs => vpc_actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4265,6 +4285,10 @@ impl App {
     }
 
     fn go_to_page(&mut self, page: usize) {
+        if self.current_service == Service::VpcVpcs {
+            vpc_actions::go_to_page(self, page);
+            return;
+        }
         if self.current_service == Service::RdsInstances {
             rds_actions::go_to_page(self, page);
             return;
@@ -4548,6 +4572,7 @@ impl App {
                     "EFS › File Systems" => Service::EfsFileSystems,
                     "FSx › File Systems" => Service::FsxFileSystems,
                     "RDS › Databases" | "RDS › DB Instances" => Service::RdsInstances,
+                    "VPC › VPCs" => Service::VpcVpcs,
                     "DynamoDB › Tables" => Service::DynamoDbTables,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
@@ -4567,6 +4592,10 @@ impl App {
                 });
                 self.current_tab = self.tabs.len() - 1;
                 self.current_service = new_service;
+                if new_service == Service::VpcVpcs {
+                    self.vpc_state.vpcs.reset();
+                    self.vpc_state.vpcs.loading = true;
+                }
                 if new_service == Service::RdsInstances {
                     self.rds_state.instances.reset();
                     self.rds_state.instances.loading = true;
@@ -4603,6 +4632,7 @@ impl App {
                     .map(|st| Tab {
                         service: match st.service.as_str() {
                             "RdsInstances" => Service::RdsInstances,
+                            "VpcVpcs" => Service::VpcVpcs,
                             "CloudWatchLogGroups" => Service::CloudWatchLogGroups,
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
@@ -5337,6 +5367,16 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_vpcs(&mut self) -> anyhow::Result<()> {
+        self.vpc_state.vpcs.loading = true;
+        let result = self.vpc_client.list_vpcs_with_properties().await;
+        self.vpc_state.vpcs.loading = false;
+        // A failed later page must not discard the previous successful inventory.
+        self.vpc_state.vpcs.items = result?;
+        self.vpc_state.vpcs.reset();
+        Ok(())
+    }
+
     pub async fn load_rds_instances(&mut self) -> anyhow::Result<()> {
         self.rds_state.instances.loading = true;
         let options =
@@ -6023,6 +6063,7 @@ impl ServicePickerState {
                 "RDS › Databases",
                 "S3 › Buckets",
                 "SQS › Queues",
+                "VPC › VPCs",
             ],
         }
     }

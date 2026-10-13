@@ -406,6 +406,7 @@ mod pagination_tests {
     use super::*;
     use crate::dynamodb::DynamoDbClient;
     use crate::rds::{InventoryOptions, RdsClient};
+    use crate::VpcClient;
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
@@ -443,6 +444,144 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn vpc_full_properties_paginate_related_inventories_and_survive_denied_reads() {
+        use aws_smithy_http_client::test_util::infallible_client_fn;
+        use std::sync::{Arc, Mutex};
+        for deny_routes in [false, true] {
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let captured = requests.clone();
+            // Dispatch by operation: related inventories are fetched concurrently.
+            let http = infallible_client_fn(move |request| {
+                let body = std::str::from_utf8(request.body().bytes().unwrap())
+                    .unwrap()
+                    .to_string();
+                captured.lock().unwrap().push(body.clone());
+                let (status, response) = if body.contains("Action=DescribeVpcs&") {
+                    (200, "<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-test</vpcId><state>available</state></item></vpcSet></DescribeVpcsResponse>")
+                } else if body.contains("Action=DescribeRouteTables&") {
+                    assert!(body.contains("association.main"));
+                    assert!(body.contains("true"));
+                    if deny_routes {
+                        (403, "<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>denied</Message></Error></Errors></Response>")
+                    } else if body.contains("NextToken=route2") {
+                        (200, "<DescribeRouteTablesResponse><routeTableSet><item><vpcId>vpc-test</vpcId><routeTableId>rtb-main</routeTableId><associationSet><item><main>true</main></item></associationSet></item></routeTableSet></DescribeRouteTablesResponse>")
+                    } else {
+                        (200, "<DescribeRouteTablesResponse><routeTableSet/><nextToken>route2</nextToken></DescribeRouteTablesResponse>")
+                    }
+                } else if body.contains("Action=DescribeNetworkAcls&") {
+                    assert!(body.contains("default"));
+                    assert!(body.contains("true"));
+                    if body.contains("NextToken=acl2") {
+                        (200, "<DescribeNetworkAclsResponse><networkAclSet><item><vpcId>vpc-test</vpcId><networkAclId>acl-main</networkAclId><default>true</default></item></networkAclSet></DescribeNetworkAclsResponse>")
+                    } else {
+                        (200, "<DescribeNetworkAclsResponse><networkAclSet/><nextToken>acl2</nextToken></DescribeNetworkAclsResponse>")
+                    }
+                } else {
+                    panic!("Unexpected operation: {body}");
+                };
+                http::Response::builder()
+                    .status(status)
+                    .body(response)
+                    .unwrap()
+            });
+            let mut config = config(&StaticReplayClient::new(vec![]));
+            config.sdk_config = config.sdk_config.to_builder().http_client(http).build();
+            let rows = VpcClient::new(config)
+                .list_vpcs_with_properties()
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].vpc_id, "vpc-test");
+            assert_eq!(
+                rows[0].main_route_table,
+                if deny_routes {
+                    "Unavailable"
+                } else {
+                    "rtb-main"
+                }
+            );
+            assert_eq!(rows[0].main_network_acl, "acl-main");
+            assert_eq!(
+                requests.lock().unwrap().len(),
+                if deny_routes { 4 } else { 5 }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn vpc_inventory_follows_tokens_and_preserves_owner_metadata() {
+        let uri = "https://ec2.us-east-1.amazonaws.com/";
+        let request = "Action=DescribeVpcs&Version=2016-11-15";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, request.into(), 200,
+                "<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-002</vpcId><state>available</state>\
+                <cidrBlock>172.31.0.0/16</cidrBlock><ownerId>123456789012</ownerId><isDefault>true</isDefault>\
+                <instanceTenancy>default</instanceTenancy><tagSet><item><key>Name</key><value>default-vpc</value></item></tagSet>\
+                </item></vpcSet><nextToken>page2</nextToken></DescribeVpcsResponse>".into()),
+            replay(uri, format!("{request}&NextToken=page2"), 200,
+                "<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-001</vpcId><state>pending</state>\
+                <ownerId>999999999999</ownerId><isDefault>false</isDefault></item></vpcSet></DescribeVpcsResponse>".into()),
+        ]);
+        let rows = VpcClient::new(config(&http)).list_vpcs().await.unwrap();
+        assert_eq!(
+            rows.iter().map(|v| v.vpc_id.as_str()).collect::<Vec<_>>(),
+            ["vpc-001", "vpc-002"]
+        );
+        assert_eq!(
+            rows[0].arn,
+            "arn:aws:ec2:us-east-1:999999999999:vpc/vpc-001"
+        );
+        assert_eq!(rows[1].name, "default-vpc");
+        assert_eq!(rows[1].is_default, Some(true));
+        assert_eq!(rows[1].ipv4_cidrs, "172.31.0.0/16");
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn vpc_inventory_empty_and_duplicate_tokens_terminate() {
+        let uri = "https://ec2.us-east-1.amazonaws.com/";
+        let request = "Action=DescribeVpcs&Version=2016-11-15";
+        for repeated in [false, true] {
+            let response = format!(
+                "<DescribeVpcsResponse><vpcSet/>{}</DescribeVpcsResponse>",
+                if repeated {
+                    "<nextToken>same</nextToken>"
+                } else {
+                    ""
+                }
+            );
+            let mut events = vec![replay(uri, request.into(), 200, response.clone())];
+            if repeated {
+                events.push(replay(
+                    uri,
+                    format!("{request}&NextToken=same"),
+                    200,
+                    response,
+                ));
+            }
+            let http = StaticReplayClient::new(events);
+            assert!(VpcClient::new(config(&http))
+                .list_vpcs()
+                .await
+                .unwrap()
+                .is_empty());
+            http.assert_requests_match(&[]);
+        }
+    }
+
+    #[tokio::test]
+    async fn vpc_inventory_does_not_report_success_on_failed_later_page() {
+        let uri = "https://ec2.us-east-1.amazonaws.com/";
+        let request = "Action=DescribeVpcs&Version=2016-11-15";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, request.into(), 200, "<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-first</vpcId></item></vpcSet><nextToken>page2</nextToken></DescribeVpcsResponse>".into()),
+            replay(uri, format!("{request}&NextToken=page2"), 403, "<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>denied</Message></Error></Errors></Response>".into()),
+        ]);
+        assert!(VpcClient::new(config(&http)).list_vpcs().await.is_err());
+        http.assert_requests_match(&[]);
     }
 
     #[tokio::test]

@@ -21,6 +21,7 @@ pub enum ResourceKind {
     Alarm,
     LogGroup,
     Instance,
+    Vpc,
     Table,
     Repository,
     PublicRepository,
@@ -37,12 +38,13 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Api,
         Self::Stack,
         Self::Alarm,
         Self::LogGroup,
         Self::Instance,
+        Self::Vpc,
         Self::Table,
         Self::Repository,
         Self::PublicRepository,
@@ -64,6 +66,7 @@ impl ResourceKind {
             Self::Alarm => "cloudwatch",
             Self::LogGroup => "logs",
             Self::Instance => "ec2",
+            Self::Vpc => "vpc",
             Self::Table => "dynamodb",
             Self::Repository => "ecr",
             Self::PublicRepository => "ecr-public",
@@ -84,6 +87,7 @@ impl ResourceKind {
             Self::Alarm => "Alarm",
             Self::LogGroup => "Log group",
             Self::Instance => "Instance",
+            Self::Vpc => "VPC",
             Self::Table => "Table",
             Self::Repository | Self::PublicRepository => "Repository",
             Self::Efs | Self::Fsx => "File system",
@@ -104,6 +108,7 @@ impl ResourceKind {
             Self::Alarm => "cloudwatch:alarm",
             Self::LogGroup => "logs:log-group",
             Self::Instance => "ec2:instance",
+            Self::Vpc => "ec2:vpc",
             Self::Table => "dynamodb:table",
             Self::Repository => "ecr:repository",
             Self::PublicRepository => "ecr-public:repository",
@@ -123,6 +128,7 @@ impl ResourceKind {
         self.service() == qualifier
             || match qualifier {
                 "ddb" => self == Self::Table,
+                "ec2" => matches!(self, Self::Instance | Self::Vpc),
                 "cfn" => self == Self::Stack,
                 "cw" | "cloudwatch" => matches!(self, Self::Alarm | Self::LogGroup),
                 "apig" => self == Self::Api,

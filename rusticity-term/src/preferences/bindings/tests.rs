@@ -22,6 +22,7 @@ const SOURCES: &[Source] = &[
     Source::DdbBackups,
     Source::DdbTags,
     Source::KmsKeys,
+    Source::RdsInstances,
 ];
 
 fn app_for(source: Source) -> App {
@@ -39,6 +40,7 @@ fn app_for(source: Source) -> App {
             Service::FsxFileSystems
         }
         Source::KmsKeys => Service::KmsKeys,
+        Source::RdsInstances => Service::RdsInstances,
         _ => Service::DynamoDbTables,
     };
     if matches!(source, Source::EcrImages) {

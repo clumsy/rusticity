@@ -2,6 +2,7 @@
 use super::{PreferenceAction, PreferenceColumn, Preferences};
 use crate::app::{App, Service};
 use crate::common::{ColumnId, PageSize};
+use crate::rds::instance::Column as RdsColumn;
 use crate::ui::{dynamodb, efs, fsx};
 use std::borrow::Cow;
 
@@ -24,6 +25,7 @@ enum Source {
     DdbBackups,
     DdbTags,
     KmsKeys,
+    RdsInstances,
 }
 
 fn columns(
@@ -105,6 +107,7 @@ impl Source {
                 }
             }
             Service::KmsKeys => Self::KmsKeys,
+            Service::RdsInstances => Self::RdsInstances,
             _ => return None,
         })
     }
@@ -175,6 +178,12 @@ impl Source {
             Self::DdbReplicas => fixed(&dynamodb::REPLICAS_COLUMNS),
             Self::DdbBackups => fixed(&dynamodb::BACKUPS_COLUMNS),
             Self::DdbTags => fixed(&dynamodb::TAGS_COLUMNS),
+            Self::RdsInstances => columns(
+                &app.rds_state.column_ids,
+                &app.rds_state.visible_column_ids,
+                |id| crate::rds::instance::Column::from_id(id).map(|c| c.name()),
+                None,
+            ),
             Self::KmsKeys => columns(
                 &app.kms_state.tab_column_ids(),
                 app.kms_state.visible_column_ids(),
@@ -216,6 +225,7 @@ impl Source {
             Self::DdbBackups => app.dynamodb_state.backups.page_size,
             Self::DdbTags => app.dynamodb_state.tags_table.page_size,
             Self::KmsKeys => app.kms_state.keys.page_size,
+            Self::RdsInstances => app.rds_state.instances.page_size,
         }
     }
 
@@ -238,6 +248,7 @@ impl Source {
             Self::DdbBackups => app.dynamodb_state.backups.set_page_size(size),
             Self::DdbTags => app.dynamodb_state.tags_table.set_page_size(size),
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
+            Self::RdsInstances => app.rds_state.instances.set_page_size(size),
         }
     }
 
@@ -251,6 +262,7 @@ impl Source {
             Self::FsxFiles => &mut app.fsx_visible_column_ids,
             Self::DdbTables => &mut app.dynamodb_visible_column_ids,
             Self::KmsKeys => app.kms_state.visible_column_ids_mut(),
+            Self::RdsInstances => &mut app.rds_state.visible_column_ids,
             _ => return None,
         })
     }
@@ -277,6 +289,7 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
         return false;
     };
     let model = source.model(app);
+    let previous_rds_options = RdsColumn::inventory_options(&app.rds_state.visible_column_ids);
     match model.action(app.column_selector_index) {
         Some(PreferenceAction::SetPageSize(size)) => source.set_page_size(app, size),
         Some(PreferenceAction::SetColumnVisibility { id, visible }) => {
@@ -294,6 +307,13 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
                 columns.retain(|column| *column != id);
                 if visible {
                     columns.push(id);
+                }
+                if visible
+                    && matches!(source, Source::RdsInstances)
+                    && RdsColumn::inventory_options(&app.rds_state.visible_column_ids)
+                        != previous_rds_options
+                {
+                    app.rds_state.instances.loading = true;
                 }
             }
         }

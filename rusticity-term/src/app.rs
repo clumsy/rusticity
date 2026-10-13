@@ -29,6 +29,7 @@ pub use crate::lambda::{
     Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer as LambdaLayer, Resource,
     ResourceColumn as LambdaResourceColumn, Version as LambdaVersion,
 };
+use crate::rds::actions as rds_actions;
 pub use crate::s3::{Bucket as S3Bucket, BucketColumn as S3BucketColumn, Object as S3Object};
 use crate::session::{Session, SessionTab};
 pub use crate::sqs::queue::Column as SqsColumn;
@@ -75,6 +76,7 @@ pub use crate::ui::lambda::{
     DetailTab as LambdaDetailTab, State as LambdaState, FILTER_CONTROLS as LAMBDA_FILTER_CONTROLS,
 };
 use crate::ui::monitoring::MonitoringState;
+use crate::ui::rds::State as RdsState;
 pub use crate::ui::s3::{
     calculate_total_bucket_rows, calculate_total_object_rows, BucketType as S3BucketType,
     ObjectTab as S3ObjectTab, State as S3State,
@@ -92,6 +94,7 @@ pub use crate::ui::{
 use rusticity_core::dynamodb::DdbItemsPage;
 #[cfg(test)]
 use rusticity_core::LogStream;
+use rusticity_core::RdsClient;
 use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
     CloudWatchClient, DynamoDbClient, Ec2Client, EcrClient, EfsClient, FsxClient, IamClient,
@@ -119,6 +122,7 @@ pub struct App {
     pub kms_client: KmsClient,
     pub efs_client: EfsClient,
     pub fsx_client: FsxClient,
+    pub rds_client: RdsClient,
     pub dynamodb_client: DynamoDbClient,
     pub apig_client: ApiGatewayClient,
     pub iam_client: IamClient,
@@ -141,6 +145,7 @@ pub struct App {
     pub kms_state: KmsState,
     pub efs_state: EfsState,
     pub fsx_state: FsxState,
+    pub rds_state: RdsState,
     pub dynamodb_state: DynamoDbState,
     pub apig_state: ApigState,
     pub lambda_state: LambdaState,
@@ -329,6 +334,7 @@ pub enum Service {
     CloudWatchInsights,
     CloudWatchAlarms,
     CloudTrailEvents,
+    RdsInstances,
     S3Buckets,
     SqsQueues,
     Ec2Instances,
@@ -353,6 +359,7 @@ impl Service {
             Service::CloudWatchInsights => "CloudWatch › Logs Insights",
             Service::CloudWatchAlarms => "CloudWatch › Alarms",
             Service::CloudTrailEvents => "CloudTrail › Event History",
+            Service::RdsInstances => "RDS › Databases",
             Service::S3Buckets => "S3 › Buckets",
             Service::SqsQueues => "SQS › Queues",
             Service::Ec2Instances => "EC2 › Instances",
@@ -476,6 +483,9 @@ impl App {
     }
 
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
+        if self.current_service == Service::RdsInstances {
+            return Some(&mut self.rds_state.instances.filter);
+        }
         if self.current_service == Service::ApiGatewayApis {
             crate::apig::actions::get_active_filter_mut(self)
         } else if self.current_service == Service::CloudWatchAlarms {
@@ -569,6 +579,9 @@ impl App {
     {
         if let Some(filter) = self.get_active_filter_mut() {
             op(filter);
+            if self.current_service == Service::RdsInstances {
+                self.rds_state.instances.reset();
+            }
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
                 crate::cw::actions::alarms_apply_filter_reset(self);
@@ -633,6 +646,7 @@ impl App {
         let kms_client = KmsClient::new(config.clone());
         let efs_client = EfsClient::new(config.clone());
         let fsx_client = FsxClient::new(config.clone());
+        let rds_client = RdsClient::new(config.clone());
         let dynamodb_client = DynamoDbClient::new(config.clone());
         let lambda_client = LambdaClient::new(config.clone());
         let cloudformation_client = CloudFormationClient::new(config.clone());
@@ -652,6 +666,7 @@ impl App {
             kms_client,
             efs_client,
             fsx_client,
+            rds_client,
             dynamodb_client,
             apig_client,
             iam_client,
@@ -682,6 +697,7 @@ impl App {
             kms_state: KmsState::new(),
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
+            rds_state: RdsState::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
@@ -881,6 +897,7 @@ impl App {
             kms_client: KmsClient::new(config.clone()),
             efs_client: EfsClient::new(config.clone()),
             fsx_client: FsxClient::new(config.clone()),
+            rds_client: RdsClient::new(config.clone()),
             dynamodb_client: DynamoDbClient::new(config.clone()),
             apig_client: ApiGatewayClient::new(config.clone()),
             iam_client: IamClient::new(config.clone()),
@@ -911,6 +928,7 @@ impl App {
             kms_state: KmsState::new(),
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
+            rds_state: RdsState::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
@@ -1095,6 +1113,9 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if rds_actions::handle_action(self, &action) {
+            return;
+        }
         match action {
             Action::Noop => {}
             Action::EnterFilterMode => match self.mode {
@@ -1279,6 +1300,7 @@ impl App {
                     Service::DynamoDbTables => {
                         ddb_actions::apply_filter_reset(self);
                     }
+                    Service::RdsInstances => self.rds_state.instances.reset(),
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
                     }
@@ -1370,6 +1392,7 @@ impl App {
                             "KmsKeys" => Service::KmsKeys,
                             "EfsFileSystems" => Service::EfsFileSystems,
                             "FsxFileSystems" => Service::FsxFileSystems,
+                            "RdsInstances" => Service::RdsInstances,
                             "DynamoDbTables" => Service::DynamoDbTables,
                             "LambdaFunctions" => Service::LambdaFunctions,
                             "LambdaApplications" => Service::LambdaApplications,
@@ -1382,8 +1405,16 @@ impl App {
 
                         self.tabs.push(Tab {
                             service,
-                            title: session_tab.title.clone(),
-                            breadcrumb: session_tab.breadcrumb.clone(),
+                            title: if service == Service::RdsInstances {
+                                service.name().into()
+                            } else {
+                                session_tab.title.clone()
+                            },
+                            breadcrumb: if service == Service::RdsInstances {
+                                service.name().into()
+                            } else {
+                                session_tab.breadcrumb.clone()
+                            },
                         });
 
                         // Restore filter if present
@@ -3351,6 +3382,7 @@ impl App {
             Service::EfsFileSystems => {
                 parts.extend(crate::efs::actions::breadcrumb(self));
             }
+            Service::RdsInstances => parts.extend(["RDS".into(), "Databases".into()]),
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
@@ -3446,6 +3478,7 @@ impl App {
             Service::KmsKeys => crate::kms::actions::console_url(self),
             Service::EfsFileSystems => crate::efs::actions::console_url(self),
             Service::FsxFileSystems => crate::fsx::actions::console_url(self),
+            Service::RdsInstances => rds_actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4226,6 +4259,10 @@ impl App {
     }
 
     fn go_to_page(&mut self, page: usize) {
+        if self.current_service == Service::RdsInstances {
+            rds_actions::go_to_page(self, page);
+            return;
+        }
         if page == 0 {
             return;
         }
@@ -4504,6 +4541,7 @@ impl App {
                     "KMS › Managed Keys" => Service::KmsKeys,
                     "EFS › File Systems" => Service::EfsFileSystems,
                     "FSx › File Systems" => Service::FsxFileSystems,
+                    "RDS › Databases" | "RDS › DB Instances" => Service::RdsInstances,
                     "DynamoDB › Tables" => Service::DynamoDbTables,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
@@ -4523,6 +4561,10 @@ impl App {
                 });
                 self.current_tab = self.tabs.len() - 1;
                 self.current_service = new_service;
+                if new_service == Service::RdsInstances {
+                    self.rds_state.instances.reset();
+                    self.rds_state.instances.loading = true;
+                }
                 self.view_mode = ViewMode::List;
                 self.service_selected = true;
                 self.mode = Mode::Normal;
@@ -4554,6 +4596,7 @@ impl App {
                     .iter()
                     .map(|st| Tab {
                         service: match st.service.as_str() {
+                            "RdsInstances" => Service::RdsInstances,
                             "CloudWatchLogGroups" => Service::CloudWatchLogGroups,
                             "CloudWatchInsights" => Service::CloudWatchInsights,
                             "CloudWatchAlarms" => Service::CloudWatchAlarms,
@@ -4562,8 +4605,16 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             _ => Service::CloudWatchLogGroups,
                         },
-                        title: st.title.clone(),
-                        breadcrumb: st.breadcrumb.clone(),
+                        title: if st.service == "RdsInstances" {
+                            Service::RdsInstances.name().into()
+                        } else {
+                            st.title.clone()
+                        },
+                        breadcrumb: if st.service == "RdsInstances" {
+                            Service::RdsInstances.name().into()
+                        } else {
+                            st.breadcrumb.clone()
+                        },
                     })
                     .collect();
 
@@ -5280,6 +5331,19 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_rds_instances(&mut self) -> anyhow::Result<()> {
+        self.rds_state.instances.loading = true;
+        let options =
+            crate::rds::instance::Column::inventory_options(&self.rds_state.visible_column_ids);
+        let result = self.rds_client.list_instances_with_options(options).await;
+        self.rds_state.instances.loading = false;
+        // Replace atomically: a failed page must not discard the prior inventory.
+        let instances = result?;
+        self.rds_state.instances.items = instances;
+        self.rds_state.instances.reset();
+        Ok(())
+    }
+
     pub async fn load_fsx_file_systems(&mut self) -> anyhow::Result<()> {
         let file_systems = self.fsx_client.list_file_systems().await?;
         self.fsx_state.file_systems.items = file_systems;
@@ -5950,6 +6014,7 @@ impl ServicePickerState {
                 "DynamoDB › Tables",
                 "Lambda › Functions",
                 "Lambda › Applications",
+                "RDS › Databases",
                 "S3 › Buckets",
                 "SQS › Queues",
             ],

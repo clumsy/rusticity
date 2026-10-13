@@ -42,6 +42,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 👤 **IAM**: Users, roles, groups, policies, and permissions
 - 🔑 **KMS**: Managed Keys — AWS managed and customer managed keys
 - λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring
+- 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
 - 🪣 **S3**: Buckets and objects with navigation
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
 
@@ -120,6 +121,15 @@ error dialog is open. Changing the table, account context, index, projection,
 operation, or query key starts a new result set. Pagination shows only loaded
 pages followed by `...` while the total is unknown; the ellipsis disappears
 only after the final result page has loaded successfully.
+
+### RDS Databases
+
+Preferences lists database metadata plus optional monitoring, maintenance, and
+recommendation columns. Extra read APIs are called only when their columns are
+visible. Missing or inapplicable values show `-`; failed optional reads show
+`Unavailable` without hiding the inventory. CPU, current activity (average active
+sessions), and replica lag use the latest CloudWatch sample within 15 minutes;
+metrics not published for an instance remain `-`.
 
 ## Development
 

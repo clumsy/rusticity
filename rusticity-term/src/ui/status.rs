@@ -174,6 +174,21 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     {
         // Service-specific Items hints must precede the legacy ViewMode branches.
         dynamodb_items_hotkeys(app)
+    } else if app.mode == Mode::Normal
+        && app.service_selected
+        && app.current_service == Service::RdsInstances
+    {
+        let mut hints = first_hint("↑↓", "scroll");
+        hints.extend(hint("⏎ / ←→", "toggle"));
+        hints.extend(hint("i", "filter"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
+        hints.extend(hint("y", "copy ARN"));
+        hints.extend(hint("^o", "console"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(hint("^w", "close"));
+        hints.extend(last_hint("q", "quit"));
+        hints
     } else if app.view_mode == ViewMode::Events {
         let mut hints = vec![];
         hints.extend(first_hint("↑↓", "scroll"));
@@ -360,6 +375,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Any service loading → show generic spinner inline with version on the right
     let is_loading = app.log_groups_state.loading
+        || app.rds_state.instances.loading
         || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading
         || app.ec2_state.table.loading

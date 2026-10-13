@@ -249,6 +249,10 @@ impl AwsConfig {
         aws_sdk_dynamodb::Client::new(&self.sdk_config)
     }
 
+    pub fn rds_client(&self) -> aws_sdk_rds::Client {
+        aws_sdk_rds::Client::new(&self.sdk_config)
+    }
+
     pub fn fsx_client(&self) -> aws_sdk_fsx::Client {
         aws_sdk_fsx::Client::new(&self.sdk_config)
     }
@@ -397,6 +401,7 @@ mod tests {
 mod pagination_tests {
     use super::*;
     use crate::dynamodb::DynamoDbClient;
+    use crate::rds::{InventoryOptions, RdsClient};
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
@@ -434,6 +439,147 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn rds_optional_reads_are_gated_and_fail_without_hiding_inventory() {
+        let uri = "https://rds.us-east-1.amazonaws.com/";
+        let inventory = "<DescribeDBInstancesResponse><DescribeDBInstancesResult><DBInstances><DBInstance>\
+            <DBInstanceIdentifier>orders</DBInstanceIdentifier><DBInstanceStatus>available</DBInstanceStatus>\
+            <DBInstanceArn>arn:aws:rds:us-east-1:123456789012:db:orders</DBInstanceArn>\
+            </DBInstance></DBInstances></DescribeDBInstancesResult></DescribeDBInstancesResponse>";
+        let denied = "<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>denied</Message></Error></ErrorResponse>";
+        for enabled in [false, true] {
+            let mut events = vec![replay(
+                uri,
+                "Action=DescribeDBInstances&Version=2014-10-31".into(),
+                200,
+                inventory.into(),
+            )];
+            if enabled {
+                events.push(replay(
+                    uri,
+                    "Action=DescribeDBRecommendations&Version=2014-10-31".into(),
+                    403,
+                    denied.into(),
+                ));
+                events.push(replay(
+                    uri,
+                    "Action=DescribePendingMaintenanceActions&Version=2014-10-31".into(),
+                    403,
+                    denied.into(),
+                ));
+                // CloudWatch uses a different wire protocol; an HTTP failure is enough
+                // to verify the optional metric error path, not its serialization.
+                events.push(replay(
+                    "https://monitoring.us-east-1.amazonaws.com/",
+                    String::new(),
+                    403,
+                    String::new(),
+                ));
+            }
+            let http = StaticReplayClient::new(events);
+            let rows = RdsClient::new(config(&http))
+                .list_instances_with_options(InventoryOptions {
+                    recommendations: enabled,
+                    maintenance: enabled,
+                    cpu: enabled,
+                    current_activity: enabled,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].identifier, "orders");
+            assert_eq!(rows[0].status, "available");
+            let expected = if enabled { "Unavailable" } else { "" };
+            assert_eq!(rows[0].recommendations, expected);
+            assert_eq!(rows[0].maintenance, expected);
+            assert_eq!(rows[0].cpu, expected);
+            assert_eq!(rows[0].current_activity, expected);
+            assert_eq!(http.actual_requests().count(), if enabled { 4 } else { 1 });
+            if !enabled {
+                http.assert_requests_match(&[]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn rds_inventory_follows_markers_maps_fields_and_sorts_identifiers() {
+        let uri = "https://rds.us-east-1.amazonaws.com/";
+        let body = "Action=DescribeDBInstances&Version=2014-10-31";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, body.into(), 200,
+                "<DescribeDBInstancesResponse><DescribeDBInstancesResult><DBInstances><DBInstance>\
+                <DBInstanceIdentifier>zeta</DBInstanceIdentifier><DBInstanceStatus>available</DBInstanceStatus>\
+                <Engine>postgres</Engine><EngineVersion>17.6</EngineVersion><DBInstanceClass>db.t4g.micro</DBInstanceClass>\
+                <AvailabilityZone>us-east-1a</AvailabilityZone><DBInstanceArn>arn:aws:rds:us-east-1:123456789012:db:zeta</DBInstanceArn>\
+                <Endpoint><Address>zeta.example.invalid</Address><Port>5432</Port></Endpoint>\
+                </DBInstance></DBInstances><Marker>page2</Marker></DescribeDBInstancesResult></DescribeDBInstancesResponse>".into()),
+            replay(uri, format!("{body}&Marker=page2"), 200,
+                "<DescribeDBInstancesResponse><DescribeDBInstancesResult><DBInstances><DBInstance>\
+                <DBInstanceIdentifier>alpha</DBInstanceIdentifier><DBInstanceStatus>creating</DBInstanceStatus>\
+                </DBInstance></DBInstances></DescribeDBInstancesResult></DescribeDBInstancesResponse>".into()),
+        ]);
+        let rows = RdsClient::new(config(&http))
+            .list_instances()
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|i| i.identifier.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "zeta"]
+        );
+        assert!(rows[0].endpoint.is_empty());
+        assert_eq!(rows[1].endpoint, "zeta.example.invalid");
+        assert_eq!(rows[1].port, Some(5432));
+        assert_eq!(rows[1].engine_version, "17.6");
+        assert_eq!(rows[1].region, "us-east-1");
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn rds_inventory_empty_and_repeated_markers_terminate() {
+        let uri = "https://rds.us-east-1.amazonaws.com/";
+        let body = "Action=DescribeDBInstances&Version=2014-10-31";
+        for repeat in [false, true] {
+            let response = format!(
+                "<DescribeDBInstancesResponse><DescribeDBInstancesResult><DBInstances/>{}\
+                </DescribeDBInstancesResult></DescribeDBInstancesResponse>",
+                if repeat { "<Marker>same</Marker>" } else { "" }
+            );
+            let mut events = vec![replay(uri, body.into(), 200, response.clone())];
+            if repeat {
+                events.push(replay(uri, format!("{body}&Marker=same"), 200, response));
+            }
+            let http = StaticReplayClient::new(events);
+            let rows = RdsClient::new(config(&http))
+                .list_instances()
+                .await
+                .unwrap();
+            assert!(rows.is_empty());
+            http.assert_requests_match(&[]);
+        }
+    }
+
+    #[tokio::test]
+    async fn rds_inventory_propagates_later_page_failure_without_partial_success() {
+        let uri = "https://rds.us-east-1.amazonaws.com/";
+        let body = "Action=DescribeDBInstances&Version=2014-10-31";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, body.into(), 200,
+                "<DescribeDBInstancesResponse><DescribeDBInstancesResult><DBInstances><DBInstance>\
+                <DBInstanceIdentifier>first</DBInstanceIdentifier></DBInstance></DBInstances><Marker>page2</Marker>\
+                </DescribeDBInstancesResult></DescribeDBInstancesResponse>".into()),
+            replay(uri, format!("{body}&Marker=page2"), 403,
+                "<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>denied</Message></Error></ErrorResponse>".into()),
+        ]);
+        assert!(RdsClient::new(config(&http))
+            .list_instances()
+            .await
+            .is_err());
+        http.assert_requests_match(&[]);
     }
 
     #[tokio::test]

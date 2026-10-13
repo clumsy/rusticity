@@ -17,6 +17,7 @@ mod pagination;
 mod preferences;
 pub mod prefs;
 mod query_editor;
+pub mod rds;
 pub mod s3;
 pub mod sqs;
 mod status;
@@ -866,6 +867,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
+        Service::RdsInstances => rds::render_instances(frame, app, area),
         Service::DynamoDbTables => dynamodb::render_tables(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
@@ -2384,6 +2386,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::KmsKeys => kms::render_keys(frame, app, area),
         Service::EfsFileSystems => efs::render_file_systems(frame, app, area),
         Service::FsxFileSystems => fsx::render_file_systems(frame, app, area),
+        Service::RdsInstances => rds::render_instances(frame, app, area),
         Service::DynamoDbTables => dynamodb::render_tables(frame, app, area),
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),

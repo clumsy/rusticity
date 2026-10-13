@@ -16,6 +16,7 @@ pub mod keymap;
 pub mod kms;
 pub mod lambda;
 pub mod preferences;
+pub mod rds;
 pub mod s3;
 pub mod session;
 pub mod sqs;
@@ -55,6 +56,7 @@ pub fn init() {
     efs::init(&mut i18n);
     fsx::init(&mut i18n);
     dynamodb::init(&mut i18n);
+    rds::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);
     sqs::init(&mut i18n);

@@ -26,6 +26,7 @@ aws-sdk-fsx = { workspace = true }
 aws-sdk-kms = { workspace = true }
 aws-sdk-lambda = { workspace = true }
 aws-sdk-pipes = { workspace = true }
+aws-sdk-rds = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-sdk-sqs = { workspace = true }
 aws-sdk-sts = { workspace = true }

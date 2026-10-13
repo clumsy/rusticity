@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3441,7 +3441,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity-core"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -3480,7 +3480,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity-term"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "aws-sdk-dynamodb",

@@ -1,5 +1,6 @@
 use crate::app::{App, Service, ViewMode};
 use crate::dynamodb::{actions::is_items_tab, items::can_load_more};
+use crate::finder::Focus as FinderFocus;
 use crate::keymap::Mode;
 use crate::ui::cfn::DetailTab;
 use crate::ui::red_text;
@@ -91,6 +92,7 @@ fn dynamodb_items_hotkeys(app: &App) -> Vec<Span<'static>> {
 pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let is_insert = match app.mode {
         Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => true,
+        Mode::ResourceFinder => app.resource_finder.focus == FinderFocus::Filter,
         Mode::ServicePicker | Mode::SpaceMenu => app.service_picker.filter_active,
         Mode::RegionPicker => app.region_filter_active,
         Mode::SessionPicker => app.session_filter_active,
@@ -105,7 +107,20 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let help = if app.mode == Mode::QuitConfirm {
+    let help = if app.mode == Mode::ResourceFinder {
+        let mut hints = if app.resource_finder.focus == FinderFocus::Filter {
+            first_hint("⏎", "results")
+        } else {
+            let mut hints = first_hint("↑↓", "select");
+            hints.extend(hint("⏎", "open"));
+            hints.extend(hint("i", "filter"));
+            hints
+        };
+        hints.extend(hint("⇤⇥", "switch"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(last_hint("⎋", "cancel"));
+        hints
+    } else if app.mode == Mode::QuitConfirm {
         let mut hints = vec![];
         hints.extend(first_hint("y", "confirm quit"));
         hints.extend(last_hint("n / Esc", "cancel"));

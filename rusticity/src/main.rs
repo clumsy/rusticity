@@ -1,6 +1,8 @@
 use anyhow::Result;
 use crossterm::event::Event;
 use rusticity_term::dynamodb::actions::is_items_tab;
+use rusticity_term::finder;
+use rusticity_term::keymap::{handle_key, Mode};
 use rusticity_term::ui::dynamodb::needs_items_load;
 use rusticity_term::{App, EventHandler, Service, ViewMode};
 use tokio::time::{interval, Duration};
@@ -46,8 +48,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        finder::poll(&mut app);
         // Any service loading → animate the spinner via periodic redraws
-        let any_loading = app.log_groups_state.loading
+        let any_loading = app.mode == Mode::ResourceFinder
+            || app.log_groups_state.loading
             || app.kms_state.keys.loading
             || app.ecr_state.repositories.loading
             || app.ec2_state.table.loading
@@ -78,6 +82,23 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                 match event? {
                     Some(Event::Key(key)) => {
                         use crossterm::event::KeyCode;
+
+                        // Finder edits and idle results never wait for service inventory
+                        // loaders in the main action path. Only Enter opens a resource.
+                        if app.mode == Mode::ResourceFinder {
+                            if let Some(action) = handle_key(key, app.mode) { app.handle_action(action); }
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Some(resource) = app.resource_finder.pending_open.take() {
+                                if let Err(error) = finder::navigation::open_resource(&mut app, resource).await {
+                                    app.error_message = Some(format!("Failed to open resource: {error:#}"));
+                                    app.error_scroll = 0;
+                                    app.mode = Mode::ErrorModal;
+                                }
+                                app.resource_finder.opening = false;
+                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            }
+                            continue;
+                        }
 
                         // Handle 'g' prefix key combinations
                         if let Some(pending) = app.pending_key {
@@ -133,6 +154,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         let prev_current_tab = app.current_tab;
 
                         app.handle_action(action);
+                        if app.mode == Mode::ResourceFinder {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            continue;
+                        }
 
                         // Fetch profile accounts on Ctrl+R in profile picker
                         if is_profile_refresh {

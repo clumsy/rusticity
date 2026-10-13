@@ -10,6 +10,7 @@ pub mod ec2;
 pub mod ecr;
 pub mod efs;
 pub mod event;
+pub mod finder;
 pub mod fsx;
 pub mod iam;
 pub mod keymap;

@@ -111,6 +111,28 @@ rusticity
 AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 ```
 
+### Resource finder
+
+Press `Space`, then `f` to search supported AWS resource inventories in the current
+profile and Region. Type at least three search characters (excluding qualifiers),
+optionally adding `@s3`, `@dynamodb`/`@ddb`, `@ec2`, `@rds`, `@iam`, `@lambda`, or
+another supported service. The filter starts focused. Enter moves to the results;
+there, use arrows to select and Enter to open. Tab/Shift+Tab switches focus,
+`i` returns to the filter, Esc cancels, and `Ctrl+R` refreshes.
+
+Search starts after a 250 ms pause and streams results without blocking typing.
+It uses an existing AWS Resource Explorer view for indexed prefix search; it does
+not create indexes or views. If unavailable, it searches supported inventories
+with at most four concurrent sources and a 60-second in-memory cache. Cached
+inventory matching is case-insensitive substring matching. Global services are
+included where the underlying API is global. Changing profile/Region clears the
+cache. Permission failures and result limits are shown rather than reported as
+complete empty results; indexed results are limited to 1,000 and can lag AWS changes.
+
+The finder searches top-level resources, not DynamoDB items, S3 objects, log
+streams/events, or CloudTrail event contents. DynamoDB results open Items and S3
+results open the bucket; other results open their filtered service inventory.
+
 ### DynamoDB Items
 
 Press `m` in Normal mode to load the next Scan/Query page. Each request evaluates

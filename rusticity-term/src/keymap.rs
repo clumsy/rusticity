@@ -5,6 +5,7 @@ pub enum Mode {
     Normal,
     SpaceMenu,
     ServicePicker,
+    ResourceFinder,
     ColumnSelector,
     FilterInput,
     EventFilterInput,
@@ -88,7 +89,35 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('c') => Some(Action::CloseService),
             KeyCode::Char('b') | KeyCode::Char('t') => Some(Action::OpenTabPicker),
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
+            KeyCode::Char('f') => Some(Action::OpenResourceFinder),
             KeyCode::Char('h') => Some(Action::ShowHelp),
+            _ => None,
+        },
+        Mode::ResourceFinder => match key.code {
+            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Down => Some(Action::NextItem),
+            KeyCode::Up => Some(Action::PrevItem),
+            KeyCode::PageDown => Some(Action::PageDown),
+            KeyCode::PageUp => Some(Action::PageUp),
+            KeyCode::Enter => Some(Action::Select),
+            KeyCode::BackTab => Some(Action::PrevFilterFocus),
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                Some(Action::PrevFilterFocus)
+            }
+            KeyCode::Tab => Some(Action::NextFilterFocus),
+            KeyCode::Backspace => Some(Action::FilterBackspace),
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Refresh),
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::CONTROL => {
+                Some(Action::DeleteWord)
+            }
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => Some(Action::CloseMenu),
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                Some(Action::FilterInput(c))
+            }
             _ => None,
         },
         Mode::ServicePicker => match key.code {
@@ -273,6 +302,7 @@ pub enum Action {
     OpenSpaceMenu,
     CloseMenu,
     OpenServicePicker,
+    OpenResourceFinder,
     OpenCloudWatch,
     OpenCloudWatchSplit,
     OpenCloudWatchAlarms,

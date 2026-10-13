@@ -8,6 +8,7 @@ pub mod ecr;
 pub mod efs;
 mod expanded_view;
 pub mod filter;
+pub mod finder;
 pub mod fsx;
 pub mod iam;
 pub mod kms;
@@ -681,6 +682,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     // Render modals on top
     match app.mode {
         Mode::SpaceMenu => render_space_menu(frame, area),
+        Mode::ResourceFinder => finder::render(frame, app, area),
         Mode::ServicePicker => render_service_picker(frame, app, area),
         Mode::ColumnSelector => render_column_selector(frame, app, area),
         Mode::ErrorModal => render_error_modal(frame, app, area),
@@ -2159,6 +2161,10 @@ fn render_quit_confirm(frame: &mut Frame, area: Rect) {
 
 fn render_space_menu(frame: &mut Frame, area: Rect) {
     let items = vec![
+        Line::from(vec![
+            Span::styled("f", Style::default().fg(Color::Yellow)),
+            Span::raw(" find resource"),
+        ]),
         Line::from(vec![
             Span::styled("o", Style::default().fg(Color::Yellow)),
             Span::raw(" services"),

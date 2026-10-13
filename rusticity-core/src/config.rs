@@ -249,6 +249,10 @@ impl AwsConfig {
         aws_sdk_dynamodb::Client::new(&self.sdk_config)
     }
 
+    pub fn resource_explorer_client(&self) -> aws_sdk_resourceexplorer2::Client {
+        aws_sdk_resourceexplorer2::Client::new(&self.sdk_config)
+    }
+
     pub fn rds_client(&self) -> aws_sdk_rds::Client {
         aws_sdk_rds::Client::new(&self.sdk_config)
     }
@@ -439,6 +443,100 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn finder_indexed_search_streams_pages_and_filters_unsupported_resources() {
+        use crate::finder::{search, SearchCache, SearchQuery, SearchUpdate};
+        use std::sync::Arc;
+        use tokio::sync::{mpsc, Mutex};
+        let query = "\"rusticity\"* resourcetype:dynamodb:table region:us-east-1,global";
+        let request = serde_json::json!({"QueryString": query, "MaxResults": 100});
+        let mut next = request.clone();
+        next["NextToken"] = "page2".into();
+        let uri = "https://resource-explorer-2.us-east-1.amazonaws.com/Search";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, request.to_string(), 200, serde_json::json!({
+                "Resources": [{"Arn": "arn:aws:dynamodb:us-east-1:123456789012:table/rusticity-orders", "Region": "us-east-1",
+                    "ResourceType": "dynamodb:table", "Service": "dynamodb", "OwningAccountId": "123456789012"}],
+                "NextToken": "page2", "Count": {"Complete": false, "TotalResources": 1000}
+            }).to_string()),
+            replay(uri, next.to_string(), 200, serde_json::json!({
+                "Resources": [
+                    {"Arn": "arn:aws:dynamodb:us-east-1:123456789012:table/rusticity-events", "Region": "us-east-1", "ResourceType": "dynamodb:table", "OwningAccountId": "123456789012"},
+                    {"Arn": "arn:aws:rds:us-east-1:123456789012:cluster/rusticity", "Region": "us-east-1", "ResourceType": "rds:cluster", "OwningAccountId": "123456789012"},
+                    {"Arn": "arn:aws:dynamodb:us-east-1:999999999999:table/rusticity-other-account", "Region": "us-east-1", "ResourceType": "dynamodb:table", "OwningAccountId": "999999999999"}
+                ], "Count": {"Complete": true, "TotalResources": 2}
+            }).to_string()),
+        ]);
+        let mut config = config(&http);
+        config.account_id = "123456789012".into();
+        let (tx, mut rx) = mpsc::channel(8);
+        search(
+            config,
+            SearchQuery::parse("@ddb rusticity").unwrap(),
+            Arc::new(Mutex::new(SearchCache::default())),
+            tx,
+        )
+        .await;
+        let mut rows = Vec::new();
+        let mut batches = 0;
+        let mut finished = false;
+        while let Some(update) = rx.recv().await {
+            match update {
+                SearchUpdate::Results(batch) => {
+                    batches += 1;
+                    rows.extend(batch);
+                }
+                SearchUpdate::Finished { limited } => {
+                    assert!(limited);
+                    finished = true;
+                }
+                SearchUpdate::Warning(warning) => panic!("Unexpected warning: {warning}"),
+                _ => {}
+            }
+        }
+        assert!(finished);
+        assert_eq!(batches, 2);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["rusticity-orders", "rusticity-events"]
+        );
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn finder_missing_view_falls_back_to_paginated_inventory_and_caches_it() {
+        use crate::finder::{search, SearchCache, SearchQuery, SearchUpdate};
+        use std::sync::Arc;
+        use tokio::sync::{mpsc, Mutex};
+        let request = serde_json::json!({"QueryString": "\"rusticity\"* resourcetype:dynamodb:table region:us-east-1,global", "MaxResults": 100});
+        let http = StaticReplayClient::new(vec![
+            replay("https://resource-explorer-2.us-east-1.amazonaws.com/Search", request.to_string(), 401, r#"{"message":"No default view"}"#.into()),
+            replay("https://dynamodb.us-east-1.amazonaws.com/", "{}".into(), 200, r#"{"TableNames":["rusticity-orders"],"LastEvaluatedTableName":"rusticity-orders"}"#.into()),
+            replay("https://dynamodb.us-east-1.amazonaws.com/", r#"{"ExclusiveStartTableName":"rusticity-orders"}"#.into(), 200, r#"{"TableNames":["rusticity-events","unrelated"]}"#.into()),
+        ]);
+        let cache = Arc::new(Mutex::new(SearchCache::default()));
+        for _ in 0..2 {
+            let (tx, mut rx) = mpsc::channel(8);
+            search(
+                config(&http),
+                SearchQuery::parse("@dynamodb rusticity").unwrap(),
+                cache.clone(),
+                tx,
+            )
+            .await;
+            let mut rows = Vec::new();
+            while let Some(update) = rx.recv().await {
+                if let SearchUpdate::Results(batch) = update {
+                    rows.extend(batch);
+                }
+            }
+            assert_eq!(rows.len(), 2);
+        }
+        // The second query uses cached inventory; neither provider makes another request.
+        assert_eq!(http.actual_requests().count(), 3);
+        http.assert_requests_match(&[]);
     }
 
     #[tokio::test]

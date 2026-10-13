@@ -635,6 +635,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-resourceexplorer2"
+version = "1.119.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c32b1c817dde8e79562e61f16279c262778980482b096409df5953d4e3657be"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-s3"
 version = "1.152.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3437,6 +3462,7 @@ dependencies = [
  "aws-sdk-lambda",
  "aws-sdk-pipes",
  "aws-sdk-rds",
+ "aws-sdk-resourceexplorer2",
  "aws-sdk-s3",
  "aws-sdk-sqs",
  "aws-sdk-sts",

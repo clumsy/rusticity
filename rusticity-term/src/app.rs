@@ -146,6 +146,7 @@ pub struct App {
     pub efs_state: EfsState,
     pub fsx_state: FsxState,
     pub rds_state: RdsState,
+    pub resource_finder: crate::finder::State,
     pub dynamodb_state: DynamoDbState,
     pub apig_state: ApigState,
     pub lambda_state: LambdaState,
@@ -698,6 +699,7 @@ impl App {
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
             rds_state: RdsState::default(),
+            resource_finder: crate::finder::State::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
@@ -929,6 +931,7 @@ impl App {
             efs_state: EfsState::new(),
             fsx_state: FsxState::new(),
             rds_state: RdsState::default(),
+            resource_finder: crate::finder::State::default(),
             dynamodb_state: DynamoDbState::new(),
             apig_state: ApigState::new(),
             lambda_state: LambdaState::new(),
@@ -1113,11 +1116,14 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if crate::finder::handle_action(self, &action) {
+            return;
+        }
         if rds_actions::handle_action(self, &action) {
             return;
         }
         match action {
-            Action::Noop => {}
+            Action::Noop | Action::OpenResourceFinder => {}
             Action::EnterFilterMode => match self.mode {
                 Mode::ServicePicker => self.service_picker.filter_active = true,
                 Mode::RegionPicker => self.region_filter_active = true,

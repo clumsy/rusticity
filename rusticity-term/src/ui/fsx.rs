@@ -2,10 +2,12 @@ use crate::app::App;
 use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::fsx::fs;
 use crate::table::{TableState, TableWindow};
+use crate::tags::{self, TagSort, TagsConfig};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::format_title;
 use crate::ui::render_tabs;
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::Summary;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use rusticity_core::fsx::FsxFileSystem;
@@ -306,10 +308,10 @@ pub fn render_file_system_detail(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     // Summary pane sized to its content height (dynamic columns).
-    let field_lines = build_summary_lines(fs);
-    let content_rows =
-        crate::ui::calculate_dynamic_height(&field_lines, area.width.saturating_sub(2));
-    let summary_height = (content_rows + 3).min(area.height.saturating_sub(2));
+    let summary = Summary::new("Summary", build_summary_lines(fs));
+    let summary_height = summary
+        .height(area.width)
+        .min(area.height.saturating_sub(2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -320,10 +322,7 @@ pub fn render_file_system_detail(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    let block = crate::ui::titled_block(" Summary ");
-    let inner = block.inner(chunks[0]);
-    frame.render_widget(block, chunks[0]);
-    crate::ui::render_fields_with_dynamic_columns(frame, inner, field_lines);
+    summary.render(frame, chunks[0]);
 
     render_tabs(frame, chunks[1], &tabs, &app.fsx_state.detail_tab);
 
@@ -363,7 +362,7 @@ impl<T> Column<T> for FieldCol<T> {
 }
 
 fn render_network_security(frame: &mut Frame, fs: &FsxFileSystem, area: Rect) {
-    use crate::ui::{calculate_dynamic_height, labeled_field, render_fields_with_dynamic_columns};
+    use crate::ui::{labeled_field, render_fields_with_dynamic_columns};
 
     let net_lines: Vec<Line> = vec![
         labeled_field("VPC", fs.vpc_id.clone()),
@@ -378,17 +377,14 @@ fn render_network_security(frame: &mut Frame, fs: &FsxFileSystem, area: Rect) {
         labeled_field("Network interface(s)", "See the Amazon EC2 Console"),
     ];
 
-    let w = area.width.saturating_sub(2);
-    let h1 = (calculate_dynamic_height(&net_lines, w) + 3).min(area.height);
+    let summary = Summary::new("Network & security", net_lines);
+    let h1 = summary.height(area.width).min(area.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(h1), Constraint::Min(0)])
         .split(area);
 
-    let block1 = crate::ui::titled_block(" Network & security ");
-    let inner1 = block1.inner(chunks[0]);
-    frame.render_widget(block1, chunks[0]);
-    render_fields_with_dynamic_columns(frame, inner1, net_lines);
+    summary.render(frame, chunks[0]);
 
     let first_subnet = fs.subnet_ids.split(',').next().unwrap_or("").trim();
     let subnet_title = if first_subnet.is_empty() {
@@ -601,70 +597,20 @@ fn render_backups_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_tags_tab(frame: &mut Frame, app: &App, fs: &FsxFileSystem, area: Rect) {
-    struct KeyCol;
-    struct ValueCol;
-
-    #[derive(Clone)]
-    struct TagRow {
-        key: String,
-        value: String,
-    }
-
-    impl Column<TagRow> for KeyCol {
-        fn name(&self) -> &str {
-            "Key"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &TagRow) -> (String, Style) {
-            (item.key.clone(), Style::default())
-        }
-    }
-    impl Column<TagRow> for ValueCol {
-        fn name(&self) -> &str {
-            "Value"
-        }
-        fn width(&self) -> u16 {
-            50
-        }
-        fn render(&self, item: &TagRow) -> (String, Style) {
-            (item.value.clone(), Style::default())
-        }
-    }
-
-    let rows: Vec<TagRow> = fs
-        .tags
-        .iter()
-        .map(|(k, v)| TagRow {
-            key: k.clone(),
-            value: v.clone(),
-        })
-        .collect();
-    let row_refs: Vec<&TagRow> = rows.iter().collect();
-    let columns: Vec<Box<dyn Column<TagRow>>> = vec![Box::new(KeyCol), Box::new(ValueCol)];
-
-    let selected = app
-        .fsx_state
-        .tags_table
-        .selected
-        .min(rows.len().saturating_sub(1));
-
-    let config = TableConfig {
-        items: row_refs,
-        selected_index: selected,
-        expanded_index: app.fsx_state.tags_table.expanded_item,
-        columns: &columns,
-        sort_column: "Key",
-        sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Tags ({})", rows.len())),
+    tags::render(
+        frame,
         area,
-        get_expanded_content: Some(Box::new(|row: &TagRow| {
-            expanded_from_columns(&columns, row)
-        })),
-        is_active: app.mode != crate::keymap::Mode::FilterInput,
-    };
-    render_table(frame, config);
+        TagsConfig {
+            table: &app.fsx_state.tags_table,
+            items: &fs.tags,
+            columns: tags::columns(),
+            sort: TagSort::Key,
+            window: crate::table::TableWindow::SelectedPage,
+            focus: app.fsx_state.input_focus,
+            mode: app.mode,
+            loading: false,
+        },
+    );
 }
 
 pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {

@@ -10,7 +10,7 @@ use crate::lambda::{
     Function as LambdaFunction, FunctionColumn as LambdaColumn, Layer, LayerColumn, Resource,
     ResourceColumn, Version, VersionColumn,
 };
-use crate::table::TableState;
+use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::monitoring::MonitoringState;
 use crate::ui::table::{
@@ -324,29 +324,27 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Filter
-    let page_size = app.lambda_state.table.page_size.value();
-    let filtered_count: usize = app
-        .lambda_state
-        .table
-        .items
-        .iter()
-        .filter(|f| {
-            app.lambda_state.table.filter.is_empty()
-                || f.name
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-                || f.description
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-                || f.runtime
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-        })
-        .count();
-
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.lambda_state.table.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
+    let view = app.lambda_state.table.prepare_view(
+        app.lambda_state
+            .table
+            .items
+            .iter()
+            .filter(|f| {
+                app.lambda_state.table.filter.is_empty()
+                    || f.name
+                        .to_lowercase()
+                        .contains(&app.lambda_state.table.filter.to_lowercase())
+                    || f.description
+                        .to_lowercase()
+                        .contains(&app.lambda_state.table.filter.to_lowercase())
+                    || f.runtime
+                        .to_lowercase()
+                        .contains(&app.lambda_state.table.filter.to_lowercase())
+            })
+            .collect(),
+        TableWindow::SelectedPage,
+    );
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -362,30 +360,8 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Table
-    let filtered: Vec<_> = app
-        .lambda_state
-        .table
-        .items
-        .iter()
-        .filter(|f| {
-            app.lambda_state.table.filter.is_empty()
-                || f.name
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-                || f.description
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-                || f.runtime
-                    .to_lowercase()
-                    .contains(&app.lambda_state.table.filter.to_lowercase())
-        })
-        .collect();
 
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered.len());
-    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-    let title = format_title(&format!("Lambda functions ({})", filtered.len()));
+    let title = format_title(&format!("Lambda functions ({})", view.total_items));
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaFunction>>> = vec![];
     for col_id in &app.lambda_state.function_visible_column_ids {
@@ -394,20 +370,10 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let expanded_index = if let Some(expanded) = app.lambda_state.table.expanded_item {
-        if expanded >= start_idx && expanded < end_idx {
-            Some(expanded - start_idx)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     let config = TableConfig {
-        items: paginated,
-        selected_index: app.lambda_state.table.selected % page_size,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Last modified",
         sort_direction: SortDirection::Desc,
@@ -670,29 +636,27 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Filter
-        let page_size = app.lambda_state.version_table.page_size.value();
-        let filtered_count: usize = app
-            .lambda_state
-            .version_table
-            .items
-            .iter()
-            .filter(|v| {
-                app.lambda_state.version_table.filter.is_empty()
-                    || v.version
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-                    || v.aliases
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-                    || v.description
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-            })
-            .count();
-
-        let total_pages = filtered_count.div_ceil(page_size);
-        let current_page = app.lambda_state.version_table.selected / page_size;
-        let pagination = render_pagination_text(current_page, total_pages);
+        let view = app.lambda_state.version_table.prepare_view(
+            app.lambda_state
+                .version_table
+                .items
+                .iter()
+                .filter(|v| {
+                    app.lambda_state.version_table.filter.is_empty()
+                        || v.version
+                            .to_lowercase()
+                            .contains(&app.lambda_state.version_table.filter.to_lowercase())
+                        || v.aliases
+                            .to_lowercase()
+                            .contains(&app.lambda_state.version_table.filter.to_lowercase())
+                        || v.description
+                            .to_lowercase()
+                            .contains(&app.lambda_state.version_table.filter.to_lowercase())
+                })
+                .collect(),
+            TableWindow::SelectedPage,
+        );
+        let pagination = render_pagination_text(view.current_page, view.total_pages);
 
         render_simple_filter(
             frame,
@@ -709,30 +673,8 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Table
-        let filtered: Vec<_> = app
-            .lambda_state
-            .version_table
-            .items
-            .iter()
-            .filter(|v| {
-                app.lambda_state.version_table.filter.is_empty()
-                    || v.version
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-                    || v.aliases
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-                    || v.description
-                        .to_lowercase()
-                        .contains(&app.lambda_state.version_table.filter.to_lowercase())
-            })
-            .collect();
 
-        let start_idx = current_page * page_size;
-        let end_idx = (start_idx + page_size).min(filtered.len());
-        let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-        let title = format_title(&format!("Versions ({})", filtered.len()));
+        let title = format_title(&format!("Versions ({})", view.total_items));
 
         let mut columns: Vec<Box<dyn TableColumn<Version>>> = vec![];
         for col_name in &app.lambda_state.version_visible_column_ids {
@@ -749,20 +691,10 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
 
-        let expanded_index = if let Some(expanded) = app.lambda_state.version_table.expanded_item {
-            if expanded >= start_idx && expanded < end_idx {
-                Some(expanded - start_idx)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let config = TableConfig {
-            items: paginated,
-            selected_index: app.lambda_state.version_table.selected % page_size,
-            expanded_index,
+            items: view.items,
+            selected_index: view.selected_index,
+            expanded_index: view.expanded_index,
             columns: &columns,
             sort_column: "Version",
             sort_direction: SortDirection::Desc,
@@ -786,29 +718,27 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Filter
-        let page_size = app.lambda_state.alias_table.page_size.value();
-        let filtered_count: usize = app
-            .lambda_state
-            .alias_table
-            .items
-            .iter()
-            .filter(|a| {
-                app.lambda_state.alias_table.filter.is_empty()
-                    || a.name
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-                    || a.versions
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-                    || a.description
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-            })
-            .count();
-
-        let total_pages = filtered_count.div_ceil(page_size);
-        let current_page = app.lambda_state.alias_table.selected / page_size;
-        let pagination = render_pagination_text(current_page, total_pages);
+        let view = app.lambda_state.alias_table.prepare_view(
+            app.lambda_state
+                .alias_table
+                .items
+                .iter()
+                .filter(|a| {
+                    app.lambda_state.alias_table.filter.is_empty()
+                        || a.name
+                            .to_lowercase()
+                            .contains(&app.lambda_state.alias_table.filter.to_lowercase())
+                        || a.versions
+                            .to_lowercase()
+                            .contains(&app.lambda_state.alias_table.filter.to_lowercase())
+                        || a.description
+                            .to_lowercase()
+                            .contains(&app.lambda_state.alias_table.filter.to_lowercase())
+                })
+                .collect(),
+            TableWindow::SelectedPage,
+        );
+        let pagination = render_pagination_text(view.current_page, view.total_pages);
 
         render_simple_filter(
             frame,
@@ -824,30 +754,8 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Table
-        let filtered: Vec<_> = app
-            .lambda_state
-            .alias_table
-            .items
-            .iter()
-            .filter(|a| {
-                app.lambda_state.alias_table.filter.is_empty()
-                    || a.name
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-                    || a.versions
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-                    || a.description
-                        .to_lowercase()
-                        .contains(&app.lambda_state.alias_table.filter.to_lowercase())
-            })
-            .collect();
 
-        let start_idx = current_page * page_size;
-        let end_idx = (start_idx + page_size).min(filtered.len());
-        let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-        let title = format_title(&format!("Aliases ({})", filtered.len()));
+        let title = format_title(&format!("Aliases ({})", view.total_items));
 
         let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
         for col_name in &app.lambda_state.alias_visible_column_ids {
@@ -862,20 +770,10 @@ pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
 
-        let expanded_index = if let Some(expanded) = app.lambda_state.alias_table.expanded_item {
-            if expanded >= start_idx && expanded < end_idx {
-                Some(expanded - start_idx)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let config = TableConfig {
-            items: paginated,
-            selected_index: app.lambda_state.alias_table.selected % page_size,
-            expanded_index,
+            items: view.items,
+            selected_index: view.selected_index,
+            expanded_index: view.expanded_index,
             columns: &columns,
             sort_column: "Name",
             sort_direction: SortDirection::Asc,
@@ -1275,30 +1173,28 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     render_fields_with_dynamic_columns(frame, config_inner, config_lines);
 
                     // Filter for aliases
-                    let page_size = app.lambda_state.alias_table.page_size.value();
-                    let filtered_count: usize = app
-                        .lambda_state
-                        .alias_table
-                        .items
-                        .iter()
-                        .filter(|a| {
-                            a.versions.contains(version_num)
-                                && (app.lambda_state.alias_table.filter.is_empty()
-                                    || a.name.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    )
-                                    || a.versions.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    )
-                                    || a.description.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    ))
-                        })
-                        .count();
-
-                    let total_pages = filtered_count.div_ceil(page_size);
-                    let current_page = app.lambda_state.alias_table.selected / page_size;
-                    let pagination = render_pagination_text(current_page, total_pages);
+                    let view = app.lambda_state.alias_table.prepare_view(
+                        app.lambda_state
+                            .alias_table
+                            .items
+                            .iter()
+                            .filter(|a| {
+                                a.versions.contains(version_num)
+                                    && (app.lambda_state.alias_table.filter.is_empty()
+                                        || a.name.to_lowercase().contains(
+                                            &app.lambda_state.alias_table.filter.to_lowercase(),
+                                        )
+                                        || a.versions.to_lowercase().contains(
+                                            &app.lambda_state.alias_table.filter.to_lowercase(),
+                                        )
+                                        || a.description.to_lowercase().contains(
+                                            &app.lambda_state.alias_table.filter.to_lowercase(),
+                                        ))
+                            })
+                            .collect(),
+                        TableWindow::SelectedPage,
+                    );
+                    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
                     render_simple_filter(
                         frame,
@@ -1316,31 +1212,8 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                     );
 
                     // Aliases table - filter to show only aliases pointing to this version
-                    let filtered: Vec<_> = app
-                        .lambda_state
-                        .alias_table
-                        .items
-                        .iter()
-                        .filter(|a| {
-                            a.versions.contains(version_num)
-                                && (app.lambda_state.alias_table.filter.is_empty()
-                                    || a.name.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    )
-                                    || a.versions.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    )
-                                    || a.description.to_lowercase().contains(
-                                        &app.lambda_state.alias_table.filter.to_lowercase(),
-                                    ))
-                        })
-                        .collect();
 
-                    let start_idx = current_page * page_size;
-                    let end_idx = (start_idx + page_size).min(filtered.len());
-                    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-                    let title = format_title(&format!("Aliases ({})", filtered.len()));
+                    let title = format_title(&format!("Aliases ({})", view.total_items));
 
                     let mut columns: Vec<Box<dyn TableColumn<Alias>>> = vec![];
                     for col_name in &app.lambda_state.alias_visible_column_ids {
@@ -1355,21 +1228,10 @@ pub fn render_version_detail(frame: &mut Frame, app: &App, area: Rect) {
                         }
                     }
 
-                    let expanded_index =
-                        if let Some(expanded) = app.lambda_state.alias_table.expanded_item {
-                            if expanded >= start_idx && expanded < end_idx {
-                                Some(expanded - start_idx)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
                     let config = TableConfig {
-                        items: paginated,
-                        selected_index: app.lambda_state.alias_table.selected % page_size,
-                        expanded_index,
+                        items: view.items,
+                        selected_index: view.selected_index,
+                        expanded_index: view.expanded_index,
                         columns: &columns,
                         sort_column: "Name",
                         sort_direction: SortDirection::Asc,
@@ -1402,11 +1264,11 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Filter with pagination
-    let page_size = app.lambda_application_state.table.page_size.value();
-    let filtered_count = filtered_lambda_applications(app).len();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.lambda_application_state.table.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
+    let view = app
+        .lambda_application_state
+        .table
+        .prepare_view(filtered_lambda_applications(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
 
     render_simple_filter(
         frame,
@@ -1423,12 +1285,7 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Table
-    let filtered: Vec<_> = filtered_lambda_applications(app);
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered.len());
-    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-    let title = format_title(&format!("Applications ({})", filtered.len()));
+    let title = format_title(&format!("Applications ({})", view.total_items));
 
     let mut columns: Vec<Box<dyn TableColumn<LambdaApplication>>> = vec![];
     for col_id in &app.lambda_application_visible_column_ids {
@@ -1437,20 +1294,10 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let expanded_index = if let Some(expanded) = app.lambda_application_state.table.expanded_item {
-        if expanded >= start_idx && expanded < end_idx {
-            Some(expanded - start_idx)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     let config = TableConfig {
-        items: paginated,
-        selected_index: app.lambda_application_state.table.selected % page_size,
-        expanded_index,
+        items: view.items,
+        selected_index: view.selected_index,
+        expanded_index: view.expanded_index,
         columns: &columns,
         sort_column: "Last modified",
         sort_direction: SortDirection::Desc,
@@ -1745,11 +1592,15 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Filter with pagination
-        let page_size = app.lambda_application_state.resources.page_size.value();
-        let filtered_count = app.lambda_application_state.resources.items.len();
-        let total_pages = filtered_count.div_ceil(page_size);
-        let current_page = app.lambda_application_state.resources.selected / page_size;
-        let pagination = render_pagination_text(current_page, total_pages);
+        let view = app.lambda_application_state.resources.prepare_view(
+            app.lambda_application_state
+                .resources
+                .items
+                .iter()
+                .collect(),
+            TableWindow::SelectedPage,
+        );
+        let pagination = render_pagination_text(view.current_page, view.total_pages);
 
         render_simple_filter(
             frame,
@@ -1780,24 +1631,10 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
                     .map(|col| Box::new(col) as Box<dyn TableColumn<Resource>>)
             })
             .collect();
-        // let columns: Vec<Box<dyn TableColumn<Resource>>> = vec![
-        //     Box::new(column!(name="Logical ID", width=30, type=Resource, field=logical_id)),
-        //     Box::new(column!(name="Physical ID", width=40, type=Resource, field=physical_id)),
-        //     Box::new(column!(name="Type", width=30, type=Resource, field=resource_type)),
-        //     Box::new(column!(name="Last modified", width=27, type=Resource, field=last_modified)),
-        // ];
-
-        let start_idx = current_page * page_size;
-        let end_idx = (start_idx + page_size).min(filtered_count);
-        let paginated: Vec<&Resource> = app.lambda_application_state.resources.items
-            [start_idx..end_idx]
-            .iter()
-            .collect();
-
         let config = TableConfig {
-            items: paginated,
-            selected_index: app.lambda_application_state.resources.selected,
-            expanded_index: app.lambda_application_state.resources.expanded_item,
+            items: view.items,
+            selected_index: view.selected_index,
+            expanded_index: view.expanded_index,
             columns: &columns,
             sort_column: "Logical ID",
             sort_direction: SortDirection::Asc,
@@ -1823,11 +1660,15 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
         );
 
         // Filter with pagination
-        let page_size = app.lambda_application_state.deployments.page_size.value();
-        let filtered_count = app.lambda_application_state.deployments.items.len();
-        let total_pages = filtered_count.div_ceil(page_size);
-        let current_page = app.lambda_application_state.deployments.selected / page_size;
-        let pagination = render_pagination_text(current_page, total_pages);
+        let view = app.lambda_application_state.deployments.prepare_view(
+            app.lambda_application_state
+                .deployments
+                .items
+                .iter()
+                .collect(),
+            TableWindow::SelectedPage,
+        );
+        let pagination = render_pagination_text(view.current_page, view.total_pages);
 
         render_simple_filter(
             frame,
@@ -1850,24 +1691,19 @@ pub fn render_application_detail(frame: &mut Frame, app: &App, area: Rect) {
             app.lambda_application_state.deployments.items.len()
         );
 
-        let columns: Vec<Box<dyn TableColumn<Deployment>>> = vec![
-            Box::new(DeploymentColumn::Deployment),
-            Box::new(DeploymentColumn::ResourceType),
-            Box::new(DeploymentColumn::LastUpdated),
-            Box::new(DeploymentColumn::Status),
-        ];
-
-        let start_idx = current_page * page_size;
-        let end_idx = (start_idx + page_size).min(filtered_count);
-        let paginated: Vec<&Deployment> = app.lambda_application_state.deployments.items
-            [start_idx..end_idx]
+        let columns: Vec<Box<dyn TableColumn<Deployment>>> = app
+            .lambda_deployment_visible_column_ids
             .iter()
+            .filter_map(|id| {
+                DeploymentColumn::from_id(id)
+                    .map(|column| Box::new(column) as Box<dyn TableColumn<Deployment>>)
+            })
             .collect();
 
         let config = TableConfig {
-            items: paginated,
-            selected_index: app.lambda_application_state.deployments.selected,
-            expanded_index: app.lambda_application_state.deployments.expanded_item,
+            items: view.items,
+            selected_index: view.selected_index,
+            expanded_index: view.expanded_index,
             columns: &columns,
             sort_column: "",
             sort_direction: SortDirection::Asc,
@@ -2470,5 +2306,151 @@ mod tests {
             "Expected 2 rows or less for code properties, got {}",
             height
         );
+    }
+}
+
+#[cfg(test)]
+mod prepared_detail_tests {
+    use super::*;
+    use crate::common::PageSize;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn versions_and_aliases_use_prepared_page_bounds_and_expansion() {
+        let mut app = App::new_without_client("test".into(), None);
+        app.mode = Mode::Normal;
+        app.lambda_state.current_function = Some("fn".into());
+        app.lambda_state.version_table.page_size = PageSize::Ten;
+        app.lambda_state.alias_table.page_size = PageSize::Ten;
+        app.lambda_state.version_table.items = (0..25)
+            .map(|i| Version {
+                version: format!("v{i:02}"),
+                aliases: String::new(),
+                description: String::new(),
+                last_modified: String::new(),
+                architecture: String::new(),
+            })
+            .collect();
+        app.lambda_state.alias_table.items = (0..25)
+            .map(|i| Alias {
+                name: format!("alias{i:02}"),
+                versions: "1".into(),
+                description: String::new(),
+            })
+            .collect();
+        for (tab, name) in [(DetailTab::Versions, "v"), (DetailTab::Aliases, "alias")] {
+            app.lambda_state.detail_tab = tab;
+            app.lambda_state.version_table.selected = 12;
+            app.lambda_state.alias_table.selected = 12;
+            app.lambda_state.version_table.expanded_item = Some(11);
+            app.lambda_state.alias_table.expanded_item = Some(11);
+            let mut terminal = Terminal::new(TestBackend::new(240, 40)).unwrap();
+            terminal
+                .draw(|f| render_functions(f, &app, f.area()))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            assert!(text.contains("1 [2] 3"));
+            assert!(text.contains(&format!("► {name}12")));
+            assert!(text.contains(&format!("▼ {name}11")));
+            assert!(!text.contains(&format!("{name}09")));
+            assert!(!text.contains(&format!("{name}20")));
+            app.lambda_state.version_table.filter = "absent".into();
+            app.lambda_state.alias_table.filter = "absent".into();
+            terminal
+                .draw(|f| render_functions(f, &app, f.area()))
+                .unwrap();
+            app.lambda_state.version_table.filter.clear();
+            app.lambda_state.alias_table.filter.clear();
+        }
+    }
+}
+
+#[cfg(test)]
+mod prepared_application_tests {
+    use super::*;
+    use crate::common::PageSize;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn application_resources_and_deployments_use_safe_page_relative_rows() {
+        let mut app = App::new_without_client("test".into(), None);
+        app.lambda_application_state.current_application = Some("application".into());
+        app.lambda_application_state.resources.page_size = PageSize::Ten;
+        app.lambda_application_state.deployments.page_size = PageSize::Ten;
+        app.lambda_application_state.resources.items = (0..25)
+            .map(|i| Resource {
+                logical_id: format!("r{i:02}"),
+                physical_id: String::new(),
+                resource_type: String::new(),
+                last_modified: String::new(),
+            })
+            .collect();
+        app.lambda_application_state.deployments.items = (0..25)
+            .map(|i| Deployment {
+                deployment_id: format!("d{i:02}"),
+                resource_type: "hidden-type".into(),
+                last_updated: String::new(),
+                status: String::new(),
+            })
+            .collect();
+        app.lambda_deployment_visible_column_ids = vec![DeploymentColumn::Deployment.id()];
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        for (tab, prefix) in [
+            (ApplicationDetailTab::Overview, "r"),
+            (ApplicationDetailTab::Deployments, "d"),
+        ] {
+            app.lambda_application_state.detail_tab = tab;
+            app.lambda_application_state.resources.selected = 12;
+            app.lambda_application_state.deployments.selected = 12;
+            app.lambda_application_state.resources.expanded_item = Some(11);
+            app.lambda_application_state.deployments.expanded_item = Some(11);
+            terminal
+                .draw(|frame| render_application_detail(frame, &app, frame.area()))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("1 [2] 3"));
+            assert!(text.contains(&format!("► {prefix}12")));
+            assert!(text.contains(&format!("▼ {prefix}11")));
+            assert!(!text.contains(&format!("{prefix}09")));
+            assert!(!text.contains(&format!("{prefix}20")));
+        }
+        app.lambda_application_state.deployments.expanded_item = None;
+        terminal
+            .draw(|frame| render_application_detail(frame, &app, frame.area()))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            !text.contains("hidden-type"),
+            "deployment column visibility must be honored"
+        );
+        app.lambda_application_state.resources.items.clear();
+        app.lambda_application_state.deployments.items.clear();
+        for tab in [
+            ApplicationDetailTab::Overview,
+            ApplicationDetailTab::Deployments,
+        ] {
+            app.lambda_application_state.detail_tab = tab;
+            terminal
+                .draw(|frame| render_application_detail(frame, &app, frame.area()))
+                .unwrap();
+        }
     }
 }

@@ -298,20 +298,19 @@ pub fn is_pagination_focused(app: &App) -> bool {
 // ── Yank / console URL / breadcrumb ──────────────────────────────────────────
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if app.dynamodb_state.current_table.is_some() {
         // Detail view — copy the ARN (fall back to the table name).
         if let Some(t) = current_table(app) {
             if t.table_arn.is_empty() {
-                copy_to_clipboard(&t.name);
+                app.clipboard.request_text(&t.name);
             } else {
-                copy_to_clipboard(&t.table_arn);
+                app.clipboard.request_text(&t.table_arn);
             }
         }
     } else {
         let filtered = filtered_dynamodb_tables(app);
         if let Some(t) = app.dynamodb_state.tables.get_selected(&filtered) {
-            copy_to_clipboard(&t.name);
+            app.clipboard.request_text(&t.name);
         }
     }
 }

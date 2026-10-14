@@ -13,6 +13,7 @@ pub mod fsx;
 pub mod iam;
 pub mod kms;
 pub mod lambda;
+pub mod metrics;
 pub mod rds;
 pub mod s3;
 pub mod sqs;

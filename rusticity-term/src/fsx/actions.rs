@@ -170,7 +170,6 @@ pub fn is_pagination_focused(app: &App) -> bool {
 // ── Yank / console URL / breadcrumb ──────────────────────────────────────────
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(fs_id) = &app.fsx_state.current_file_system {
         // Detail view — copy the ARN (fall back to the ID).
         if let Some(fs) = app
@@ -181,15 +180,15 @@ pub fn yank(app: &App) {
             .find(|f| &f.file_system_id == fs_id)
         {
             if fs.file_system_arn.is_empty() {
-                copy_to_clipboard(&fs.file_system_id);
+                app.clipboard.request_text(&fs.file_system_id);
             } else {
-                copy_to_clipboard(&fs.file_system_arn);
+                app.clipboard.request_text(&fs.file_system_arn);
             }
         }
     } else {
         let filtered = filtered_fsx_file_systems(app);
         if let Some(fs) = app.fsx_state.file_systems.get_selected(&filtered) {
-            copy_to_clipboard(&fs.file_system_id);
+            app.clipboard.request_text(&fs.file_system_id);
         }
     }
 }

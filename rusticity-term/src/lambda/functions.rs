@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::keymap::Mode;
 use crate::ui::lambda::{filtered_lambda_functions, DetailTab as LambdaDetailTab, FILTER_CONTROLS};
 use crate::ui::monitoring::MonitoringState;
@@ -542,127 +542,37 @@ pub fn refresh(app: &mut App) {
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     let filtered = filtered_lambda_functions(app);
     if let Some(func) = app.lambda_state.table.get_selected(&filtered) {
-        copy_to_clipboard(&func.arn);
+        app.clipboard.request_text(&func.arn);
     }
 }
 
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.lambda_state.current_function.is_some()
-        && app.lambda_state.detail_tab == LambdaDetailTab::Versions
-    {
-        if idx > 0 && idx <= app.lambda_state.version_column_ids.len() {
-            if let Some(col) = app.lambda_state.version_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .lambda_state
-                    .version_visible_column_ids
-                    .iter()
-                    .position(|c| *c == *col)
-                {
-                    if app.lambda_state.version_visible_column_ids.len() > 1 {
-                        app.lambda_state.version_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.lambda_state
-                        .version_visible_column_ids
-                        .push(col.clone());
-                }
-            }
-        } else if idx == app.lambda_state.version_column_ids.len() + 3 {
-            app.lambda_state.version_table.page_size = PageSize::Ten;
-        } else if idx == app.lambda_state.version_column_ids.len() + 4 {
-            app.lambda_state.version_table.page_size = PageSize::TwentyFive;
-        } else if idx == app.lambda_state.version_column_ids.len() + 5 {
-            app.lambda_state.version_table.page_size = PageSize::Fifty;
-        } else if idx == app.lambda_state.version_column_ids.len() + 6 {
-            app.lambda_state.version_table.page_size = PageSize::OneHundred;
-        }
-    } else if (app.lambda_state.current_function.is_some()
-        && app.lambda_state.detail_tab == LambdaDetailTab::Aliases)
-        || (app.lambda_state.current_version.is_some()
-            && app.lambda_state.detail_tab == LambdaDetailTab::Configuration)
-    {
-        if idx > 0 && idx <= app.lambda_state.alias_column_ids.len() {
-            if let Some(col) = app.lambda_state.alias_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .lambda_state
-                    .alias_visible_column_ids
-                    .iter()
-                    .position(|c| *c == *col)
-                {
-                    if app.lambda_state.alias_visible_column_ids.len() > 1 {
-                        app.lambda_state.alias_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.lambda_state.alias_visible_column_ids.push(col.clone());
-                }
-            }
-        } else if idx == app.lambda_state.alias_column_ids.len() + 3 {
-            app.lambda_state.alias_table.page_size = PageSize::Ten;
-        } else if idx == app.lambda_state.alias_column_ids.len() + 4 {
-            app.lambda_state.alias_table.page_size = PageSize::TwentyFive;
-        } else if idx == app.lambda_state.alias_column_ids.len() + 5 {
-            app.lambda_state.alias_table.page_size = PageSize::Fifty;
-        } else if idx == app.lambda_state.alias_column_ids.len() + 6 {
-            app.lambda_state.alias_table.page_size = PageSize::OneHundred;
-        }
-    } else {
-        if idx > 0 && idx <= app.lambda_state.function_column_ids.len() {
-            if let Some(col) = app.lambda_state.function_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .lambda_state
-                    .function_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.lambda_state.function_visible_column_ids.len() > 1 {
-                        app.lambda_state.function_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.lambda_state.function_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.lambda_state.function_column_ids.len() + 3 {
-            app.lambda_state.table.page_size = PageSize::Ten;
-        } else if idx == app.lambda_state.function_column_ids.len() + 4 {
-            app.lambda_state.table.page_size = PageSize::TwentyFive;
-        } else if idx == app.lambda_state.function_column_ids.len() + 5 {
-            app.lambda_state.table.page_size = PageSize::Fifty;
-        } else if idx == app.lambda_state.function_column_ids.len() + 6 {
-            app.lambda_state.table.page_size = PageSize::OneHundred;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::LambdaFunctions);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = app.lambda_state.function_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::LambdaFunctions, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = app.lambda_state.function_column_ids.len() + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::LambdaFunctions,
+        false,
+    );
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.lambda_state.function_column_ids.len() + 6
+    crate::preferences::bindings::model_for(app, crate::app::Service::LambdaFunctions).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.lambda_state.function_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::LambdaFunctions)
+        .column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

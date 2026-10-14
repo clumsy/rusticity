@@ -2,10 +2,12 @@ use crate::app::App;
 use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::efs::fs::{self, FileSystem as EfsFileSystem};
 use crate::table::{TableState, TableWindow};
+use crate::tags::{self, TagSort, TagsConfig};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::format_title;
 use crate::ui::render_tabs;
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::Summary;
 use ratatui::{prelude::*, widgets::*};
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -271,11 +273,10 @@ pub fn render_file_system_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some(fs) = fs {
         // General summary always visible at top — compute its height
-        let field_lines = build_general_lines(fs);
-        let content_rows =
-            crate::ui::calculate_dynamic_height(&field_lines, area.width.saturating_sub(2));
-        // +2 for borders, +1 so bottom border doesn't sit on last field row
-        let summary_height = (content_rows + 3).min(area.height.saturating_sub(2));
+        let summary = Summary::new("General", build_general_lines(fs));
+        let summary_height = summary
+            .height(area.width)
+            .min(area.height.saturating_sub(2));
 
         // Layout: [Summary] [Ribbon] [Tab content]
         let chunks = Layout::default()
@@ -288,10 +289,7 @@ pub fn render_file_system_detail(frame: &mut Frame, app: &App, area: Rect) {
             .split(area);
 
         // Always render General summary
-        let block = crate::ui::titled_block(" General ");
-        let inner = block.inner(chunks[0]);
-        frame.render_widget(block, chunks[0]);
-        crate::ui::render_fields_with_dynamic_columns(frame, inner, field_lines);
+        summary.render(frame, chunks[0]);
 
         // Always render ribbon
         render_tabs(frame, chunks[1], &tabs, &app.efs_state.detail_tab);
@@ -452,19 +450,7 @@ fn render_metered_size_tab(frame: &mut Frame, fs: &EfsFileSystem, area: Rect) {
         ),
     ];
 
-    // Size the pane to its content height (dynamic columns), like the General summary.
-    let content_rows =
-        crate::ui::calculate_dynamic_height(&field_lines, area.width.saturating_sub(2));
-    let pane_height = (content_rows + 3).min(area.height);
-    let pane = Rect {
-        height: pane_height,
-        ..area
-    };
-
-    let block = crate::ui::titled_block(" Metered size ");
-    let inner = block.inner(pane);
-    frame.render_widget(block, pane);
-    crate::ui::render_fields_with_dynamic_columns(frame, inner, field_lines);
+    Summary::new("Metered size", field_lines).render(frame, area);
 }
 
 /// Access points filtered by the current filter (name, access point ID, or path).
@@ -731,76 +717,20 @@ fn render_efs_monitoring_charts(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_tags_tab(frame: &mut Frame, app: &App, fs: &EfsFileSystem, area: Rect) {
-    use crate::common::SortDirection;
-    use crate::ui::format_title;
-    use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
-
-    struct KeyCol;
-    struct ValueCol;
-
-    #[derive(Clone)]
-    struct TagRow {
-        key: String,
-        value: String,
-    }
-
-    impl Column<TagRow> for KeyCol {
-        fn name(&self) -> &str {
-            "Key"
-        }
-        fn width(&self) -> u16 {
-            30
-        }
-        fn render(&self, item: &TagRow) -> (String, ratatui::style::Style) {
-            (item.key.clone(), ratatui::style::Style::default())
-        }
-    }
-    impl Column<TagRow> for ValueCol {
-        fn name(&self) -> &str {
-            "Value"
-        }
-        fn width(&self) -> u16 {
-            50
-        }
-        fn render(&self, item: &TagRow) -> (String, ratatui::style::Style) {
-            (item.value.clone(), ratatui::style::Style::default())
-        }
-    }
-
-    let rows: Vec<TagRow> = fs
-        .tags
-        .iter()
-        .map(|(k, v)| TagRow {
-            key: k.clone(),
-            value: v.clone(),
-        })
-        .collect();
-    let row_refs: Vec<&TagRow> = rows.iter().collect();
-
-    let columns: Vec<Box<dyn Column<TagRow>>> = vec![Box::new(KeyCol), Box::new(ValueCol)];
-
-    let selected = app
-        .efs_state
-        .tags_table
-        .selected
-        .min(rows.len().saturating_sub(1));
-    let expanded_index = app.efs_state.tags_table.expanded_item;
-
-    let config = TableConfig {
-        items: row_refs,
-        selected_index: selected,
-        expanded_index,
-        columns: &columns,
-        sort_column: "Key",
-        sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Tags ({})", rows.len())),
+    tags::render(
+        frame,
         area,
-        get_expanded_content: Some(Box::new(|row: &TagRow| {
-            expanded_from_columns(&columns, row)
-        })),
-        is_active: app.mode != crate::keymap::Mode::FilterInput,
-    };
-    render_table(frame, config);
+        TagsConfig {
+            table: &app.efs_state.tags_table,
+            items: &fs.tags,
+            columns: tags::columns(),
+            sort: TagSort::Key,
+            window: crate::table::TableWindow::SelectedPage,
+            focus: app.efs_state.input_focus,
+            mode: app.mode,
+            loading: false,
+        },
+    );
 }
 
 fn format_performance_mode_display(mode: &str) -> String {

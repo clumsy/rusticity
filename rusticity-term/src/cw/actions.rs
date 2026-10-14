@@ -181,36 +181,29 @@ pub fn alarms_refresh(app: &mut App) {
     app.alarms_state.metrics_loading = true;
 }
 
-pub fn alarms_column_selector_max(_app: &App) -> usize {
-    29
+pub fn alarms_column_selector_max(app: &App) -> usize {
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudWatchAlarms).max_index()
 }
 
-pub fn alarms_column_count(_app: &App) -> usize {
-    14
+pub fn alarms_column_count(app: &App) -> usize {
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudWatchAlarms)
+        .column_count()
 }
 
 pub fn alarms_next_preferences(app: &mut App) {
-    if app.column_selector_index < 18 {
-        app.column_selector_index = 18;
-    } else if app.column_selector_index < 22 {
-        app.column_selector_index = 22;
-    } else if app.column_selector_index < 28 {
-        app.column_selector_index = 28;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::CloudWatchAlarms,
+        true,
+    );
 }
 
 pub fn alarms_prev_preferences(app: &mut App) {
-    if app.column_selector_index >= 28 {
-        app.column_selector_index = 22;
-    } else if app.column_selector_index >= 22 {
-        app.column_selector_index = 18;
-    } else if app.column_selector_index >= 18 {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = 28;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::CloudWatchAlarms,
+        false,
+    );
 }
 
 pub fn alarms_breadcrumb() -> Vec<String> {

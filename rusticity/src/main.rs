@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crossterm::event::Event;
+use rusticity_term::clipboard::ClipboardService;
 use rusticity_term::dynamodb::actions::is_items_tab;
 use rusticity_term::finder;
 use rusticity_term::keymap::{handle_key, Mode};
@@ -42,6 +43,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     };
 
     let events = EventHandler::new();
+    let mut clipboard = ClipboardService::default();
 
     terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
 
@@ -49,8 +51,12 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
     while app.running {
         finder::poll(&mut app);
+        if app.clipboard.expire_notice() {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
         // Any service loading → animate the spinner via periodic redraws
-        let any_loading = app.mode == Mode::ResourceFinder
+        let any_loading = app.clipboard.notice().is_some()
+            || app.mode == Mode::ResourceFinder
             || app.log_groups_state.loading
             || app.kms_state.keys.loading
             || app.ecr_state.repositories.loading
@@ -1476,55 +1482,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             }
                         }
 
-                        terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-
-                        // Capture snapshot if requested
-                        if app.snapshot_requested {
-                            app.snapshot_requested = false;
-
-                            // Capture the rendered content
-                            let mut snapshot = String::new();
-                            terminal.draw(|f| {
-                                rusticity_term::ui::render(f, &app);
-
-                                // Extract text from the frame's buffer
-                                let size = f.area();
-                                let width = size.width as usize;
-                                let height = size.height as usize;
-
-                                // Clone buffer content to avoid borrow issues
-                                let content: Vec<_> = f.buffer_mut().content().to_vec();
-
-                                let mut lines = Vec::new();
-                                for row in 0..height {
-                                    let start = row * width;
-                                    let end = start + width;
-                                    if end <= content.len() {
-                                        let line: String = content[start..end]
-                                            .iter()
-                                            .map(|cell| cell.symbol())
-                                            .collect();
-                                        lines.push(line.trim_end().to_string());
-                                    }
-                                }
-                                snapshot = lines.join("\n");
-                            })?;
-
-                            match arboard::Clipboard::new() {
-                                Ok(mut clipboard) => {
-                                    match clipboard.set_text(snapshot) {
-                                        Ok(_) => {
-                                            app.error_message = Some("Snapshot copied to clipboard".to_string());
-                                        }
-                                        Err(e) => {
-                                            app.error_message = Some(format!("Failed to copy: {}", e));
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    app.error_message = Some(format!("Failed to access clipboard: {}", e));
-                                }
-                            }
+                        let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        if clipboard.flush(&mut app.clipboard, frame.buffer) {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
                         }

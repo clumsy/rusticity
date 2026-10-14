@@ -3429,7 +3429,6 @@ name = "rusticity"
 version = "0.1.9"
 dependencies = [
  "anyhow",
- "arboard",
  "chrono",
  "crossterm",
  "ratatui",
@@ -3483,6 +3482,7 @@ name = "rusticity-term"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "arboard",
  "aws-sdk-dynamodb",
  "chrono",
  "crossterm",

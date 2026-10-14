@@ -6,10 +6,12 @@ use crate::common::{
 use crate::dynamodb::items::{self, ItemRequestContext};
 use crate::dynamodb::table;
 use crate::table::{TableState, TableWindow};
+use crate::tags::{self, TagSort, TagsConfig};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::format_title;
 use crate::ui::render_tabs;
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
+use crate::ui::Summary;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use rusticity_core::dynamodb::{
@@ -418,10 +420,10 @@ pub fn render_table_detail(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let field_lines = build_summary_lines(t);
-    let content_rows =
-        crate::ui::calculate_dynamic_height(&field_lines, area.width.saturating_sub(2));
-    let summary_height = (content_rows + 2).min(area.height.saturating_sub(2));
+    let summary = Summary::new("Summary", build_summary_lines(t));
+    let summary_height = summary
+        .height(area.width)
+        .min(area.height.saturating_sub(2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -432,10 +434,7 @@ pub fn render_table_detail(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    let block = crate::ui::titled_block(" Summary ");
-    let inner = block.inner(chunks[0]);
-    frame.render_widget(block, chunks[0]);
-    crate::ui::render_fields_with_dynamic_columns(frame, inner, field_lines);
+    summary.render(frame, chunks[0]);
 
     render_tabs(frame, chunks[1], &tabs, &app.dynamodb_state.detail_tab);
 
@@ -473,10 +472,7 @@ impl<T> Column<T> for FieldCol<T> {
 }
 
 fn render_settings(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
-    use crate::ui::{
-        calculate_dynamic_height, labeled_field, labeled_field_colored,
-        render_fields_with_dynamic_columns,
-    };
+    use crate::ui::{labeled_field, labeled_field_colored, render_fields_with_dynamic_columns};
 
     let s = &app.dynamodb_state.settings;
     let ttl_status = if app.dynamodb_state.settings_loading {
@@ -515,17 +511,14 @@ fn render_settings(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
         labeled_field("Replicas", t.replicas.len().to_string()),
     ];
 
-    let w = area.width.saturating_sub(2);
-    let h1 = (calculate_dynamic_height(&general, w) + 2).min(area.height);
+    let summary = Summary::new("General information", general);
+    let h1 = summary.height(area.width).min(area.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(h1), Constraint::Min(0)])
         .split(area);
 
-    let block1 = crate::ui::titled_block(" General information ");
-    let inner1 = block1.inner(chunks[0]);
-    frame.render_widget(block1, chunks[0]);
-    render_fields_with_dynamic_columns(frame, inner1, general);
+    summary.render(frame, chunks[0]);
 
     let block2 = crate::ui::titled_block(" Capacity ");
     let inner2 = block2.inner(chunks[1]);
@@ -692,7 +685,7 @@ fn render_indexes_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
 }
 
 fn render_global_tables_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Rect) {
-    use crate::ui::{calculate_dynamic_height, labeled_field_colored};
+    use crate::ui::labeled_field_colored;
 
     // Settings replication pane. The API does not expose per-setting overrides,
     // so this reflects whether the table has replicas at all.
@@ -706,17 +699,14 @@ fn render_global_tables_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Re
         status.to_string(),
         enabled_disabled_color(status),
     )];
-    let repl_height =
-        (calculate_dynamic_height(&repl_lines, area.width.saturating_sub(2)) + 3).min(area.height);
+    let summary = Summary::new("Settings replication", repl_lines);
+    let repl_height = summary.height(area.width).min(area.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(repl_height), Constraint::Min(0)])
         .split(area);
 
-    let block = crate::ui::titled_block(" Settings replication ");
-    let inner = block.inner(chunks[0]);
-    frame.render_widget(block, chunks[0]);
-    crate::ui::render_fields_with_dynamic_columns(frame, inner, repl_lines);
+    summary.render(frame, chunks[0]);
 
     let area = chunks[1];
     let rows: Vec<&DdbReplica> = t.replicas.iter().collect();
@@ -773,7 +763,7 @@ fn render_global_tables_tab(frame: &mut Frame, app: &App, t: &DdbTable, area: Re
 }
 
 fn render_backups_tab(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::ui::{calculate_dynamic_height, labeled_field, labeled_field_colored};
+    use crate::ui::{labeled_field, labeled_field_colored};
 
     // Point-in-time recovery pane.
     let s = &app.dynamodb_state.settings;
@@ -814,17 +804,14 @@ fn render_backups_tab(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    let pitr_height =
-        (calculate_dynamic_height(&pitr_lines, area.width.saturating_sub(2)) + 3).min(area.height);
+    let summary = Summary::new("Point-in-time recovery (PITR)", pitr_lines);
+    let pitr_height = summary.height(area.width).min(area.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(pitr_height), Constraint::Min(0)])
         .split(area);
 
-    let block = crate::ui::titled_block(" Point-in-time recovery (PITR) ");
-    let inner = block.inner(chunks[0]);
-    frame.render_widget(block, chunks[0]);
-    crate::ui::render_fields_with_dynamic_columns(frame, inner, pitr_lines);
+    summary.render(frame, chunks[0]);
 
     let area = chunks[1];
 
@@ -1286,53 +1273,20 @@ fn index_label_width(options: &[String], selected: usize) -> usize {
 }
 
 fn render_tags_tab(frame: &mut Frame, app: &App, area: Rect) {
-    if app.dynamodb_state.tags_loading {
-        let block = crate::ui::titled_block(" Tags ");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let p = Paragraph::new("Loading tags...")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center);
-        frame.render_widget(p, inner);
-        return;
-    }
-
-    let rows: Vec<&(String, String)> = app.dynamodb_state.tags_table.items.iter().collect();
-
-    let columns: Vec<Box<dyn Column<(String, String)>>> = vec![
-        Box::new(FieldCol {
-            label: "Key",
-            width: 30,
-            get: |t: &(String, String)| t.0.clone(),
-        }),
-        Box::new(FieldCol {
-            label: "Value",
-            width: 50,
-            get: |t: &(String, String)| t.1.clone(),
-        }),
-    ];
-
-    let selected = app
-        .dynamodb_state
-        .tags_table
-        .selected
-        .min(rows.len().saturating_sub(1));
-
-    let config = TableConfig {
-        items: rows.clone(),
-        selected_index: selected,
-        expanded_index: app.dynamodb_state.tags_table.expanded_item,
-        columns: &columns,
-        sort_column: "Key",
-        sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Tags ({})", rows.len())),
+    tags::render(
+        frame,
         area,
-        get_expanded_content: Some(Box::new(|t: &(String, String)| {
-            expanded_from_columns(&columns, t)
-        })),
-        is_active: app.mode != crate::keymap::Mode::FilterInput,
-    };
-    render_table(frame, config);
+        TagsConfig {
+            table: &app.dynamodb_state.tags_table,
+            items: &app.dynamodb_state.tags_table.items,
+            columns: tags::columns(),
+            sort: TagSort::Key,
+            window: TableWindow::SelectedPage,
+            focus: app.dynamodb_state.input_focus,
+            mode: app.mode,
+            loading: app.dynamodb_state.tags_loading,
+        },
+    );
 }
 
 pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {

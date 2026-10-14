@@ -1,4 +1,5 @@
 use crate::config::AwsConfig;
+use crate::metrics::{MetricQuery, MetricReader, MetricWindow};
 use anyhow::Result;
 
 pub struct AlarmsClient {
@@ -342,55 +343,25 @@ impl AlarmsClient {
         &self,
         req: MetricStatsRequest<'_>,
     ) -> Result<Vec<(i64, f64)>> {
-        use aws_sdk_cloudwatch::types::Dimension;
-        let client = self.config.cloudwatch_client();
-        let MetricStatsRequest {
-            namespace,
-            metric_name,
-            statistic,
-            period,
-            dimensions,
-            start_time,
-            end_time,
-        } = req;
-
-        let mut cw_req = client
-            .get_metric_statistics()
-            .namespace(namespace)
-            .metric_name(metric_name)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::from(statistic))
-            .period(period)
-            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
-                start_time.timestamp_millis(),
-            ))
-            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_millis(
-                end_time.timestamp_millis(),
-            ));
-
-        for (name, value) in dimensions {
-            cw_req = cw_req.dimensions(Dimension::builder().name(name).value(value).build());
+        let mut query = MetricQuery::new(
+            req.namespace,
+            req.metric_name,
+            aws_sdk_cloudwatch::types::Statistic::from(req.statistic),
+        );
+        for (name, value) in req.dimensions {
+            query = query.dimension(name, value);
         }
-
-        let resp = cw_req.send().await?;
-
-        let mut data: Vec<(i64, f64)> = resp
-            .datapoints()
-            .iter()
-            .filter_map(|dp| {
-                let timestamp = dp.timestamp()?.as_secs_f64() as i64;
-                let value = match statistic {
-                    "Average" => dp.average(),
-                    "Sum" => dp.sum(),
-                    "Minimum" => dp.minimum(),
-                    "Maximum" => dp.maximum(),
-                    "SampleCount" => dp.sample_count(),
-                    _ => dp.average(),
-                }?;
-                Some((timestamp, value))
-            })
-            .collect();
-
-        data.sort_by_key(|(ts, _)| *ts);
-        Ok(data)
+        MetricReader::new(self.config.cloudwatch_client())
+            .read(
+                query,
+                MetricWindow {
+                    start: aws_smithy_types::DateTime::from_millis(
+                        req.start_time.timestamp_millis(),
+                    ),
+                    end: aws_smithy_types::DateTime::from_millis(req.end_time.timestamp_millis()),
+                    period: req.period,
+                },
+            )
+            .await
     }
 }

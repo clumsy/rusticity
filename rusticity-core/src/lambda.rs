@@ -1,4 +1,5 @@
 use crate::config::AwsConfig;
+use crate::metrics::{MetricQuery, MetricReader};
 use anyhow::Result;
 
 pub use aws_sdk_cloudwatch::types::Statistic;
@@ -341,60 +342,16 @@ impl LambdaClient {
         function_name: &str,
         resource: Option<&str>,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let mut dimensions = vec![aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build()];
-
-        if let Some(res) = resource {
-            dimensions.push(
-                aws_sdk_cloudwatch::types::Dimension::builder()
-                    .name("Resource")
-                    .value(res)
-                    .build(),
-            );
-        }
-
-        let mut request = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("Invocations")
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum);
-
-        for dim in dimensions {
-            request = request.dimensions(dim);
-        }
-
-        let response = request.send().await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "Invocations", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        let query = if let Some(resource) = resource {
+            query.dimension("Resource", resource)
+        } else {
+            query
+        };
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_duration_metric(
@@ -402,240 +359,49 @@ impl LambdaClient {
         function_name: &str,
         stat: aws_sdk_cloudwatch::types::Statistic,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("Duration")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(stat.clone())
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                let value = match stat {
-                    aws_sdk_cloudwatch::types::Statistic::Minimum => dp.minimum,
-                    aws_sdk_cloudwatch::types::Statistic::Average => dp.average,
-                    aws_sdk_cloudwatch::types::Statistic::Maximum => dp.maximum,
-                    _ => None,
-                };
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, value) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "Duration", stat)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_errors_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("Errors")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "Errors", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_throttles_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("Throttles")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "Throttles", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_concurrent_executions_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("ConcurrentExecutions")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.maximum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "ConcurrentExecutions", Statistic::Maximum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_recursive_invocations_dropped_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("RecursiveInvocationsDropped")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "RecursiveInvocationsDropped", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_async_event_age_metric(
@@ -643,291 +409,63 @@ impl LambdaClient {
         function_name: &str,
         stat: aws_sdk_cloudwatch::types::Statistic,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("AsyncEventAge")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(stat.clone())
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                let value = match stat {
-                    aws_sdk_cloudwatch::types::Statistic::Minimum => dp.minimum,
-                    aws_sdk_cloudwatch::types::Statistic::Average => dp.average,
-                    aws_sdk_cloudwatch::types::Statistic::Maximum => dp.maximum,
-                    _ => None,
-                };
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, value) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "AsyncEventAge", stat)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_async_events_received_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("AsyncEventsReceived")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "AsyncEventsReceived", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_async_events_dropped_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("AsyncEventsDropped")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "AsyncEventsDropped", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_destination_delivery_failures_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("DestinationDeliveryFailures")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "DestinationDeliveryFailures", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_dead_letter_errors_metric(
         &self,
         function_name: &str,
     ) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("DeadLetterErrors")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Sum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.sum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "DeadLetterErrors", Statistic::Sum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 
     pub async fn get_iterator_age_metric(&self, function_name: &str) -> Result<Vec<(i64, f64)>> {
-        let cw_client = self.config.cloudwatch_client();
-
-        let end_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64,
-        );
-        let start_time = aws_smithy_types::DateTime::from_secs(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64
-                - 3 * 3600,
-        );
-
-        let dimension = aws_sdk_cloudwatch::types::Dimension::builder()
-            .name("FunctionName")
-            .value(function_name)
-            .build();
-
-        let response = cw_client
-            .get_metric_statistics()
-            .namespace("AWS/Lambda")
-            .metric_name("IteratorAge")
-            .dimensions(dimension)
-            .start_time(start_time)
-            .end_time(end_time)
-            .period(60)
-            .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
-            .send()
-            .await?;
-
-        let mut data = Vec::new();
-        if let Some(datapoints) = response.datapoints {
-            for dp in datapoints {
-                if let (Some(timestamp), Some(value)) = (dp.timestamp, dp.maximum) {
-                    data.push((timestamp.secs(), value));
-                }
-            }
-        }
-
-        data.sort_by_key(|&(timestamp, _)| timestamp);
-        Ok(data)
+        let query = MetricQuery::new("AWS/Lambda", "IteratorAge", Statistic::Maximum)
+            .dimension("FunctionName", function_name);
+        MetricReader::new(self.config.cloudwatch_client())
+            .recent(query, 60)
+            .await
     }
 }
 

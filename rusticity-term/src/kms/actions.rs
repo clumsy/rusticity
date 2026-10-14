@@ -114,10 +114,9 @@ pub fn prev_detail_tab(app: &mut App) {
 // ── Yank / console URL / breadcrumb ──────────────────────────────────────────
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     let filtered = filtered_kms_keys(app);
     if let Some(key) = app.kms_state.keys.get_selected(&filtered) {
-        copy_to_clipboard(&key.key_arn);
+        app.clipboard.request_text(&key.key_arn);
     }
 }
 

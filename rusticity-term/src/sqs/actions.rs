@@ -1,5 +1,5 @@
 use crate::app::{App, ViewMode};
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::monitoring::MonitoringState;
 use crate::ui::sqs::{
     filtered_eventbridge_pipes, filtered_lambda_triggers, filtered_queues, filtered_subscriptions,
@@ -304,108 +304,15 @@ pub fn go_back(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.sqs_column_ids.len() - 1
+    crate::preferences::bindings::model_for(app, crate::app::Service::SqsQueues).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.sqs_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::SqsQueues).column_count()
 }
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.sqs_state.current_queue.is_some()
-        && app.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-    {
-        if idx > 0 && idx <= app.sqs_state.trigger_column_ids.len() {
-            if let Some(col) = app.sqs_state.trigger_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .sqs_state
-                    .trigger_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    app.sqs_state.trigger_visible_column_ids.remove(pos);
-                } else {
-                    app.sqs_state.trigger_visible_column_ids.push(col.clone());
-                }
-            }
-        } else if idx == app.sqs_state.trigger_column_ids.len() + 3 {
-            app.sqs_state.triggers.page_size = PageSize::Ten;
-        } else if idx == app.sqs_state.trigger_column_ids.len() + 4 {
-            app.sqs_state.triggers.page_size = PageSize::TwentyFive;
-        } else if idx == app.sqs_state.trigger_column_ids.len() + 5 {
-            app.sqs_state.triggers.page_size = PageSize::Fifty;
-        } else if idx == app.sqs_state.trigger_column_ids.len() + 6 {
-            app.sqs_state.triggers.page_size = PageSize::OneHundred;
-        }
-    } else if app.sqs_state.current_queue.is_some()
-        && app.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-    {
-        if idx > 0 && idx <= app.sqs_state.pipe_column_ids.len() {
-            if let Some(col) = app.sqs_state.pipe_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .sqs_state
-                    .pipe_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    app.sqs_state.pipe_visible_column_ids.remove(pos);
-                } else {
-                    app.sqs_state.pipe_visible_column_ids.push(col.clone());
-                }
-            }
-        } else if idx == app.sqs_state.pipe_column_ids.len() + 3 {
-            app.sqs_state.pipes.page_size = PageSize::Ten;
-        } else if idx == app.sqs_state.pipe_column_ids.len() + 4 {
-            app.sqs_state.pipes.page_size = PageSize::TwentyFive;
-        } else if idx == app.sqs_state.pipe_column_ids.len() + 5 {
-            app.sqs_state.pipes.page_size = PageSize::Fifty;
-        } else if idx == app.sqs_state.pipe_column_ids.len() + 6 {
-            app.sqs_state.pipes.page_size = PageSize::OneHundred;
-        }
-    } else if app.sqs_state.current_queue.is_some()
-        && app.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-    {
-        if idx > 0 && idx <= app.sqs_state.tag_column_ids.len() {
-            if let Some(col) = app.sqs_state.tag_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .sqs_state
-                    .tag_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    app.sqs_state.tag_visible_column_ids.remove(pos);
-                } else {
-                    app.sqs_state.tag_visible_column_ids.push(col.clone());
-                }
-            }
-        } else if idx == app.sqs_state.tag_column_ids.len() + 3 {
-            app.sqs_state.tags.page_size = PageSize::Ten;
-        } else if idx == app.sqs_state.tag_column_ids.len() + 4 {
-            app.sqs_state.tags.page_size = PageSize::TwentyFive;
-        } else if idx == app.sqs_state.tag_column_ids.len() + 5 {
-            app.sqs_state.tags.page_size = PageSize::Fifty;
-        } else if idx == app.sqs_state.tag_column_ids.len() + 6 {
-            app.sqs_state.tags.page_size = PageSize::OneHundred;
-        }
-    } else {
-        // Queue list view — idx maps directly to column index
-        if let Some(col) = app.sqs_column_ids.get(idx) {
-            if let Some(pos) = app.sqs_visible_column_ids.iter().position(|c| c == col) {
-                app.sqs_visible_column_ids.remove(pos);
-            } else {
-                app.sqs_visible_column_ids.push(*col);
-            }
-        } else if idx == app.sqs_column_ids.len() + 2 {
-            app.sqs_state.queues.page_size = PageSize::Ten;
-        } else if idx == app.sqs_column_ids.len() + 3 {
-            app.sqs_state.queues.page_size = PageSize::TwentyFive;
-        } else if idx == app.sqs_column_ids.len() + 4 {
-            app.sqs_state.queues.page_size = PageSize::Fifty;
-        } else if idx == app.sqs_column_ids.len() + 5 {
-            app.sqs_state.queues.page_size = PageSize::OneHundred;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::SqsQueues);
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────
@@ -424,13 +331,12 @@ pub fn console_url(app: &App) -> String {
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(queue_url) = &app.sqs_state.current_queue {
-        copy_to_clipboard(queue_url);
+        app.clipboard.request_text(queue_url);
     } else {
         let filtered = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
         if let Some(q) = app.sqs_state.queues.get_selected(&filtered) {
-            copy_to_clipboard(&q.url);
+            app.clipboard.request_text(&q.url);
         }
     }
 }

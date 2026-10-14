@@ -167,38 +167,12 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Filter
-            Constraint::Min(0),    // Table
-        ])
-        .split(area);
-
-    // Calculate pagination
-    let filtered_count: usize = app
+    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
+    let view = app
         .ecr_state
         .images
-        .items
-        .iter()
-        .filter(|img| {
-            app.ecr_state.images.filter.is_empty()
-                || img
-                    .tag
-                    .to_lowercase()
-                    .contains(&app.ecr_state.images.filter.to_lowercase())
-                || img
-                    .digest
-                    .to_lowercase()
-                    .contains(&app.ecr_state.images.filter.to_lowercase())
-        })
-        .count();
-
-    let page_size = 50;
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.ecr_state.images.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
-
+        .prepare_view(filtered_ecr_images(app), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(view.current_page, view.total_pages);
     render_simple_filter(
         frame,
         chunks[0],
@@ -211,62 +185,70 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: false,
         },
     );
-
-    // Table
-    let filtered: Vec<_> = app
-        .ecr_state
-        .images
-        .items
-        .iter()
-        .filter(|img| {
-            app.ecr_state.images.filter.is_empty()
-                || img
-                    .tag
-                    .to_lowercase()
-                    .contains(&app.ecr_state.images.filter.to_lowercase())
-                || img
-                    .digest
-                    .to_lowercase()
-                    .contains(&app.ecr_state.images.filter.to_lowercase())
-        })
-        .collect();
-
-    // Apply pagination
-    let page_size = app.ecr_state.repositories.page_size.value();
-    let current_page = app.ecr_state.images.selected / page_size;
-    let start_idx = current_page * page_size;
-    let end_idx = (start_idx + page_size).min(filtered.len());
-    let paginated: Vec<_> = filtered[start_idx..end_idx].to_vec();
-
-    let title = format_title(&format!("Images ({})", filtered.len()));
-
-    // Define columns
     let columns: Vec<Box<dyn Column<EcrImage>>> = app
         .ecr_image_visible_column_ids
         .iter()
-        .filter_map(|col_id| {
-            image::Column::from_id(col_id).map(|col| Box::new(col) as Box<dyn Column<EcrImage>>)
+        .filter_map(|id| {
+            image::Column::from_id(id).map(|col| Box::new(col) as Box<dyn Column<EcrImage>>)
         })
         .collect();
+    render_table(
+        frame,
+        TableConfig {
+            items: view.items,
+            selected_index: view.selected_index,
+            expanded_index: view.expanded_index,
+            columns: &columns,
+            sort_column: "Pushed at",
+            sort_direction: SortDirection::Desc,
+            title: format_title(&format!("Images ({})", view.total_items)),
+            area: chunks[1],
+            get_expanded_content: Some(Box::new(|image| expanded_from_columns(&columns, image))),
+            is_active: app.mode != Mode::FilterInput,
+        },
+    );
+}
 
-    let config = TableConfig {
-        items: paginated,
-        selected_index: app.ecr_state.images.selected - app.ecr_state.images.scroll_offset,
-        expanded_index: app
-            .ecr_state
-            .images
-            .expanded_item
-            .map(|idx| idx - app.ecr_state.images.scroll_offset),
-        columns: &columns,
-        sort_column: "Pushed at",
-        sort_direction: SortDirection::Desc,
-        title,
-        area: chunks[1],
-        get_expanded_content: Some(Box::new(|img: &EcrImage| {
-            expanded_from_columns(&columns, img)
-        })),
-        is_active: app.mode != Mode::FilterInput,
-    };
+#[cfg(test)]
+mod prepared_image_tests {
+    use super::*;
+    use crate::common::PageSize;
+    use ratatui::{backend::TestBackend, Terminal};
 
-    render_table(frame, config);
+    #[test]
+    fn images_use_their_own_page_size_and_safe_relative_selection() {
+        let mut app = App::new_without_client("test".into(), None);
+        app.ecr_state.repositories.page_size = PageSize::OneHundred;
+        app.ecr_state.images.page_size = PageSize::Ten;
+        app.ecr_state.images.items = (0..25)
+            .map(|i| EcrImage {
+                tag: format!("tag{i:02}"),
+                digest: format!("digest{i:02}"),
+                artifact_type: "Image".into(),
+                pushed_at: String::new(),
+                size_bytes: 0,
+                uri: String::new(),
+                last_pull_time: String::new(),
+            })
+            .collect();
+        app.ecr_state.images.selected = 12;
+        app.ecr_state.images.expanded_item = Some(11);
+        app.ecr_state.images.scroll_offset = 200; // Legacy scroll offsets must not underflow.
+        let mut terminal = Terminal::new(TestBackend::new(240, 40)).unwrap();
+        terminal.draw(|f| render_images(f, &app, f.area())).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains("1 [2] 3"));
+        assert!(text.contains("► tag12"));
+        assert!(text.contains("▼ tag11"));
+        assert!(!text.contains("tag09"));
+        assert!(!text.contains("tag20"));
+        app.ecr_state.images.filter = "no match".into();
+        terminal.draw(|f| render_images(f, &app, f.area())).unwrap();
+    }
 }

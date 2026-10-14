@@ -447,6 +447,238 @@ mod pagination_tests {
     }
 
     #[tokio::test]
+    async fn metric_reader_callers_keep_service_specific_requests_and_propagate_errors() {
+        use aws_smithy_http_client::test_util::infallible_client_fn;
+        use std::sync::{Arc, Mutex};
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let capture = requests.clone();
+        let http = infallible_client_fn(move |request| {
+            capture
+                .lock()
+                .unwrap()
+                .push(request.body().bytes().unwrap().to_vec());
+            // CloudWatch's CBOR response: an empty map represents no datapoints.
+            http::Response::builder()
+                .status(200)
+                .body(vec![0xa0u8])
+                .unwrap()
+        });
+        let mut config = config(&StaticReplayClient::new(vec![]));
+        config.sdk_config = config.sdk_config.to_builder().http_client(http).build();
+        let lambda = crate::LambdaClient::new(config.clone());
+        let ec2 = crate::Ec2Client::new(config.clone());
+        let sqs = crate::SqsClient::new(config.clone());
+        macro_rules! check {
+            ($call:expr, $namespace:literal, $name:literal, $stat:literal) => {{
+                assert!($call.await.unwrap().is_empty());
+                let guard = requests.lock().unwrap();
+                let body = guard.last().unwrap();
+                for token in [$namespace, $name, $stat] {
+                    assert!(
+                        body.windows(token.len()).any(|b| b == token.as_bytes()),
+                        "Missing {token}"
+                    );
+                }
+            }};
+        }
+        check!(
+            lambda.get_invocations_metric("fn", Some("fn:alias")),
+            "AWS/Lambda",
+            "Invocations",
+            "Sum"
+        );
+        assert!(requests.lock().unwrap()[0]
+            .windows(8)
+            .any(|b| b == b"fn:alias"));
+        check!(
+            lambda.get_duration_metric("fn", aws_sdk_cloudwatch::types::Statistic::Minimum),
+            "AWS/Lambda",
+            "Duration",
+            "Minimum"
+        );
+        check!(
+            lambda.get_errors_metric("fn"),
+            "AWS/Lambda",
+            "Errors",
+            "Sum"
+        );
+        check!(
+            lambda.get_throttles_metric("fn"),
+            "AWS/Lambda",
+            "Throttles",
+            "Sum"
+        );
+        check!(
+            lambda.get_concurrent_executions_metric("fn"),
+            "AWS/Lambda",
+            "ConcurrentExecutions",
+            "Maximum"
+        );
+        check!(
+            lambda.get_recursive_invocations_dropped_metric("fn"),
+            "AWS/Lambda",
+            "RecursiveInvocationsDropped",
+            "Sum"
+        );
+        check!(
+            lambda.get_async_event_age_metric("fn", aws_sdk_cloudwatch::types::Statistic::Maximum),
+            "AWS/Lambda",
+            "AsyncEventAge",
+            "Maximum"
+        );
+        check!(
+            lambda.get_async_events_received_metric("fn"),
+            "AWS/Lambda",
+            "AsyncEventsReceived",
+            "Sum"
+        );
+        check!(
+            lambda.get_async_events_dropped_metric("fn"),
+            "AWS/Lambda",
+            "AsyncEventsDropped",
+            "Sum"
+        );
+        check!(
+            lambda.get_destination_delivery_failures_metric("fn"),
+            "AWS/Lambda",
+            "DestinationDeliveryFailures",
+            "Sum"
+        );
+        check!(
+            lambda.get_dead_letter_errors_metric("fn"),
+            "AWS/Lambda",
+            "DeadLetterErrors",
+            "Sum"
+        );
+        check!(
+            lambda.get_iterator_age_metric("fn"),
+            "AWS/Lambda",
+            "IteratorAge",
+            "Maximum"
+        );
+        check!(
+            ec2.get_cpu_metrics("i-test"),
+            "AWS/EC2",
+            "CPUUtilization",
+            "Average"
+        );
+        check!(
+            ec2.get_network_in_metrics("i-test"),
+            "AWS/EC2",
+            "NetworkIn",
+            "Average"
+        );
+        check!(
+            ec2.get_network_out_metrics("i-test"),
+            "AWS/EC2",
+            "NetworkOut",
+            "Average"
+        );
+        check!(
+            ec2.get_network_packets_in_metrics("i-test"),
+            "AWS/EC2",
+            "NetworkPacketsIn",
+            "Average"
+        );
+        check!(
+            ec2.get_network_packets_out_metrics("i-test"),
+            "AWS/EC2",
+            "NetworkPacketsOut",
+            "Average"
+        );
+        check!(
+            ec2.get_metadata_no_token_metrics("i-test"),
+            "AWS/EC2",
+            "MetadataNoToken",
+            "Average"
+        );
+        check!(
+            sqs.get_queue_metrics("queue"),
+            "AWS/SQS",
+            "ApproximateAgeOfOldestMessage",
+            "Maximum"
+        );
+        check!(
+            sqs.get_queue_delayed_metrics("queue"),
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesDelayed",
+            "Average"
+        );
+        check!(
+            sqs.get_queue_not_visible_metrics("queue"),
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesNotVisible",
+            "Average"
+        );
+        check!(
+            sqs.get_queue_visible_metrics("queue"),
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesVisible",
+            "Average"
+        );
+        check!(
+            sqs.get_queue_empty_receives_metrics("queue"),
+            "AWS/SQS",
+            "NumberOfEmptyReceives",
+            "Sum"
+        );
+        check!(
+            sqs.get_queue_messages_deleted_metrics("queue"),
+            "AWS/SQS",
+            "NumberOfMessagesDeleted",
+            "Sum"
+        );
+        check!(
+            sqs.get_queue_messages_received_metrics("queue"),
+            "AWS/SQS",
+            "NumberOfMessagesReceived",
+            "Sum"
+        );
+        check!(
+            sqs.get_queue_messages_sent_metrics("queue"),
+            "AWS/SQS",
+            "NumberOfMessagesSent",
+            "Sum"
+        );
+        check!(
+            sqs.get_queue_sent_message_size_metrics("queue"),
+            "AWS/SQS",
+            "SentMessageSize",
+            "Average"
+        );
+        let alarms = crate::AlarmsClient::new(config.clone());
+        check!(
+            alarms.get_metric_statistics(crate::MetricStatsRequest {
+                namespace: "Custom/Test",
+                metric_name: "Samples",
+                statistic: "SampleCount",
+                period: 120,
+                dimensions: &[("Key".into(), "Value".into())],
+                start_time: chrono::DateTime::from_timestamp(100, 0).unwrap(),
+                end_time: chrono::DateTime::from_timestamp(1000, 0).unwrap(),
+            }),
+            "Custom/Test",
+            "Samples",
+            "SampleCount"
+        );
+        assert_eq!(requests.lock().unwrap().len(), 28);
+        config.sdk_config = config
+            .sdk_config
+            .to_builder()
+            .http_client(infallible_client_fn(|_| {
+                http::Response::builder()
+                    .status(403)
+                    .body(vec![0xa0u8])
+                    .unwrap()
+            }))
+            .build();
+        assert!(crate::LambdaClient::new(config)
+            .get_errors_metric("fn")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
     async fn vpc_full_properties_paginate_related_inventories_and_survive_denied_reads() {
         use aws_smithy_http_client::test_util::infallible_client_fn;
         use std::sync::{Arc, Mutex};

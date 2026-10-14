@@ -3,6 +3,7 @@ use crate::apig::resource::Column as ResourceColumn;
 use crate::apig::route::Column as RouteColumn;
 pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
+use crate::clipboard::ClipboardState;
 use crate::cloudtrail::{CloudTrailEvent, CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
 pub use crate::cw::insights::InsightsFocus;
@@ -246,7 +247,7 @@ pub struct App {
     pub profile_picker_selected: usize,
     pub profile_filter_active: bool,
     pub available_profiles: Vec<AwsProfile>,
-    pub snapshot_requested: bool,
+    pub clipboard: ClipboardState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -385,102 +386,9 @@ impl Service {
     }
 }
 
-pub(crate) fn copy_to_clipboard(text: &str) {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-    }
-}
-
 pub(crate) fn nav_page_down(selected: &mut usize, max: usize, page_size: usize) {
     if max > 0 {
         *selected = (*selected + page_size).min(max - 1);
-    }
-}
-
-pub(crate) fn toggle_iam_preference(
-    idx: usize,
-    column_ids: &[String],
-    visible_column_ids: &mut Vec<String>,
-    page_size: &mut PageSize,
-) {
-    if idx > 0 && idx <= column_ids.len() {
-        if let Some(col) = column_ids.get(idx - 1) {
-            if let Some(pos) = visible_column_ids.iter().position(|c| c == col) {
-                // Only remove if more than one column is visible
-                if visible_column_ids.len() > 1 {
-                    visible_column_ids.remove(pos);
-                }
-            } else {
-                visible_column_ids.push(col.clone());
-            }
-        }
-    } else if idx == column_ids.len() + 3 {
-        *page_size = PageSize::Ten;
-    } else if idx == column_ids.len() + 4 {
-        *page_size = PageSize::TwentyFive;
-    } else if idx == column_ids.len() + 5 {
-        *page_size = PageSize::Fifty;
-    }
-}
-
-pub(crate) fn toggle_iam_preference_static(
-    idx: usize,
-    column_ids: &[ColumnId],
-    visible_column_ids: &mut Vec<ColumnId>,
-    page_size: &mut PageSize,
-) {
-    if idx > 0 && idx <= column_ids.len() {
-        if let Some(col) = column_ids.get(idx - 1) {
-            if let Some(pos) = visible_column_ids.iter().position(|c| c == col) {
-                // Only remove if more than one column is visible
-                if visible_column_ids.len() > 1 {
-                    visible_column_ids.remove(pos);
-                }
-            } else {
-                visible_column_ids.push(*col);
-            }
-        }
-    } else if idx == column_ids.len() + 3 {
-        *page_size = PageSize::Ten;
-    } else if idx == column_ids.len() + 4 {
-        *page_size = PageSize::TwentyFive;
-    } else if idx == column_ids.len() + 5 {
-        *page_size = PageSize::Fifty;
-    }
-}
-
-pub(crate) fn toggle_iam_page_size_only(idx: usize, base_idx: usize, page_size: &mut PageSize) {
-    if idx == base_idx {
-        *page_size = PageSize::Ten;
-    } else if idx == base_idx + 1 {
-        *page_size = PageSize::TwentyFive;
-    } else if idx == base_idx + 2 {
-        *page_size = PageSize::Fifty;
-    }
-}
-
-/// Helper to cycle to next preference section (Columns -> PageSize -> Columns)
-fn cycle_preference_next(current_idx: &mut usize, num_columns: usize) {
-    let page_size_idx = num_columns + 2;
-    if *current_idx < page_size_idx {
-        *current_idx = page_size_idx;
-    } else {
-        *current_idx = 0;
-    }
-}
-
-/// Helper to cycle to previous preference section (Columns <- PageSize <- Columns)
-fn cycle_preference_prev(current_idx: &mut usize, num_columns: usize) {
-    let page_size_idx = num_columns + 2;
-    if *current_idx >= page_size_idx {
-        *current_idx = 0;
-    } else {
-        *current_idx = page_size_idx;
     }
 }
 
@@ -490,6 +398,9 @@ impl App {
     }
 
     fn get_active_filter_mut(&mut self) -> Option<&mut String> {
+        if crate::tags::Source::active(self).is_some() {
+            return crate::tags::active_filter_mut(self);
+        }
         if self.current_service == Service::VpcVpcs {
             return Some(&mut self.vpc_state.vpcs.filter);
         }
@@ -589,6 +500,9 @@ impl App {
     {
         if let Some(filter) = self.get_active_filter_mut() {
             op(filter);
+            if crate::tags::reset_active(self) {
+                return;
+            }
             if self.current_service == Service::RdsInstances {
                 self.rds_state.instances.reset();
             } else if self.current_service == Service::VpcVpcs {
@@ -893,7 +807,7 @@ impl App {
             profile_filter_active: false,
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
-            snapshot_requested: false,
+            clipboard: ClipboardState::default(),
         })
     }
 
@@ -1127,11 +1041,14 @@ impl App {
             profile_filter_active: false,
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
-            snapshot_requested: false,
+            clipboard: ClipboardState::default(),
         }
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if crate::tags::handle_action(self, &action) {
+            return;
+        }
         if crate::finder::handle_action(self, &action) {
             return;
         }
@@ -1895,391 +1812,13 @@ impl App {
                 }
             }
             Action::ToggleColumn => {
-                if crate::preferences::bindings::activate_active(self) {
-                    // The same model supplies rows, navigation, and actions.
-                } else if self.current_service == Service::S3Buckets
-                    && self.s3_state.current_bucket.is_none()
-                {
-                    crate::s3::actions::toggle_column(self);
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    // Map flat list index to actual item
-                    // 0: Columns header, 1-16: columns, 17: empty, 18: ViewAs header, 19-20: view options
-                    // 21: empty, 22: PageSize header, 23-25: page sizes, 26: empty, 27: WrapLines header, 28: wrap option
-                    let idx = self.column_selector_index;
-                    if (1..=16).contains(&idx) {
-                        // Column toggle
-                        if let Some(col) = self.cw_alarm_column_ids.get(idx - 1) {
-                            Self::toggle_column_visibility(
-                                &mut self.cw_alarm_visible_column_ids,
-                                &self.cw_alarm_column_ids,
-                                *col,
-                            );
-                        }
-                    } else if idx == 19 {
-                        self.alarms_state.view_as = AlarmViewMode::Table;
-                    } else if idx == 20 {
-                        self.alarms_state.view_as = AlarmViewMode::Cards;
-                    } else if idx == 23 {
-                        self.alarms_state.table.page_size = PageSize::Ten;
-                    } else if idx == 24 {
-                        self.alarms_state.table.page_size = PageSize::TwentyFive;
-                    } else if idx == 25 {
-                        self.alarms_state.table.page_size = PageSize::Fifty;
-                    } else if idx == 26 {
-                        self.alarms_state.table.page_size = PageSize::OneHundred;
-                    } else if idx == 29 {
-                        self.alarms_state.wrap_lines = !self.alarms_state.wrap_lines;
-                    }
-                } else if self.current_service == Service::CloudTrailEvents {
-                    if self.cloudtrail_state.current_event.is_some()
-                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-                    {
-                        // Resources table in detail view
-                        let idx = self.column_selector_index;
-                        if idx > 0 && idx <= self.cloudtrail_resource_column_ids.len() {
-                            if let Some(col) = self.cloudtrail_resource_column_ids.get(idx - 1) {
-                                Self::toggle_column_visibility(
-                                    &mut self.cloudtrail_resource_visible_column_ids,
-                                    &self.cloudtrail_resource_column_ids,
-                                    *col,
-                                );
-                            }
-                        }
-                    } else {
-                        // Main events table
-                        let idx = self.column_selector_index;
-                        if (1..=14).contains(&idx) {
-                            if let Some(col) = self.cloudtrail_event_column_ids.get(idx - 1) {
-                                Self::toggle_column_visibility(
-                                    &mut self.cloudtrail_event_visible_column_ids,
-                                    &self.cloudtrail_event_column_ids,
-                                    *col,
-                                );
-                            }
-                        } else if idx == 17 {
-                            self.cloudtrail_state.table.page_size = PageSize::Ten;
-                            self.cloudtrail_state.table.snap_to_page();
-                        } else if idx == 18 {
-                            self.cloudtrail_state.table.page_size = PageSize::TwentyFive;
-                            self.cloudtrail_state.table.snap_to_page();
-                        } else if idx == 19 {
-                            self.cloudtrail_state.table.page_size = PageSize::Fifty;
-                            self.cloudtrail_state.table.snap_to_page();
-                        } else if idx == 20 {
-                            self.cloudtrail_state.table.page_size = PageSize::OneHundred;
-                            self.cloudtrail_state.table.snap_to_page();
-                        }
-                    }
-                } else if self.current_service == Service::ApiGatewayApis {
-                    crate::apig::actions::toggle_column(self);
-                } else if self.current_service == Service::Ec2Instances {
-                    crate::ec2::actions::toggle_column(self);
-                } else if self.current_service == Service::SqsQueues {
-                    crate::sqs::actions::toggle_column(self);
-                } else if self.current_service == Service::LambdaFunctions {
-                    crate::lambda::functions::toggle_column(self);
-                } else if self.current_service == Service::LambdaApplications {
-                    crate::lambda::applications::toggle_column(self);
-                } else if self.view_mode == ViewMode::Events {
-                    if let Some(col) = self.cw_log_event_column_ids.get(self.column_selector_index)
-                    {
-                        if let Some(pos) = self
-                            .cw_log_event_visible_column_ids
-                            .iter()
-                            .position(|c| c == col)
-                        {
-                            self.cw_log_event_visible_column_ids.remove(pos);
-                        } else {
-                            self.cw_log_event_visible_column_ids.push(*col);
-                        }
-                    }
-                } else if self.view_mode == ViewMode::Detail {
-                    let idx = self.column_selector_index;
-                    if self.log_groups_state.detail_tab == DetailTab::Tags {
-                        // Tags tab
-                        if idx > 0 && idx <= self.cw_log_tag_column_ids.len() {
-                            if let Some(col) = self.cw_log_tag_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .cw_log_tag_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.cw_log_tag_visible_column_ids.remove(pos);
-                                } else {
-                                    self.cw_log_tag_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.cw_log_tag_column_ids.len() + 3 {
-                            self.log_groups_state.tags.page_size = PageSize::Ten;
-                        } else if idx == self.cw_log_tag_column_ids.len() + 4 {
-                            self.log_groups_state.tags.page_size = PageSize::TwentyFive;
-                        } else if idx == self.cw_log_tag_column_ids.len() + 5 {
-                            self.log_groups_state.tags.page_size = PageSize::Fifty;
-                        } else if idx == self.cw_log_tag_column_ids.len() + 6 {
-                            self.log_groups_state.tags.page_size = PageSize::OneHundred;
-                        }
-                    } else {
-                        // Log streams tab
-                        if idx > 0 && idx <= self.cw_log_stream_column_ids.len() {
-                            if let Some(col) = self.cw_log_stream_column_ids.get(idx - 1) {
-                                if let Some(pos) = self
-                                    .cw_log_stream_visible_column_ids
-                                    .iter()
-                                    .position(|c| c == col)
-                                {
-                                    self.cw_log_stream_visible_column_ids.remove(pos);
-                                } else {
-                                    self.cw_log_stream_visible_column_ids.push(*col);
-                                }
-                            }
-                        } else if idx == self.cw_log_stream_column_ids.len() + 3 {
-                            self.log_groups_state.stream_page_size = 10;
-                            self.log_groups_state.stream_current_page = 0;
-                        } else if idx == self.cw_log_stream_column_ids.len() + 4 {
-                            self.log_groups_state.stream_page_size = 25;
-                            self.log_groups_state.stream_current_page = 0;
-                        } else if idx == self.cw_log_stream_column_ids.len() + 5 {
-                            self.log_groups_state.stream_page_size = 50;
-                            self.log_groups_state.stream_current_page = 0;
-                        } else if idx == self.cw_log_stream_column_ids.len() + 6 {
-                            self.log_groups_state.stream_page_size = 100;
-                            self.log_groups_state.stream_current_page = 0;
-                        }
-                    }
-                } else if self.current_service == Service::CloudFormationStacks {
-                    crate::cfn::actions::toggle_column(self);
-                } else if self.current_service == Service::IamUsers {
-                    crate::iam::actions::toggle_column_users(self);
-                } else if self.current_service == Service::IamRoles {
-                    crate::iam::actions::toggle_column_roles(self);
-                } else if self.current_service == Service::IamUserGroups {
-                    crate::iam::actions::toggle_column_groups(self);
-                } else {
-                    let idx = self.column_selector_index;
-                    if idx > 0 && idx <= self.cw_log_group_column_ids.len() {
-                        if let Some(col) = self.cw_log_group_column_ids.get(idx - 1) {
-                            if let Some(pos) = self
-                                .cw_log_group_visible_column_ids
-                                .iter()
-                                .position(|c| c == col)
-                            {
-                                self.cw_log_group_visible_column_ids.remove(pos);
-                            } else {
-                                self.cw_log_group_visible_column_ids.push(*col);
-                            }
-                        }
-                    } else if idx == self.cw_log_group_column_ids.len() + 3 {
-                        self.log_groups_state.log_groups.page_size = PageSize::Ten;
-                    } else if idx == self.cw_log_group_column_ids.len() + 4 {
-                        self.log_groups_state.log_groups.page_size = PageSize::TwentyFive;
-                    } else if idx == self.cw_log_group_column_ids.len() + 5 {
-                        self.log_groups_state.log_groups.page_size = PageSize::Fifty;
-                    } else if idx == self.cw_log_group_column_ids.len() + 6 {
-                        self.log_groups_state.log_groups.page_size = PageSize::OneHundred;
-                    }
-                }
+                crate::preferences::bindings::activate_active(self);
             }
             Action::NextPreferences => {
-                if crate::preferences::bindings::move_section_active(self, true) {
-                    // The same model supplies rows, navigation, and actions.
-                } else if self.current_service == Service::ApiGatewayApis {
-                    crate::apig::actions::next_preferences(self);
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    crate::cw::actions::alarms_next_preferences(self);
-                } else if self.current_service == Service::LambdaFunctions {
-                    crate::lambda::functions::next_preferences(self);
-                } else if self.current_service == Service::LambdaApplications {
-                    crate::lambda::applications::next_preferences(self);
-                } else if self.current_service == Service::CloudFormationStacks {
-                    crate::cfn::actions::next_preferences(self);
-                } else if self.current_service == Service::CloudTrailEvents {
-                    if self.cloudtrail_state.current_event.is_some()
-                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-                    {
-                        // Resources table has no page size, just columns
-                        self.column_selector_index = 0;
-                    } else {
-                        let page_size_idx = self.cloudtrail_event_column_ids.len() + 2;
-                        if self.column_selector_index < page_size_idx {
-                            self.column_selector_index = page_size_idx;
-                        } else {
-                            self.column_selector_index = 0;
-                        }
-                    }
-                } else if self.current_service == Service::Ec2Instances {
-                    let page_size_idx = self.ec2_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
-                } else if self.current_service == Service::IamUsers {
-                    crate::iam::actions::next_preferences_users(self);
-                } else if self.current_service == Service::IamRoles {
-                    crate::iam::actions::next_preferences_roles(self);
-                } else if self.current_service == Service::IamUserGroups {
-                    crate::iam::actions::next_preferences_groups(self);
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::LambdaTriggers
-                {
-                    // Triggers tab: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.sqs_state.trigger_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::EventBridgePipes
-                {
-                    // Pipes tab: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.sqs_state.pipe_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::Tagging
-                {
-                    // Tags tab: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.sqs_state.tag_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                    && self.sqs_state.detail_tab == SqsQueueDetailTab::SnsSubscriptions
-                {
-                    // Subscriptions tab: Columns(0), PageSize(columns.len() + 2)
-                    let page_size_idx = self.sqs_state.subscription_column_ids.len() + 2;
-                    if self.column_selector_index < page_size_idx {
-                        self.column_selector_index = page_size_idx;
-                    } else {
-                        self.column_selector_index = 0;
-                    }
-                } else if self.current_service == Service::S3Buckets
-                    && self.s3_state.current_bucket.is_none()
-                {
-                    crate::s3::actions::next_preferences(self);
-                } else if self.current_service == Service::CloudWatchLogGroups {
-                    if self.view_mode == ViewMode::Events {
-                        // Events view: only columns, no sections to cycle
-                    } else if self.view_mode == ViewMode::Detail {
-                        if self.log_groups_state.detail_tab == DetailTab::Tags {
-                            // Tags tab: Columns(0), PageSize(columns.len() + 2)
-                            cycle_preference_next(
-                                &mut self.column_selector_index,
-                                self.cw_log_tag_column_ids.len(),
-                            );
-                        } else {
-                            // Streams view: Columns(0), PageSize(columns.len() + 2)
-                            cycle_preference_next(
-                                &mut self.column_selector_index,
-                                self.cw_log_stream_column_ids.len(),
-                            );
-                        }
-                    } else {
-                        // Log groups view: Columns(0), PageSize(columns.len() + 2)
-                        cycle_preference_next(
-                            &mut self.column_selector_index,
-                            self.cw_log_group_column_ids.len(),
-                        );
-                    }
-                }
+                crate::preferences::bindings::move_section_active(self, true);
             }
             Action::PrevPreferences => {
-                if crate::preferences::bindings::move_section_active(self, false) {
-                    // The same model supplies rows, navigation, and actions.
-                } else if self.current_service == Service::ApiGatewayApis {
-                    crate::apig::actions::prev_preferences(self);
-                } else if self.current_service == Service::CloudWatchAlarms {
-                    crate::cw::actions::alarms_prev_preferences(self);
-                } else if self.current_service == Service::LambdaFunctions {
-                    crate::lambda::functions::prev_preferences(self);
-                } else if self.current_service == Service::LambdaApplications {
-                    crate::lambda::applications::prev_preferences(self);
-                } else if self.current_service == Service::CloudFormationStacks {
-                    crate::cfn::actions::prev_preferences(self);
-                } else if self.current_service == Service::CloudTrailEvents {
-                    if self.cloudtrail_state.current_event.is_some()
-                        && self.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-                    {
-                        // Resources table has no page size, just columns
-                        self.column_selector_index = 0;
-                    } else {
-                        let page_size_idx = self.cloudtrail_event_column_ids.len() + 2;
-                        if self.column_selector_index >= page_size_idx {
-                            self.column_selector_index = 0;
-                        } else {
-                            self.column_selector_index = page_size_idx;
-                        }
-                    }
-                } else if self.current_service == Service::Ec2Instances {
-                    crate::ec2::actions::next_preferences(self);
-                } else if self.current_service == Service::IamUsers {
-                    crate::iam::actions::prev_preferences_users(self);
-                } else if self.current_service == Service::IamRoles {
-                    crate::iam::actions::prev_preferences_roles(self);
-                } else if self.current_service == Service::IamUserGroups {
-                    crate::iam::actions::prev_preferences_groups(self);
-                } else if self.current_service == Service::SqsQueues
-                    && self.sqs_state.current_queue.is_some()
-                {
-                    let page_size_idx = match self.sqs_state.detail_tab {
-                        SqsQueueDetailTab::LambdaTriggers => {
-                            self.sqs_state.trigger_column_ids.len() + 2
-                        }
-                        SqsQueueDetailTab::EventBridgePipes => {
-                            self.sqs_state.pipe_column_ids.len() + 2
-                        }
-                        SqsQueueDetailTab::Tagging => self.sqs_state.tag_column_ids.len() + 2,
-                        SqsQueueDetailTab::SnsSubscriptions => {
-                            self.sqs_state.subscription_column_ids.len() + 2
-                        }
-                        _ => 0,
-                    };
-                    if page_size_idx > 0 {
-                        if self.column_selector_index >= page_size_idx {
-                            self.column_selector_index = 0;
-                        } else {
-                            self.column_selector_index = page_size_idx;
-                        }
-                    }
-                } else if self.current_service == Service::S3Buckets
-                    && self.s3_state.current_bucket.is_none()
-                {
-                    crate::s3::actions::prev_preferences(self);
-                } else if self.current_service == Service::CloudWatchLogGroups {
-                    if self.view_mode == ViewMode::Events {
-                        // Events view: only columns, no sections to cycle
-                    } else if self.view_mode == ViewMode::Detail {
-                        if self.log_groups_state.detail_tab == DetailTab::Tags {
-                            // Tags tab: Columns(0), PageSize(columns.len() + 2)
-                            cycle_preference_prev(
-                                &mut self.column_selector_index,
-                                self.cw_log_tag_column_ids.len(),
-                            );
-                        } else {
-                            // Streams view: Columns(0), PageSize(columns.len() + 2)
-                            cycle_preference_prev(
-                                &mut self.column_selector_index,
-                                self.cw_log_stream_column_ids.len(),
-                            );
-                        }
-                    } else {
-                        // Log groups view: Columns(0), PageSize(columns.len() + 2)
-                        cycle_preference_prev(
-                            &mut self.column_selector_index,
-                            self.cw_log_group_column_ids.len(),
-                        );
-                    }
-                }
+                crate::preferences::bindings::move_section_active(self, false);
             }
             Action::CloseColumnSelector => {
                 self.mode = Mode::Normal;
@@ -2946,7 +2485,7 @@ impl App {
                 if self.mode == Mode::ErrorModal {
                     // Copy error message
                     if let Some(error) = &self.error_message {
-                        copy_to_clipboard(error);
+                        self.clipboard.request_text(error);
                     }
                 } else if self.view_mode == ViewMode::Events {
                     if let Some(event) = self
@@ -2954,7 +2493,7 @@ impl App {
                         .log_events
                         .get(self.log_groups_state.event_scroll_offset)
                     {
-                        copy_to_clipboard(&event.message);
+                        self.clipboard.request_text(&event.message);
                     }
                 } else if self.current_service == Service::EcrRepositories {
                     crate::ecr::actions::yank(self);
@@ -2996,7 +2535,7 @@ impl App {
                                 extract_account_id(&queue.url),
                                 queue.name
                             );
-                            copy_to_clipboard(&arn);
+                            self.clipboard.request_text(&arn);
                         }
                     } else {
                         // In list view - copy selected queue ARN
@@ -3011,7 +2550,7 @@ impl App {
                                 extract_account_id(&queue.url),
                                 queue.name
                             );
-                            copy_to_clipboard(&arn);
+                            self.clipboard.request_text(&arn);
                         }
                     }
                 } else if self.current_service == Service::ApiGatewayApis {
@@ -3020,7 +2559,7 @@ impl App {
             }
             Action::CopyToClipboard => {
                 // Request snapshot - will be captured after next render
-                self.snapshot_requested = true;
+                self.clipboard.request_snapshot();
             }
             Action::RetryLoad => {
                 self.error_message = None;
@@ -3526,84 +3065,16 @@ impl App {
     }
 
     fn get_column_selector_max(&self) -> usize {
-        if let Some(model) = crate::preferences::bindings::active(self) {
-            model.max_index()
-        } else if self.current_service == Service::ApiGatewayApis {
-            crate::apig::actions::column_selector_max(self)
-        } else if self.current_service == Service::S3Buckets
-            && self.s3_state.current_bucket.is_none()
-        {
-            crate::s3::actions::column_selector_max(self)
-        } else if self.view_mode == ViewMode::Events {
-            self.cw_log_event_column_ids.len() - 1
-        } else if self.view_mode == ViewMode::Detail {
-            self.cw_log_stream_column_ids.len() + 6
-        } else if self.current_service == Service::CloudWatchAlarms {
-            crate::cw::actions::alarms_column_selector_max(self)
-        } else if self.current_service == Service::CloudTrailEvents {
-            crate::cloudtrail::actions::column_selector_max(self)
-        } else if self.current_service == Service::Ec2Instances {
-            crate::ec2::actions::column_selector_max(self)
-        } else if self.current_service == Service::SqsQueues {
-            crate::sqs::actions::column_selector_max(self)
-        } else if self.current_service == Service::LambdaFunctions {
-            crate::lambda::functions::column_selector_max(self)
-        } else if self.current_service == Service::LambdaApplications {
-            crate::lambda::applications::column_selector_max(self)
-        } else if self.current_service == Service::CloudFormationStacks {
-            crate::cfn::actions::column_selector_max(self)
-        } else if self.current_service == Service::IamUsers {
-            crate::iam::actions::column_selector_max_users(self)
-        } else if self.current_service == Service::IamRoles {
-            crate::iam::actions::column_selector_max_roles(self)
-        } else {
-            self.cw_log_group_column_ids.len() + 6
-        }
+        crate::preferences::bindings::model_for(self, self.current_service).max_index()
     }
 
+    #[cfg(test)]
     fn get_column_count(&self) -> usize {
-        if let Some(model) = crate::preferences::bindings::active(self) {
-            model.column_count()
-        } else if self.current_service == Service::ApiGatewayApis {
-            crate::apig::actions::column_count(self)
-        } else if self.current_service == Service::S3Buckets
-            && self.s3_state.current_bucket.is_none()
-        {
-            crate::s3::actions::column_count(self)
-        } else if self.view_mode == ViewMode::Events {
-            self.cw_log_event_column_ids.len()
-        } else if self.view_mode == ViewMode::Detail {
-            self.cw_log_stream_column_ids.len()
-        } else if self.current_service == Service::CloudWatchAlarms {
-            crate::cw::actions::alarms_column_count(self)
-        } else if self.current_service == Service::CloudTrailEvents {
-            crate::cloudtrail::actions::column_count(self)
-        } else if self.current_service == Service::Ec2Instances {
-            crate::ec2::actions::column_count(self)
-        } else if self.current_service == Service::SqsQueues {
-            crate::sqs::actions::column_count(self)
-        } else if self.current_service == Service::LambdaFunctions {
-            crate::lambda::functions::column_count(self)
-        } else if self.current_service == Service::LambdaApplications {
-            crate::lambda::applications::column_count(self)
-        } else if self.current_service == Service::CloudFormationStacks {
-            crate::cfn::actions::column_count(self)
-        } else if self.current_service == Service::IamUsers {
-            crate::iam::actions::column_count_users(self)
-        } else if self.current_service == Service::IamRoles {
-            crate::iam::actions::column_count_roles(self)
-        } else {
-            self.cw_log_group_column_ids.len()
-        }
+        crate::preferences::bindings::model_for(self, self.current_service).column_count()
     }
 
     fn is_blank_row_index(&self, idx: usize) -> bool {
-        if let Some(model) = crate::preferences::bindings::active(self) {
-            return model.is_separator(idx);
-        }
-        let column_count = self.get_column_count();
-        // Blank row is at: header(0) + columns(1..=column_count) + blank(column_count+1)
-        idx == column_count + 1
+        crate::preferences::bindings::model_for(self, self.current_service).is_separator(idx)
     }
 
     fn next_item(&mut self) {
@@ -3668,17 +3139,9 @@ impl App {
                 crate::cw::actions::insights_next_item_dropdown(self);
             }
             Mode::ColumnSelector => {
-                if let Some(model) = crate::preferences::bindings::active(self) {
-                    self.column_selector_index = model.move_row(self.column_selector_index, true);
-                } else {
-                    let max = self.get_column_selector_max();
-                    let mut next_idx = (self.column_selector_index + 1).min(max);
-                    // Skip blank row
-                    if self.is_blank_row_index(next_idx) {
-                        next_idx = (next_idx + 1).min(max);
-                    }
-                    self.column_selector_index = next_idx;
-                }
+                self.column_selector_index =
+                    crate::preferences::bindings::model_for(self, self.current_service)
+                        .move_row(self.column_selector_index, true);
             }
             Mode::ServicePicker => {
                 let filtered = self.filtered_services();
@@ -3818,16 +3281,9 @@ impl App {
                 crate::cw::actions::insights_prev_item_dropdown(self);
             }
             Mode::ColumnSelector => {
-                if let Some(model) = crate::preferences::bindings::active(self) {
-                    self.column_selector_index = model.move_row(self.column_selector_index, false);
-                } else {
-                    let mut prev_idx = self.column_selector_index.saturating_sub(1);
-                    // Skip blank row
-                    if self.is_blank_row_index(prev_idx) {
-                        prev_idx = prev_idx.saturating_sub(1);
-                    }
-                    self.column_selector_index = prev_idx;
-                }
+                self.column_selector_index =
+                    crate::preferences::bindings::model_for(self, self.current_service)
+                        .move_row(self.column_selector_index, false);
             }
             Mode::ServicePicker => {
                 self.service_picker.selected = self.service_picker.selected.saturating_sub(1);
@@ -5990,22 +5446,6 @@ impl App {
         }
 
         Err(anyhow::anyhow!("Query timeout"))
-    }
-
-    /// Toggle column visibility, ensuring at least one column remains visible
-    pub(crate) fn toggle_column_visibility<T: PartialEq + Copy>(
-        visible_columns: &mut Vec<T>,
-        _all_columns: &[T],
-        column_to_toggle: T,
-    ) {
-        if let Some(pos) = visible_columns.iter().position(|c| c == &column_to_toggle) {
-            // Only remove if more than one column is visible
-            if visible_columns.len() > 1 {
-                visible_columns.remove(pos);
-            }
-        } else {
-            visible_columns.push(column_to_toggle);
-        }
     }
 }
 
@@ -8462,11 +7902,11 @@ mod tests {
             },
         ];
 
-        assert!(!app.snapshot_requested);
+        assert!(!app.clipboard.snapshot_requested());
         app.handle_action(Action::CopyToClipboard);
 
         // Should set snapshot_requested flag
-        assert!(app.snapshot_requested);
+        assert!(app.clipboard.snapshot_requested());
     }
 
     #[test]
@@ -13936,8 +13376,8 @@ mod sqs_tests {
         app.sqs_visible_column_ids = SqsColumn::ids();
         let initial_count = app.sqs_visible_column_ids.len();
 
-        // Select first column (index 0) and toggle it
-        app.column_selector_index = 0;
+        // Index 0 is the Columns header; the first column is row 1.
+        app.column_selector_index = 1;
         app.handle_action(Action::ToggleColumn);
 
         // First column should be removed

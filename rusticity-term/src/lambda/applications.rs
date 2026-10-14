@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::lambda::{
     filtered_lambda_applications, ApplicationDetailTab as LambdaApplicationDetailTab,
     FILTER_CONTROLS,
@@ -317,102 +317,33 @@ pub fn refresh(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.lambda_application_state.current_application.is_some() {
-        if app.lambda_application_state.detail_tab == LambdaApplicationDetailTab::Overview {
-            if idx > 0 && idx <= app.lambda_resource_column_ids.len() {
-                if let Some(col) = app.lambda_resource_column_ids.get(idx - 1) {
-                    if let Some(pos) = app
-                        .lambda_resource_visible_column_ids
-                        .iter()
-                        .position(|c| c == col)
-                    {
-                        if app.lambda_resource_visible_column_ids.len() > 1 {
-                            app.lambda_resource_visible_column_ids.remove(pos);
-                        }
-                    } else {
-                        app.lambda_resource_visible_column_ids.push(*col);
-                    }
-                }
-            } else if idx == app.lambda_resource_column_ids.len() + 3 {
-                app.lambda_application_state.resources.page_size = PageSize::Ten;
-            } else if idx == app.lambda_resource_column_ids.len() + 4 {
-                app.lambda_application_state.resources.page_size = PageSize::TwentyFive;
-            } else if idx == app.lambda_resource_column_ids.len() + 5 {
-                app.lambda_application_state.resources.page_size = PageSize::Fifty;
-            }
-        } else {
-            if idx > 0 && idx <= app.lambda_deployment_column_ids.len() {
-                if let Some(col) = app.lambda_deployment_column_ids.get(idx - 1) {
-                    if let Some(pos) = app
-                        .lambda_deployment_visible_column_ids
-                        .iter()
-                        .position(|c| c == col)
-                    {
-                        if app.lambda_deployment_visible_column_ids.len() > 1 {
-                            app.lambda_deployment_visible_column_ids.remove(pos);
-                        }
-                    } else {
-                        app.lambda_deployment_visible_column_ids.push(*col);
-                    }
-                }
-            } else if idx == app.lambda_deployment_column_ids.len() + 3 {
-                app.lambda_application_state.deployments.page_size = PageSize::Ten;
-            } else if idx == app.lambda_deployment_column_ids.len() + 4 {
-                app.lambda_application_state.deployments.page_size = PageSize::TwentyFive;
-            } else if idx == app.lambda_deployment_column_ids.len() + 5 {
-                app.lambda_application_state.deployments.page_size = PageSize::Fifty;
-            }
-        }
-    } else {
-        if idx > 0 && idx <= app.lambda_application_column_ids.len() {
-            if let Some(col) = app.lambda_application_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .lambda_application_visible_column_ids
-                    .iter()
-                    .position(|c| *c == *col)
-                {
-                    if app.lambda_application_visible_column_ids.len() > 1 {
-                        app.lambda_application_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.lambda_application_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.lambda_application_column_ids.len() + 3 {
-            app.lambda_application_state.table.page_size = PageSize::Ten;
-        } else if idx == app.lambda_application_column_ids.len() + 4 {
-            app.lambda_application_state.table.page_size = PageSize::TwentyFive;
-        } else if idx == app.lambda_application_column_ids.len() + 5 {
-            app.lambda_application_state.table.page_size = PageSize::Fifty;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::LambdaApplications);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = app.lambda_application_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::LambdaApplications,
+        true,
+    );
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = app.lambda_application_column_ids.len() + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::LambdaApplications,
+        false,
+    );
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.lambda_application_column_ids.len() + 5
+    crate::preferences::bindings::model_for(app, crate::app::Service::LambdaApplications)
+        .max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.lambda_application_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::LambdaApplications)
+        .column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

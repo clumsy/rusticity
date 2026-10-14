@@ -4,6 +4,7 @@ use crate::common::PageSize;
 use std::borrow::Cow;
 
 pub(crate) mod bindings;
+mod panels;
 
 pub const PAGE_SIZE_OPTIONS: &[(PageSize, &str)] = &[
     (PageSize::Ten, "10"),
@@ -25,6 +26,17 @@ pub enum PreferenceRow {
     Section(&'static str),
     Column(PreferenceColumn),
     Separator,
+    Radio {
+        group: &'static str,
+        value: &'static str,
+        label: &'static str,
+        selected: bool,
+    },
+    Toggle {
+        id: &'static str,
+        label: &'static str,
+        enabled: bool,
+    },
     PageSize {
         value: PageSize,
         label: &'static str,
@@ -39,6 +51,14 @@ pub enum PreferenceAction {
         visible: bool,
     },
     SetPageSize(PageSize),
+    SetRadio {
+        group: &'static str,
+        value: &'static str,
+    },
+    SetToggle {
+        id: &'static str,
+        enabled: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -49,23 +69,82 @@ pub struct Preferences {
 
 impl Preferences {
     pub fn table(columns: Vec<PreferenceColumn>, page_size: PageSize) -> Self {
-        let mut rows = vec![PreferenceRow::Section("Columns")];
+        Self::table_with_page_sizes(columns, page_size, PAGE_SIZE_OPTIONS)
+    }
+
+    pub fn table_with_page_sizes(
+        columns: Vec<PreferenceColumn>,
+        page_size: PageSize,
+        options: &[(PageSize, &'static str)],
+    ) -> Self {
+        Self::columns_only(columns, true).with_page_sizes(Some(page_size), options)
+    }
+
+    pub fn columns_only(columns: Vec<PreferenceColumn>, header: bool) -> Self {
+        let mut rows = Vec::new();
+        if header {
+            rows.push(PreferenceRow::Section("Columns"));
+        }
         rows.extend(columns.into_iter().map(PreferenceRow::Column));
-        rows.push(PreferenceRow::Separator);
-        rows.push(PreferenceRow::Section("Page size"));
-        rows.extend(
-            PAGE_SIZE_OPTIONS
-                .iter()
-                .map(|&(value, label)| PreferenceRow::PageSize {
-                    value,
-                    label,
-                    selected: value == page_size,
-                }),
-        );
         Self {
             rows,
             enabled: true,
         }
+    }
+
+    fn section(&mut self, title: &'static str) {
+        if !self.rows.is_empty() {
+            self.rows.push(PreferenceRow::Separator);
+        }
+        self.rows.push(PreferenceRow::Section(title));
+    }
+
+    pub fn with_page_sizes(
+        mut self,
+        current: Option<PageSize>,
+        options: &[(PageSize, &'static str)],
+    ) -> Self {
+        self.section("Page size");
+        self.rows.extend(
+            options
+                .iter()
+                .map(|&(value, label)| PreferenceRow::PageSize {
+                    value,
+                    label,
+                    selected: current == Some(value),
+                }),
+        );
+        self
+    }
+
+    pub fn radio_group(
+        mut self,
+        group: &'static str,
+        title: &'static str,
+        choices: &[(&'static str, &'static str)],
+        selected: &str,
+    ) -> Self {
+        self.section(title);
+        self.rows
+            .extend(choices.iter().map(|&(value, label)| PreferenceRow::Radio {
+                group,
+                value,
+                label,
+                selected: selected == value,
+            }));
+        self
+    }
+
+    pub fn toggle(
+        mut self,
+        id: &'static str,
+        title: &'static str,
+        label: &'static str,
+        enabled: bool,
+    ) -> Self {
+        self.section(title);
+        self.rows.push(PreferenceRow::Toggle { id, label, enabled });
+        self
     }
 
     /// Preserve a non-table tab's fallback display without presenting working controls.
@@ -113,6 +192,13 @@ impl Preferences {
                 })
             }
             PreferenceRow::PageSize { value, .. } => Some(PreferenceAction::SetPageSize(*value)),
+            PreferenceRow::Radio { group, value, .. } => {
+                Some(PreferenceAction::SetRadio { group, value })
+            }
+            PreferenceRow::Toggle { id, enabled, .. } => Some(PreferenceAction::SetToggle {
+                id,
+                enabled: !enabled,
+            }),
             _ => None,
         }
     }

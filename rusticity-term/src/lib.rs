@@ -2,6 +2,7 @@ pub mod apig;
 pub mod app;
 pub mod aws;
 pub mod cfn;
+pub mod clipboard;
 pub mod cloudtrail;
 pub mod common;
 pub mod cw;
@@ -23,6 +24,7 @@ pub mod s3;
 pub mod session;
 pub mod sqs;
 pub mod table;
+pub mod tags;
 pub mod ui;
 pub mod vpc;
 

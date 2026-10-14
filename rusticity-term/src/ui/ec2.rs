@@ -1,12 +1,10 @@
-use crate::common::{
-    filter_by_fields, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
-};
+use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
 use crate::ec2::tag::{Column as TagColumn, InstanceTag};
 use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
-use crate::table::{TableState, TableWindow};
-use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-use crate::ui::table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig};
+use crate::table::TableState;
+use crate::tags::{self, TagSort, TagsConfig};
+use crate::ui::table::{expanded_from_columns, Column as TableColumn};
 use crate::ui::{
     calculate_dynamic_height, format_title, render_fields_with_dynamic_columns, rounded_block,
     titled_block,
@@ -610,66 +608,35 @@ pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::A
 }
 
 fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
-
-    let view = app
-        .ec2_state
-        .tags
-        .prepare_view(filtered_tags(app), TableWindow::SelectedPage);
-
-    let columns: Vec<Box<dyn TableColumn<InstanceTag>>> = app
+    let columns = app
         .ec2_state
         .tag_visible_column_ids
         .iter()
         .filter_map(|id| TagColumn::from_id(id))
         .map(|col| Box::new(col) as Box<dyn TableColumn<InstanceTag>>)
         .collect();
-
-    let pagination = render_pagination_text(view.current_page, view.total_pages);
-
-    render_simple_filter(
+    tags::render(
         frame,
-        chunks[0],
-        SimpleFilterConfig {
-            filter_text: &app.ec2_state.tags.filter,
-            placeholder: "Search tags",
-            pagination: &pagination,
+        area,
+        TagsConfig {
+            table: &app.ec2_state.tags,
+            items: &app.ec2_state.tags.items,
+            columns,
+            sort: TagSort::Value,
+            window: crate::table::TableWindow::SelectedPage,
+            focus: app.ec2_state.input_focus,
             mode: app.mode,
-            is_input_focused: app.ec2_state.input_focus == InputFocus::Filter,
-            is_pagination_focused: app.ec2_state.input_focus == InputFocus::Pagination,
-        },
-    );
-
-    render_table(
-        frame,
-        TableConfig {
-            area: chunks[1],
-            columns: &columns,
-            items: view.items,
-            selected_index: view.selected_index,
-            is_active: app.mode != Mode::FilterInput,
-            title: format_title(&format!("Tags ({})", view.total_items)),
-            sort_column: "value",
-            sort_direction: SortDirection::Asc,
-            expanded_index: view.expanded_index,
-            get_expanded_content: Some(Box::new(|tag: &InstanceTag| {
-                expanded_from_columns(&columns, tag)
-            })),
+            loading: false,
         },
     );
 }
 
 pub fn filtered_tags(app: &crate::app::App) -> Vec<&InstanceTag> {
-    let mut filtered =
-        filter_by_fields(&app.ec2_state.tags.items, &app.ec2_state.tags.filter, |t| {
-            vec![&t.key, &t.value]
-        });
-
-    filtered.sort_by(|a, b| a.value.cmp(&b.value));
-    filtered
+    tags::filtered(
+        &app.ec2_state.tags.items,
+        &app.ec2_state.tags.filter,
+        TagSort::Value,
+    )
 }
 
 pub async fn load_tags(app: &mut crate::app::App, instance_id: &str) -> anyhow::Result<()> {

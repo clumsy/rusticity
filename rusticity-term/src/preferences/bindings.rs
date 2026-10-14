@@ -1,9 +1,10 @@
 //! Bind the shared row model to service state. No row-index arithmetic lives here.
-use super::{PreferenceAction, PreferenceColumn, Preferences};
+use super::{panels::Panel, PreferenceAction, PreferenceColumn, Preferences};
 use crate::app::{App, Service};
 use crate::common::{ColumnId, PageSize};
 use crate::rds::instance::Column as RdsColumn;
-use crate::ui::{dynamodb, efs, fsx};
+use crate::tags;
+use crate::ui::{dynamodb, ec2, efs, fsx, iam};
 use std::borrow::Cow;
 
 #[derive(Clone, Copy)]
@@ -24,6 +25,9 @@ enum Source {
     DdbReplicas,
     DdbBackups,
     DdbTags,
+    Ec2Tags,
+    IamUserTags,
+    IamRoleTags,
     KmsKeys,
     RdsInstances,
     VpcVpcs,
@@ -107,6 +111,24 @@ impl Source {
                     Self::DdbTables
                 }
             }
+            Service::Ec2Instances
+                if app.ec2_state.current_instance.is_some()
+                    && app.ec2_state.detail_tab == ec2::DetailTab::Tags =>
+            {
+                Self::Ec2Tags
+            }
+            Service::IamUsers
+                if app.iam_state.current_user.is_some()
+                    && app.iam_state.user_tab == iam::UserTab::Tags =>
+            {
+                Self::IamUserTags
+            }
+            Service::IamRoles
+                if app.iam_state.current_role.is_some()
+                    && app.iam_state.role_tab == iam::RoleTab::Tags =>
+            {
+                Self::IamRoleTags
+            }
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances => Self::RdsInstances,
             Service::VpcVpcs => Self::VpcVpcs,
@@ -146,14 +168,14 @@ impl Source {
                 |id| crate::efs::mount_target::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
-            Self::EfsTags => fixed(&["Key", "Value"]),
+            Self::EfsTags => tags::fixed_columns(),
             Self::FsxFiles => columns(
                 &app.fsx_column_ids,
                 &app.fsx_visible_column_ids,
                 |id| crate::fsx::fs::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
-            Self::FsxTags => fixed(&fsx::TAGS_COLUMNS),
+            Self::FsxTags => tags::fixed_columns(),
             Self::FsxUpdates => fixed(&fsx::UPDATES_COLUMNS),
             Self::FsxBackups => fixed(&fsx::BACKUPS_COLUMNS),
             Self::DdbTables => columns(
@@ -179,7 +201,21 @@ impl Source {
             Self::DdbIndexes => fixed(&dynamodb::INDEXES_COLUMNS),
             Self::DdbReplicas => fixed(&dynamodb::REPLICAS_COLUMNS),
             Self::DdbBackups => fixed(&dynamodb::BACKUPS_COLUMNS),
-            Self::DdbTags => fixed(&dynamodb::TAGS_COLUMNS),
+            Self::DdbTags => tags::fixed_columns(),
+            Self::IamUserTags | Self::IamRoleTags => tags::fixed_columns(),
+            Self::Ec2Tags => app
+                .ec2_state
+                .tag_column_ids
+                .iter()
+                .filter_map(|id| {
+                    crate::ec2::tag::Column::from_id(id).map(|column| PreferenceColumn {
+                        id: Cow::Owned(id.clone()),
+                        label: column.name(),
+                        visible: app.ec2_state.tag_visible_column_ids.contains(id),
+                        locked: false,
+                    })
+                })
+                .collect(),
             Self::VpcVpcs => columns(
                 &app.vpc_state.column_ids,
                 &app.vpc_state.visible_column_ids,
@@ -199,7 +235,19 @@ impl Source {
                 Some(crate::kms::key::Column::Alias.id()),
             ),
         };
-        let prefs = Preferences::table(cols, self.page_size(app));
+        let prefs = match self {
+            Self::EfsTags
+            | Self::FsxTags
+            | Self::DdbTags
+            | Self::Ec2Tags
+            | Self::IamUserTags
+            | Self::IamRoleTags => tags::preferences(
+                cols,
+                self.page_size(app),
+                matches!(self, Self::IamUserTags | Self::IamRoleTags),
+            ),
+            _ => Preferences::table(cols, self.page_size(app)),
+        };
         // Existing non-table panes show the parent schema, but cannot mutate it.
         let read_only = match self {
             Self::EfsFiles => app.efs_state.current_file_system.is_some(),
@@ -235,6 +283,9 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.page_size,
             Self::RdsInstances => app.rds_state.instances.page_size,
             Self::VpcVpcs => app.vpc_state.vpcs.page_size,
+            Self::Ec2Tags => app.ec2_state.tags.page_size,
+            Self::IamUserTags => app.iam_state.user_tags.page_size,
+            Self::IamRoleTags => app.iam_state.tags.page_size,
         }
     }
 
@@ -259,6 +310,9 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
             Self::RdsInstances => app.rds_state.instances.set_page_size(size),
             Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
+            Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
+            Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
+            Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
         }
     }
 
@@ -280,14 +334,14 @@ impl Source {
 }
 
 pub(crate) fn active(app: &App) -> Option<Preferences> {
-    Source::for_service(app, app.current_service).map(|source| source.model(app))
+    Some(model_for(app, app.current_service))
 }
 
 /// Explicit service routing also supports legacy service entry points used by callers/tests.
 pub(crate) fn model_for(app: &App, service: Service) -> Preferences {
     Source::for_service(app, service)
-        .expect("service has a preferences model")
-        .model(app)
+        .map(|source| source.model(app))
+        .unwrap_or_else(|| Panel::for_service(app, service).model(app))
 }
 
 pub(crate) fn activate_active(app: &mut App) -> bool {
@@ -297,7 +351,8 @@ pub(crate) fn activate_active(app: &mut App) -> bool {
 
 pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
     let Some(source) = Source::for_service(app, service) else {
-        return false;
+        Panel::for_service(app, service).activate(app);
+        return true;
     };
     let model = source.model(app);
     let previous_rds_options = RdsColumn::inventory_options(&app.rds_state.visible_column_ids);
@@ -314,6 +369,13 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
                 if !visible {
                     hidden.push(id.into_owned());
                 }
+            } else if matches!(source, Source::Ec2Tags) {
+                app.ec2_state
+                    .tag_visible_column_ids
+                    .retain(|column| column != id.as_ref());
+                if visible {
+                    app.ec2_state.tag_visible_column_ids.push(id.into_owned());
+                }
             } else if let (Some(columns), Cow::Borrowed(id)) = (source.visible_columns(app), id) {
                 columns.retain(|column| *column != id);
                 if visible {
@@ -328,7 +390,7 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
                 }
             }
         }
-        None => {}
+        _ => {}
     }
     true
 }
@@ -339,12 +401,8 @@ pub(crate) fn move_section_active(app: &mut App, forward: bool) -> bool {
 }
 
 pub(crate) fn move_section_for(app: &mut App, service: Service, forward: bool) -> bool {
-    let Some(source) = Source::for_service(app, service) else {
-        return false;
-    };
-    app.column_selector_index = source
-        .model(app)
-        .move_section(app.column_selector_index, forward);
+    app.column_selector_index =
+        model_for(app, service).move_section(app.column_selector_index, forward);
     true
 }
 

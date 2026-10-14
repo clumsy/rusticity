@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::cfn::{
     filtered_change_sets, filtered_cloudformation_stacks, filtered_events, filtered_outputs,
     filtered_parameters, filtered_resources, DetailTab as CfnDetailTab,
@@ -643,12 +643,11 @@ pub fn toggle_events_view(app: &mut App) {
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(stack_name) = &app.cfn_state.current_stack {
         // On Template tab — copy the full template body
         if app.cfn_state.detail_tab == CfnDetailTab::Template {
             if !app.cfn_state.template_body.is_empty() {
-                copy_to_clipboard(&app.cfn_state.template_body);
+                app.clipboard.request_text(&app.cfn_state.template_body);
             }
             return;
         }
@@ -659,12 +658,12 @@ pub fn yank(app: &App) {
             .iter()
             .find(|s| &s.name == stack_name)
         {
-            copy_to_clipboard(&stack.stack_id);
+            app.clipboard.request_text(&stack.stack_id);
         }
     } else {
         let filtered = filtered_cloudformation_stacks(app);
         if let Some(stack) = app.cfn_state.table.get_selected(&filtered) {
-            copy_to_clipboard(&stack.stack_id);
+            app.clipboard.request_text(&stack.stack_id);
         }
     }
 }
@@ -672,209 +671,33 @@ pub fn yank(app: &App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.cfn_state.current_stack.is_some() && app.cfn_state.detail_tab == CfnDetailTab::StackInfo
-    {
-        // Tags: page size only
-        if idx == 4 {
-            app.cfn_state.tags.page_size = PageSize::Ten;
-        } else if idx == 5 {
-            app.cfn_state.tags.page_size = PageSize::TwentyFive;
-        } else if idx == 6 {
-            app.cfn_state.tags.page_size = PageSize::Fifty;
-        } else if idx == 7 {
-            app.cfn_state.tags.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_some()
-        && app.cfn_state.detail_tab == CfnDetailTab::Parameters
-    {
-        if idx > 0 && idx <= app.cfn_parameter_column_ids.len() {
-            if let Some(col) = app.cfn_parameter_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .cfn_parameter_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.cfn_parameter_visible_column_ids.len() > 1 {
-                        app.cfn_parameter_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_parameter_visible_column_ids.push(col);
-                }
-            }
-        } else if idx == app.cfn_parameter_column_ids.len() + 3 {
-            app.cfn_state.parameters.page_size = PageSize::Ten;
-        } else if idx == app.cfn_parameter_column_ids.len() + 4 {
-            app.cfn_state.parameters.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_parameter_column_ids.len() + 5 {
-            app.cfn_state.parameters.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_parameter_column_ids.len() + 6 {
-            app.cfn_state.parameters.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_some()
-        && app.cfn_state.detail_tab == CfnDetailTab::Outputs
-    {
-        if idx > 0 && idx <= app.cfn_output_column_ids.len() {
-            if let Some(col) = app.cfn_output_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .cfn_output_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.cfn_output_visible_column_ids.len() > 1 {
-                        app.cfn_output_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_output_visible_column_ids.push(col);
-                }
-            }
-        } else if idx == app.cfn_output_column_ids.len() + 3 {
-            app.cfn_state.outputs.page_size = PageSize::Ten;
-        } else if idx == app.cfn_output_column_ids.len() + 4 {
-            app.cfn_state.outputs.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_output_column_ids.len() + 5 {
-            app.cfn_state.outputs.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_output_column_ids.len() + 6 {
-            app.cfn_state.outputs.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_some()
-        && app.cfn_state.detail_tab == CfnDetailTab::Resources
-    {
-        if idx > 0 && idx <= app.cfn_resource_column_ids.len() {
-            if let Some(col) = app.cfn_resource_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .cfn_resource_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.cfn_resource_visible_column_ids.len() > 1 {
-                        app.cfn_resource_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_resource_visible_column_ids.push(col);
-                }
-            }
-        } else if idx == app.cfn_resource_column_ids.len() + 3 {
-            app.cfn_state.resources.page_size = PageSize::Ten;
-        } else if idx == app.cfn_resource_column_ids.len() + 4 {
-            app.cfn_state.resources.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_resource_column_ids.len() + 5 {
-            app.cfn_state.resources.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_resource_column_ids.len() + 6 {
-            app.cfn_state.resources.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_some()
-        && app.cfn_state.detail_tab == CfnDetailTab::Events
-    {
-        if idx > 0 && idx <= app.cfn_event_column_ids.len() {
-            if let Some(col) = app.cfn_event_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .cfn_event_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.cfn_event_visible_column_ids.len() > 1 {
-                        app.cfn_event_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_event_visible_column_ids.push(col);
-                }
-            }
-        } else if idx == app.cfn_event_column_ids.len() + 3 {
-            app.cfn_state.events.page_size = PageSize::Ten;
-        } else if idx == app.cfn_event_column_ids.len() + 4 {
-            app.cfn_state.events.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_event_column_ids.len() + 5 {
-            app.cfn_state.events.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_event_column_ids.len() + 6 {
-            app.cfn_state.events.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_some()
-        && app.cfn_state.detail_tab == CfnDetailTab::ChangeSets
-    {
-        if idx > 0 && idx <= app.cfn_change_set_column_ids.len() {
-            if let Some(col) = app.cfn_change_set_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .cfn_change_set_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.cfn_change_set_visible_column_ids.len() > 1 {
-                        app.cfn_change_set_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_change_set_visible_column_ids.push(col);
-                }
-            }
-        } else if idx == app.cfn_change_set_column_ids.len() + 3 {
-            app.cfn_state.change_sets.page_size = PageSize::Ten;
-        } else if idx == app.cfn_change_set_column_ids.len() + 4 {
-            app.cfn_state.change_sets.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_change_set_column_ids.len() + 5 {
-            app.cfn_state.change_sets.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_change_set_column_ids.len() + 6 {
-            app.cfn_state.change_sets.page_size = PageSize::OneHundred;
-        }
-    } else if app.cfn_state.current_stack.is_none() {
-        if idx > 0 && idx <= app.cfn_column_ids.len() {
-            if let Some(col) = app.cfn_column_ids.get(idx - 1) {
-                if let Some(pos) = app.cfn_visible_column_ids.iter().position(|c| c == col) {
-                    if app.cfn_visible_column_ids.len() > 1 {
-                        app.cfn_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.cfn_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.cfn_column_ids.len() + 3 {
-            app.cfn_state.table.page_size = PageSize::Ten;
-        } else if idx == app.cfn_column_ids.len() + 4 {
-            app.cfn_state.table.page_size = PageSize::TwentyFive;
-        } else if idx == app.cfn_column_ids.len() + 5 {
-            app.cfn_state.table.page_size = PageSize::Fifty;
-        } else if idx == app.cfn_column_ids.len() + 6 {
-            app.cfn_state.table.page_size = PageSize::OneHundred;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::CloudFormationStacks);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let cols = column_count(app);
-    let page_size_idx = cols + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::CloudFormationStacks,
+        true,
+    );
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let cols = column_count(app);
-    let page_size_idx = cols + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    crate::preferences::bindings::move_section_for(
+        app,
+        crate::app::Service::CloudFormationStacks,
+        false,
+    );
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    column_count(app) + 6
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudFormationStacks)
+        .max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    if app.cfn_state.current_stack.is_some() {
-        match app.cfn_state.detail_tab {
-            CfnDetailTab::Parameters => app.cfn_parameter_column_ids.len(),
-            CfnDetailTab::Outputs => app.cfn_output_column_ids.len(),
-            CfnDetailTab::Resources => app.cfn_resource_column_ids.len(),
-            CfnDetailTab::Events => app.cfn_event_column_ids.len(),
-            CfnDetailTab::ChangeSets => app.cfn_change_set_column_ids.len(),
-            _ => 0,
-        }
-    } else {
-        app.cfn_column_ids.len()
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudFormationStacks)
+        .column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

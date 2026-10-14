@@ -1,7 +1,7 @@
 use crate::apig::resource::Resource as ApigResource;
 use crate::apig::route::Route;
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::apig::{filtered_apis, ApiDetailTab, FILTER_CONTROLS};
 use crate::ui::tree::TreeItem;
 use std::collections::HashMap;
@@ -248,94 +248,23 @@ pub fn go_back(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.apig_api_column_ids.len() + 6
+    crate::preferences::bindings::model_for(app, crate::app::Service::ApiGatewayApis).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.apig_api_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::ApiGatewayApis).column_count()
 }
 
 pub fn next_preferences(app: &mut App) {
-    let num_columns = app.apig_api_column_ids.len();
-    let page_size_idx = num_columns + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::ApiGatewayApis, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let num_columns = app.apig_api_column_ids.len();
-    let page_size_idx = num_columns + 2;
-    if app.column_selector_index == 0 {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::ApiGatewayApis, false);
 }
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if let Some(api) = &app.apig_state.current_api {
-        if app.apig_state.detail_tab == ApiDetailTab::Routes {
-            if api.protocol_type.to_uppercase() == "REST" {
-                // REST API — resource columns; first column is locked
-                if idx > 1 && idx <= app.apig_resource_column_ids.len() {
-                    if let Some(col) = app.apig_resource_column_ids.get(idx - 1) {
-                        if let Some(pos) = app
-                            .apig_resource_visible_column_ids
-                            .iter()
-                            .position(|c| c == col)
-                        {
-                            app.apig_resource_visible_column_ids.remove(pos);
-                        } else {
-                            app.apig_resource_visible_column_ids.push(*col);
-                        }
-                    }
-                }
-            } else {
-                // HTTP/WebSocket — route columns; first column is locked
-                if idx > 1 && idx <= app.apig_route_column_ids.len() {
-                    if let Some(col) = app.apig_route_column_ids.get(idx - 1) {
-                        if let Some(pos) = app
-                            .apig_route_visible_column_ids
-                            .iter()
-                            .position(|c| c == col)
-                        {
-                            app.apig_route_visible_column_ids.remove(pos);
-                        } else {
-                            app.apig_route_visible_column_ids.push(*col);
-                        }
-                    }
-                }
-            }
-            // idx == 1 is the locked first column — do nothing
-        }
-    } else {
-        // API list view
-        if idx > 0 && idx <= app.apig_api_column_ids.len() {
-            if let Some(col) = app.apig_api_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .apig_api_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    app.apig_api_visible_column_ids.remove(pos);
-                } else {
-                    app.apig_api_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.apig_api_column_ids.len() + 3 {
-            app.apig_state.apis.page_size = PageSize::Ten;
-        } else if idx == app.apig_api_column_ids.len() + 4 {
-            app.apig_state.apis.page_size = PageSize::TwentyFive;
-        } else if idx == app.apig_api_column_ids.len() + 5 {
-            app.apig_state.apis.page_size = PageSize::Fifty;
-        } else if idx == app.apig_api_column_ids.len() + 6 {
-            app.apig_state.apis.page_size = PageSize::OneHundred;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::ApiGatewayApis);
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────
@@ -407,7 +336,6 @@ pub fn console_url(app: &App) -> String {
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(_api) = &app.apig_state.current_api {
         if app.apig_state.detail_tab == ApiDetailTab::Routes {
             let (filtered_routes, _) = crate::ui::apig::filter_tree_items(
@@ -418,7 +346,7 @@ pub fn yank(app: &App) {
             let filtered_refs: Vec<&Route> = filtered_routes.iter().collect();
             if let Some(route) = app.apig_state.routes.get_selected(&filtered_refs) {
                 if !route.arn.is_empty() {
-                    copy_to_clipboard(&route.arn);
+                    app.clipboard.request_text(&route.arn);
                 }
             }
         }

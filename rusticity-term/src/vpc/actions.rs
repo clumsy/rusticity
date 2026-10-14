@@ -40,6 +40,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             error_scroll: &mut app.error_scroll,
             filtered_count,
             selected_arn,
+            clipboard: &app.clipboard,
         },
         action,
     )

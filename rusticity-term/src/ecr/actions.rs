@@ -202,16 +202,15 @@ pub fn prev_detail_tab(app: &mut App) {
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if app.ecr_state.current_repository.is_some() {
         let filtered = filtered_ecr_images(app);
         if let Some(image) = app.ecr_state.images.get_selected(&filtered) {
-            copy_to_clipboard(&image.uri);
+            app.clipboard.request_text(&image.uri);
         }
     } else {
         let filtered = filtered_ecr_repositories(app);
         if let Some(repo) = app.ecr_state.repositories.get_selected(&filtered) {
-            copy_to_clipboard(&repo.uri);
+            app.clipboard.request_text(&repo.uri);
         }
     }
 }

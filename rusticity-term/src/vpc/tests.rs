@@ -180,7 +180,7 @@ fn vpc_preferences_and_print_use_common_components() {
     app.view_mode = ViewMode::Events;
     let key = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
     app.handle_action(handle_key(key, app.mode).unwrap());
-    assert!(app.snapshot_requested);
+    assert!(app.clipboard.snapshot_requested());
     assert!(screen(&app, 240, 45).contains("^p print"));
     app.handle_action(Action::OpenColumnSelector);
     let model = bindings::active(&app).unwrap();

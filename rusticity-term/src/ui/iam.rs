@@ -9,6 +9,7 @@ use crate::iam::{
 };
 use crate::keymap::Mode;
 use crate::table::TableState;
+use crate::tags::{self, TagSort, TagsConfig};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
 use crate::ui::table::{
     expanded_from_columns, plain_expanded_content, render_table, Column, TableConfig,
@@ -1018,90 +1019,23 @@ pub fn render_policies_table(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_tags_table(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(3), // Filter with pagination
-            Constraint::Min(0),    // Table
-        ],
-        area,
-    );
-
-    // Filter
-    let page_size = app.iam_state.tags.page_size.value();
-    let filtered_tags: Vec<_> = app
-        .iam_state
-        .tags
-        .items
-        .iter()
-        .filter(|t| {
-            if app.iam_state.tags.filter.is_empty() {
-                true
-            } else {
-                t.key
-                    .to_lowercase()
-                    .contains(&app.iam_state.tags.filter.to_lowercase())
-                    || t.value
-                        .to_lowercase()
-                        .contains(&app.iam_state.tags.filter.to_lowercase())
-            }
-        })
-        .collect();
-
-    let filtered_count = filtered_tags.len();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.iam_state.tags.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
-
-    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-    render_simple_filter(
+    tags::render(
         frame,
-        chunks[0],
-        SimpleFilterConfig {
-            filter_text: &app.iam_state.tags.filter,
-            placeholder: "Search",
-            pagination: &pagination,
+        area,
+        TagsConfig {
+            table: &app.iam_state.tags,
+            items: &app.iam_state.tags.items,
+            columns: vec![
+                Box::new(crate::iam::TagColumn::Key),
+                Box::new(crate::iam::TagColumn::Value),
+            ],
+            sort: TagSort::Source,
+            window: crate::table::TableWindow::ScrollOffset,
+            focus: app.iam_state.role_input_focus,
             mode: app.mode,
-            is_input_focused: app.iam_state.role_input_focus == InputFocus::Filter,
-            is_pagination_focused: app.iam_state.role_input_focus == InputFocus::Pagination,
+            loading: false,
         },
     );
-
-    // Table using common render_table
-    let scroll_offset = app.iam_state.tags.scroll_offset;
-    let page_tags: Vec<&RoleTag> = filtered_tags
-        .into_iter()
-        .skip(scroll_offset)
-        .take(page_size)
-        .collect();
-
-    use crate::iam::TagColumn;
-    let columns: Vec<Box<dyn Column<RoleTag>>> =
-        vec![Box::new(TagColumn::Key), Box::new(TagColumn::Value)];
-
-    let expanded_index = app.iam_state.tags.expanded_item.and_then(|idx| {
-        if idx >= scroll_offset && idx < scroll_offset + page_size {
-            Some(idx - scroll_offset)
-        } else {
-            None
-        }
-    });
-
-    let config = TableConfig {
-        items: page_tags,
-        selected_index: app.iam_state.tags.selected - scroll_offset,
-        expanded_index,
-        columns: &columns,
-        sort_column: "",
-        sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Tags ({})", app.iam_state.tags.items.len())),
-        area: chunks[1],
-        is_active: true,
-        get_expanded_content: Some(Box::new(|tag: &RoleTag| {
-            plain_expanded_content(format!("Key: {}\nValue: {}", tag.key, tag.value))
-        })),
-    };
-
-    render_table(frame, config);
 }
 
 pub fn render_user_groups_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1207,90 +1141,23 @@ pub fn render_user_last_accessed_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_user_tags_table(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = vertical(
-        [
-            Constraint::Length(3), // Filter with pagination
-            Constraint::Min(0),    // Table
-        ],
-        area,
-    );
-
-    // Filter
-    let page_size = app.iam_state.user_tags.page_size.value();
-    let filtered_tags: Vec<_> = app
-        .iam_state
-        .user_tags
-        .items
-        .iter()
-        .filter(|t| {
-            if app.iam_state.user_tags.filter.is_empty() {
-                true
-            } else {
-                t.key
-                    .to_lowercase()
-                    .contains(&app.iam_state.user_tags.filter.to_lowercase())
-                    || t.value
-                        .to_lowercase()
-                        .contains(&app.iam_state.user_tags.filter.to_lowercase())
-            }
-        })
-        .collect();
-
-    let filtered_count = filtered_tags.len();
-    let total_pages = filtered_count.div_ceil(page_size);
-    let current_page = app.iam_state.user_tags.selected / page_size;
-    let pagination = render_pagination_text(current_page, total_pages);
-
-    use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-    render_simple_filter(
+    tags::render(
         frame,
-        chunks[0],
-        SimpleFilterConfig {
-            filter_text: &app.iam_state.user_tags.filter,
-            placeholder: "Search",
-            pagination: &pagination,
+        area,
+        TagsConfig {
+            table: &app.iam_state.user_tags,
+            items: &app.iam_state.user_tags.items,
+            columns: vec![
+                Box::new(crate::iam::TagColumn::Key),
+                Box::new(crate::iam::TagColumn::Value),
+            ],
+            sort: TagSort::Source,
+            window: crate::table::TableWindow::ScrollOffset,
+            focus: app.iam_state.user_input_focus,
             mode: app.mode,
-            is_input_focused: app.iam_state.user_input_focus == InputFocus::Filter,
-            is_pagination_focused: app.iam_state.user_input_focus == InputFocus::Pagination,
+            loading: false,
         },
     );
-
-    // Table using common render_table
-    let scroll_offset = app.iam_state.user_tags.scroll_offset;
-    let page_tags: Vec<&UserTag> = filtered_tags
-        .into_iter()
-        .skip(scroll_offset)
-        .take(page_size)
-        .collect();
-
-    use crate::iam::TagColumn;
-    let columns: Vec<Box<dyn Column<UserTag>>> =
-        vec![Box::new(TagColumn::Key), Box::new(TagColumn::Value)];
-
-    let expanded_index = app.iam_state.user_tags.expanded_item.and_then(|idx| {
-        if idx >= scroll_offset && idx < scroll_offset + page_size {
-            Some(idx - scroll_offset)
-        } else {
-            None
-        }
-    });
-
-    let config = TableConfig {
-        items: page_tags,
-        selected_index: app.iam_state.user_tags.selected - scroll_offset,
-        expanded_index,
-        columns: &columns,
-        sort_column: "",
-        sort_direction: SortDirection::Asc,
-        title: format_title(&format!("Tags ({})", app.iam_state.user_tags.items.len())),
-        area: chunks[1],
-        is_active: true,
-        get_expanded_content: Some(Box::new(|tag: &UserTag| {
-            plain_expanded_content(format!("Key: {}\nValue: {}", tag.key, tag.value))
-        })),
-    };
-
-    render_table(frame, config);
 }
 
 pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {

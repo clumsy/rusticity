@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::ec2::{
     filtered_ec2_instances, filtered_tags, DetailTab as Ec2DetailTab, FILTER_CONTROLS,
     STATE_FILTER as EC2_STATE_FILTER,
@@ -198,78 +198,19 @@ pub fn block_column_selector(app: &App) -> bool {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if app.ec2_state.current_instance.is_some() && app.ec2_state.detail_tab == Ec2DetailTab::Tags {
-        if idx > 0 && idx <= app.ec2_state.tag_column_ids.len() {
-            if let Some(col) = app.ec2_state.tag_column_ids.get(idx - 1) {
-                if let Some(pos) = app
-                    .ec2_state
-                    .tag_visible_column_ids
-                    .iter()
-                    .position(|c| c == col)
-                {
-                    if app.ec2_state.tag_visible_column_ids.len() > 1 {
-                        app.ec2_state.tag_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.ec2_state.tag_visible_column_ids.push(col.clone());
-                }
-            }
-        } else if idx == app.ec2_state.tag_column_ids.len() + 3 {
-            app.ec2_state.tags.page_size = PageSize::Ten;
-        } else if idx == app.ec2_state.tag_column_ids.len() + 4 {
-            app.ec2_state.tags.page_size = PageSize::TwentyFive;
-        } else if idx == app.ec2_state.tag_column_ids.len() + 5 {
-            app.ec2_state.tags.page_size = PageSize::Fifty;
-        } else if idx == app.ec2_state.tag_column_ids.len() + 6 {
-            app.ec2_state.tags.page_size = PageSize::OneHundred;
-        }
-    } else {
-        if idx > 0 && idx <= app.ec2_column_ids.len() {
-            if let Some(col) = app.ec2_column_ids.get(idx - 1) {
-                if let Some(pos) = app.ec2_visible_column_ids.iter().position(|c| c == col) {
-                    if app.ec2_visible_column_ids.len() > 1 {
-                        app.ec2_visible_column_ids.remove(pos);
-                    }
-                } else {
-                    app.ec2_visible_column_ids.push(*col);
-                }
-            }
-        } else if idx == app.ec2_column_ids.len() + 3 {
-            app.ec2_state.table.page_size = PageSize::Ten;
-        } else if idx == app.ec2_column_ids.len() + 4 {
-            app.ec2_state.table.page_size = PageSize::TwentyFive;
-        } else if idx == app.ec2_column_ids.len() + 5 {
-            app.ec2_state.table.page_size = PageSize::Fifty;
-        } else if idx == app.ec2_column_ids.len() + 6 {
-            app.ec2_state.table.page_size = PageSize::OneHundred;
-        }
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::Ec2Instances);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = app.ec2_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::Ec2Instances, true);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    if app.ec2_state.current_instance.is_some() && app.ec2_state.detail_tab == Ec2DetailTab::Tags {
-        app.ec2_state.tag_column_ids.len() + 6
-    } else {
-        app.ec2_column_ids.len() + 6
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::Ec2Instances).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    if app.ec2_state.current_instance.is_some() && app.ec2_state.detail_tab == Ec2DetailTab::Tags {
-        app.ec2_state.tag_column_ids.len()
-    } else {
-        app.ec2_column_ids.len()
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::Ec2Instances).column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

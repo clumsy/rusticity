@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::s3::BucketType as S3BucketType;
 
 const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -86,50 +86,23 @@ pub fn prev_detail_tab(app: &mut App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column(app: &mut App) {
-    let idx = app.column_selector_index;
-    if idx > 0 && idx <= app.s3_bucket_column_ids.len() {
-        if let Some(col) = app.s3_bucket_column_ids.get(idx - 1) {
-            App::toggle_column_visibility(
-                &mut app.s3_bucket_visible_column_ids,
-                &app.s3_bucket_column_ids,
-                *col,
-            );
-        }
-    } else if idx == app.s3_bucket_column_ids.len() + 3 {
-        app.s3_state.buckets.page_size = PageSize::Ten;
-    } else if idx == app.s3_bucket_column_ids.len() + 4 {
-        app.s3_state.buckets.page_size = PageSize::TwentyFive;
-    } else if idx == app.s3_bucket_column_ids.len() + 5 {
-        app.s3_state.buckets.page_size = PageSize::Fifty;
-    } else if idx == app.s3_bucket_column_ids.len() + 6 {
-        app.s3_state.buckets.page_size = PageSize::OneHundred;
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::S3Buckets);
 }
 
 pub fn next_preferences(app: &mut App) {
-    let page_size_idx = app.s3_bucket_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::S3Buckets, true);
 }
 
 pub fn prev_preferences(app: &mut App) {
-    let page_size_idx = app.s3_bucket_column_ids.len() + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::S3Buckets, false);
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    app.s3_bucket_column_ids.len() + 6
+    crate::preferences::bindings::model_for(app, crate::app::Service::S3Buckets).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    app.s3_bucket_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::S3Buckets).column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

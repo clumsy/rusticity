@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::common::{CyclicEnum, InputFocus, PageSize};
+use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::iam::{
     filtered_iam_policies, filtered_iam_roles, filtered_iam_users, filtered_last_accessed,
     filtered_tags as filtered_iam_tags, filtered_user_tags, GroupTab, RoleTab, UserTab,
@@ -804,11 +804,10 @@ pub fn select_item_groups(app: &mut App) {
 // ── Yank ──────────────────────────────────────────────────────────────────────
 
 pub fn yank_users(app: &App) {
-    use crate::app::copy_to_clipboard;
     // In policy view, copy the policy document JSON
     if app.view_mode == crate::app::ViewMode::PolicyView {
         if !app.iam_state.policy_document.is_empty() {
-            copy_to_clipboard(&app.iam_state.policy_document);
+            app.clipboard.request_text(&app.iam_state.policy_document);
         }
         return;
     }
@@ -821,23 +820,22 @@ pub fn yank_users(app: &App) {
                 .iter()
                 .find(|u| u.user_name == *user_name)
             {
-                copy_to_clipboard(&user.arn);
+                app.clipboard.request_text(&user.arn);
             }
         }
     } else {
         let filtered = filtered_iam_users(app);
         if let Some(user) = app.iam_state.users.get_selected(&filtered) {
-            copy_to_clipboard(&user.arn);
+            app.clipboard.request_text(&user.arn);
         }
     }
 }
 
 pub fn yank_roles(app: &App) {
-    use crate::app::copy_to_clipboard;
     // In policy view, copy the policy document JSON
     if app.view_mode == crate::app::ViewMode::PolicyView {
         if !app.iam_state.policy_document.is_empty() {
-            copy_to_clipboard(&app.iam_state.policy_document);
+            app.clipboard.request_text(&app.iam_state.policy_document);
         }
         return;
     }
@@ -850,23 +848,22 @@ pub fn yank_roles(app: &App) {
                 .iter()
                 .find(|r| r.role_name == *role_name)
             {
-                copy_to_clipboard(&role.arn);
+                app.clipboard.request_text(&role.arn);
             }
         }
     } else {
         let filtered = filtered_iam_roles(app);
         if let Some(role) = app.iam_state.roles.get_selected(&filtered) {
-            copy_to_clipboard(&role.arn);
+            app.clipboard.request_text(&role.arn);
         }
     }
 }
 
 pub fn yank_groups(app: &App) {
-    use crate::app::copy_to_clipboard;
     use crate::iam;
     if let Some(group_name) = &app.iam_state.current_group {
         let arn = iam::format_arn(&app.config.account_id, "group", group_name);
-        copy_to_clipboard(&arn);
+        app.clipboard.request_text(&arn);
     } else {
         let filtered: Vec<_> = app
             .iam_state
@@ -882,7 +879,7 @@ pub fn yank_groups(app: &App) {
             .collect();
         if let Some(group) = app.iam_state.groups.get_selected(&filtered) {
             let arn = iam::format_arn(&app.config.account_id, "group", &group.group_name);
-            copy_to_clipboard(&arn);
+            app.clipboard.request_text(&arn);
         }
     }
 }
@@ -890,302 +887,65 @@ pub fn yank_groups(app: &App) {
 // ── Column preferences ────────────────────────────────────────────────────────
 
 pub fn toggle_column_users(app: &mut App) {
-    use crate::app::{toggle_iam_page_size_only, toggle_iam_preference_static};
-    let idx = app.column_selector_index;
-    if app.iam_state.current_user.is_some() {
-        match app.iam_state.user_tab {
-            UserTab::Permissions => {
-                if idx > 0 && idx <= app.iam_policy_column_ids.len() {
-                    if let Some(col) = app.iam_policy_column_ids.get(idx - 1) {
-                        if let Some(pos) = app
-                            .iam_policy_visible_column_ids
-                            .iter()
-                            .position(|c| c == col)
-                        {
-                            app.iam_policy_visible_column_ids.remove(pos);
-                        } else {
-                            app.iam_policy_visible_column_ids.push(col.clone());
-                        }
-                    }
-                } else if idx == app.iam_policy_column_ids.len() + 3 {
-                    app.iam_state.policies.page_size = PageSize::Ten;
-                } else if idx == app.iam_policy_column_ids.len() + 4 {
-                    app.iam_state.policies.page_size = PageSize::TwentyFive;
-                } else if idx == app.iam_policy_column_ids.len() + 5 {
-                    app.iam_state.policies.page_size = PageSize::Fifty;
-                }
-            }
-            UserTab::Groups => toggle_iam_page_size_only(
-                idx,
-                5,
-                &mut app.iam_state.user_group_memberships.page_size,
-            ),
-            UserTab::Tags => {
-                toggle_iam_page_size_only(idx, 5, &mut app.iam_state.user_tags.page_size)
-            }
-            UserTab::LastAccessed => toggle_iam_page_size_only(
-                idx,
-                6,
-                &mut app.iam_state.last_accessed_services.page_size,
-            ),
-            _ => {}
-        }
-    } else {
-        toggle_iam_preference_static(
-            idx,
-            &app.iam_user_column_ids.clone(),
-            &mut app.iam_user_visible_column_ids,
-            &mut app.iam_state.users.page_size,
-        );
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::IamUsers);
 }
 
 pub fn toggle_column_roles(app: &mut App) {
-    use crate::app::{
-        toggle_iam_page_size_only, toggle_iam_preference, toggle_iam_preference_static,
-    };
-    let idx = app.column_selector_index;
-    if app.iam_state.current_role.is_some() {
-        match app.iam_state.role_tab {
-            RoleTab::Permissions => toggle_iam_preference(
-                idx,
-                &app.iam_policy_column_ids.clone(),
-                &mut app.iam_policy_visible_column_ids,
-                &mut app.iam_state.policies.page_size,
-            ),
-            RoleTab::LastAccessed => toggle_iam_page_size_only(
-                idx,
-                6,
-                &mut app.iam_state.last_accessed_services.page_size,
-            ),
-            _ => {}
-        }
-    } else {
-        toggle_iam_preference_static(
-            idx,
-            &app.iam_role_column_ids.clone(),
-            &mut app.iam_role_visible_column_ids,
-            &mut app.iam_state.roles.page_size,
-        );
-    }
+    crate::preferences::bindings::activate_for(app, crate::app::Service::IamRoles);
 }
 
 pub fn toggle_column_groups(app: &mut App) {
-    use crate::app::toggle_iam_preference;
-    toggle_iam_preference(
-        app.column_selector_index,
-        &app.iam_group_column_ids.clone(),
-        &mut app.iam_group_visible_column_ids,
-        &mut app.iam_state.groups.page_size,
-    );
+    crate::preferences::bindings::activate_for(app, crate::app::Service::IamUserGroups);
 }
 
 // ── Prefs cycling ─────────────────────────────────────────────────────────────
 
 pub fn next_preferences_users(app: &mut App) {
-    if app.iam_state.current_user.is_some() {
-        match app.iam_state.user_tab {
-            UserTab::Permissions => {
-                let page_size_idx = app.iam_policy_column_ids.len() + 2;
-                if app.column_selector_index < page_size_idx {
-                    app.column_selector_index = page_size_idx;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            UserTab::Groups | UserTab::Tags => {
-                if app.column_selector_index < 4 {
-                    app.column_selector_index = 4;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            UserTab::LastAccessed => {
-                if app.column_selector_index < 5 {
-                    app.column_selector_index = 5;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            _ => {}
-        }
-    } else {
-        let page_size_idx = app.iam_user_column_ids.len() + 2;
-        if app.column_selector_index < page_size_idx {
-            app.column_selector_index = page_size_idx;
-        } else {
-            app.column_selector_index = 0;
-        }
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamUsers, true);
 }
 
 pub fn prev_preferences_users(app: &mut App) {
-    if app.iam_state.current_user.is_some() {
-        match app.iam_state.user_tab {
-            UserTab::Permissions => {
-                let page_size_idx = app.iam_policy_column_ids.len() + 2;
-                if app.column_selector_index >= page_size_idx {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = page_size_idx;
-                }
-            }
-            UserTab::Groups | UserTab::Tags => {
-                if app.column_selector_index >= 4 {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = 4;
-                }
-            }
-            UserTab::LastAccessed => {
-                if app.column_selector_index >= 5 {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = 5;
-                }
-            }
-            _ => {}
-        }
-    } else {
-        let page_size_idx = app.iam_user_column_ids.len() + 2;
-        if app.column_selector_index >= page_size_idx {
-            app.column_selector_index = 0;
-        } else {
-            app.column_selector_index = page_size_idx;
-        }
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamUsers, false);
 }
 
 pub fn next_preferences_roles(app: &mut App) {
-    if app.iam_state.current_role.is_some() {
-        match app.iam_state.role_tab {
-            RoleTab::Permissions => {
-                let page_size_idx = app.iam_policy_column_ids.len() + 2;
-                if app.column_selector_index < page_size_idx {
-                    app.column_selector_index = page_size_idx;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            RoleTab::Tags => {
-                if app.column_selector_index < 4 {
-                    app.column_selector_index = 4;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            RoleTab::LastAccessed => {
-                if app.column_selector_index < 5 {
-                    app.column_selector_index = 5;
-                } else {
-                    app.column_selector_index = 0;
-                }
-            }
-            _ => {}
-        }
-    } else {
-        let page_size_idx = app.iam_role_column_ids.len() + 2;
-        if app.column_selector_index < page_size_idx {
-            app.column_selector_index = page_size_idx;
-        } else {
-            app.column_selector_index = 0;
-        }
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamRoles, true);
 }
 
 pub fn prev_preferences_roles(app: &mut App) {
-    if app.iam_state.current_role.is_some() {
-        match app.iam_state.role_tab {
-            RoleTab::Permissions => {
-                let page_size_idx = app.iam_policy_column_ids.len() + 2;
-                if app.column_selector_index >= page_size_idx {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = page_size_idx;
-                }
-            }
-            RoleTab::Tags => {
-                if app.column_selector_index >= 4 {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = 4;
-                }
-            }
-            RoleTab::LastAccessed => {
-                if app.column_selector_index >= 5 {
-                    app.column_selector_index = 0;
-                } else {
-                    app.column_selector_index = 5;
-                }
-            }
-            _ => {}
-        }
-    } else {
-        let page_size_idx = app.iam_role_column_ids.len() + 2;
-        if app.column_selector_index >= page_size_idx {
-            app.column_selector_index = 0;
-        } else {
-            app.column_selector_index = page_size_idx;
-        }
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamRoles, false);
 }
 
 pub fn next_preferences_groups(app: &mut App) {
-    let page_size_idx = app.iam_group_column_ids.len() + 2;
-    if app.column_selector_index < page_size_idx {
-        app.column_selector_index = page_size_idx;
-    } else {
-        app.column_selector_index = 0;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamUserGroups, true);
 }
 
 pub fn prev_preferences_groups(app: &mut App) {
-    let page_size_idx = app.iam_group_column_ids.len() + 2;
-    if app.column_selector_index >= page_size_idx {
-        app.column_selector_index = 0;
-    } else {
-        app.column_selector_index = page_size_idx;
-    }
+    crate::preferences::bindings::move_section_for(app, crate::app::Service::IamUserGroups, false);
 }
 
 pub fn column_selector_max_users(app: &App) -> usize {
-    if app.iam_state.current_user.is_some() {
-        app.iam_policy_column_ids.len() + 5
-    } else {
-        app.iam_user_column_ids.len() + 5
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamUsers).max_index()
 }
 
 pub fn column_count_users(app: &App) -> usize {
-    if app.iam_state.current_user.is_some() {
-        app.iam_policy_column_ids.len()
-    } else {
-        app.iam_user_column_ids.len()
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamUsers).column_count()
 }
 
 pub fn column_selector_max_roles(app: &App) -> usize {
-    if app.iam_state.current_role.is_some() {
-        app.iam_policy_column_ids.len() + 5
-    } else {
-        app.iam_role_column_ids.len() + 5
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamRoles).max_index()
 }
 
 pub fn column_count_roles(app: &App) -> usize {
-    if app.iam_state.current_role.is_some() {
-        app.iam_policy_column_ids.len()
-    } else {
-        app.iam_role_column_ids.len()
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamRoles).column_count()
 }
 
 pub fn column_selector_max_groups(app: &App) -> usize {
-    app.iam_group_column_ids.len() + 5
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamUserGroups).max_index()
 }
 
 pub fn column_count_groups(app: &App) -> usize {
-    app.iam_group_column_ids.len()
+    crate::preferences::bindings::model_for(app, crate::app::Service::IamUserGroups).column_count()
 }
 
 // ── Breadcrumb / console URL ──────────────────────────────────────────────────

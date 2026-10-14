@@ -9,6 +9,34 @@ pub(super) fn render_rows(prefs: &Preferences) -> (Vec<ListItem<'static>>, &'sta
         .map(|row| match row {
             PreferenceRow::Section(label) => super::render_section_header(label).0,
             PreferenceRow::Separator => ListItem::new(""),
+            PreferenceRow::Radio {
+                label, selected, ..
+            }
+            | PreferenceRow::PageSize {
+                label, selected, ..
+            } if prefs.is_enabled() => super::render_radio_item(label, *selected, false).0,
+            PreferenceRow::Radio {
+                label, selected, ..
+            }
+            | PreferenceRow::PageSize {
+                label, selected, ..
+            } => {
+                let (radio, _) = super::render_radio(*selected);
+                ListItem::new(Span::styled(
+                    format!("{} {}", radio, label),
+                    Style::default().fg(Color::DarkGray),
+                ))
+            }
+            PreferenceRow::Toggle { label, enabled, .. } if prefs.is_enabled() => {
+                super::render_column_toggle_string(label, *enabled).0
+            }
+            PreferenceRow::Toggle { label, enabled, .. } => {
+                let toggle = if *enabled { "◼⬜" } else { "⬜◼" };
+                ListItem::new(Span::styled(
+                    format!("{} {}", toggle, label),
+                    Style::default().fg(Color::DarkGray),
+                ))
+            }
             PreferenceRow::Column(column) if column.locked || !prefs.is_enabled() => {
                 let toggle = if column.visible { "◼⬜" } else { "⬜◼" };
                 ListItem::new(Span::styled(
@@ -18,18 +46,6 @@ pub(super) fn render_rows(prefs: &Preferences) -> (Vec<ListItem<'static>>, &'sta
             }
             PreferenceRow::Column(column) => {
                 super::render_column_toggle_string(&column.label, column.visible).0
-            }
-            PreferenceRow::PageSize {
-                label, selected, ..
-            } if prefs.is_enabled() => super::render_radio_item(label, *selected, false).0,
-            PreferenceRow::PageSize {
-                label, selected, ..
-            } => {
-                let (radio, _) = super::render_radio(*selected);
-                ListItem::new(Span::styled(
-                    format!("{} {}", radio, label),
-                    Style::default().fg(Color::DarkGray),
-                ))
             }
         })
         .collect();
@@ -62,7 +78,14 @@ mod tests {
                 },
             ],
             PageSize::TwentyFive,
-        );
+        )
+        .radio_group(
+            "view",
+            "View as",
+            &[("table", "Table"), ("cards", "Cards")],
+            "cards",
+        )
+        .toggle("wrap", "Wrap lines", "Wrap lines", true);
         let (items, title, width) = render_rows(&prefs);
         assert_eq!(items.len(), prefs.rows().len());
         assert_eq!(title, " Preferences ");
@@ -75,7 +98,9 @@ mod tests {
                 .map(|x| buffer[(x, index as u16)].symbol())
                 .collect::<String>();
             match row {
-                PreferenceRow::Section(label) => assert!(text.contains(label)),
+                PreferenceRow::Section(label)
+                | PreferenceRow::Radio { label, .. }
+                | PreferenceRow::Toggle { label, .. } => assert!(text.contains(label)),
                 PreferenceRow::Column(column) => {
                     // Wide glyphs have blank continuation cells in the buffer.
                     assert!(text

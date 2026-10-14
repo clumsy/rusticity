@@ -1,6 +1,6 @@
 //! Shared input handling for flat, read-only inventories (RDS, VPC).
 //! Service adapters provide state and the same filtered count used by rendering.
-use crate::app::copy_to_clipboard;
+use crate::clipboard::ClipboardState;
 use crate::common::InputFocus;
 use crate::keymap::{Action, Mode};
 use crate::table::TableState;
@@ -16,6 +16,7 @@ pub struct InventoryInput<'a, T> {
     pub error_scroll: &'a mut usize,
     pub filtered_count: usize,
     pub selected_arn: Option<String>,
+    pub clipboard: &'a ClipboardState,
 }
 
 pub fn go_to_page<T>(table: &mut TableState<T>, page: usize, count: usize) {
@@ -37,6 +38,7 @@ pub fn handle_action<T>(input: InventoryInput<'_, T>, action: &Action) -> bool {
         error_scroll,
         filtered_count,
         selected_arn,
+        clipboard,
     } = input;
     if *mode == Mode::ErrorModal && *action == Action::RetryLoad {
         *error_message = None;
@@ -70,7 +72,7 @@ pub fn handle_action<T>(input: InventoryInput<'_, T>, action: &Action) -> bool {
             Action::Refresh => table.loading = true,
             Action::Yank => {
                 if let Some(arn) = selected_arn {
-                    copy_to_clipboard(&arn);
+                    clipboard.request_text(arn);
                 }
             }
             // Flat inventory views do not implement tabs or additional sort/filter switches.

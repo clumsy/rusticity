@@ -440,7 +440,16 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             app.page_input
         ))]))
     } else {
-        None
+        app.clipboard.notice().map(|notice| {
+            Line::styled(
+                notice.message.clone(),
+                Style::default().fg(if notice.failed {
+                    Color::Red
+                } else {
+                    Color::Green
+                }),
+            )
+        })
     };
 
     let chunks = Layout::default()

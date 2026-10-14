@@ -336,9 +336,9 @@ fn rds_print_hint_and_ctrl_p_use_the_shared_snapshot_action() {
             let key = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
             let action = handle_key(key, app.mode).unwrap();
             assert_eq!(action, Action::CopyToClipboard);
-            assert!(!app.snapshot_requested);
+            assert!(!app.clipboard.snapshot_requested());
             app.handle_action(action);
-            assert!(app.snapshot_requested);
+            assert!(app.clipboard.snapshot_requested());
             assert_eq!(app.mode, Mode::Normal);
             assert_eq!(app.current_service, Service::RdsInstances);
             assert!(!app.rds_state.instances.loading);
@@ -359,7 +359,7 @@ fn rds_plain_p_still_opens_preferences_instead_of_printing() {
     assert_eq!(action, Action::OpenColumnSelector);
     app.handle_action(action);
     assert_eq!(app.mode, Mode::ColumnSelector);
-    assert!(!app.snapshot_requested);
+    assert!(!app.clipboard.snapshot_requested());
 }
 
 #[test]

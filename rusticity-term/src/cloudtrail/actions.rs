@@ -133,29 +133,17 @@ pub fn go_back(app: &mut App) {
 }
 
 pub fn column_selector_max(app: &App) -> usize {
-    if app.cloudtrail_state.current_event.is_some()
-        && app.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-    {
-        app.cloudtrail_resource_column_ids.len()
-    } else {
-        app.cloudtrail_event_column_ids.len() + 6
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudTrailEvents).max_index()
 }
 
 pub fn column_count(app: &App) -> usize {
-    if app.cloudtrail_state.current_event.is_some()
-        && app.cloudtrail_state.detail_focus == CloudTrailDetailFocus::Resources
-    {
-        app.cloudtrail_resource_column_ids.len()
-    } else {
-        app.cloudtrail_event_column_ids.len()
-    }
+    crate::preferences::bindings::model_for(app, crate::app::Service::CloudTrailEvents)
+        .column_count()
 }
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(event) = &app.cloudtrail_state.current_event {
-        copy_to_clipboard(&event.cloud_trail_event_json);
+        app.clipboard.request_text(&event.cloud_trail_event_json);
     }
 }
 

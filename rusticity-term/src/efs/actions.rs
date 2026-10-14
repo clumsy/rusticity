@@ -221,13 +221,12 @@ pub fn is_pagination_focused(app: &App) -> bool {
 // ── Yank / console URL / breadcrumb ──────────────────────────────────────────
 
 pub fn yank(app: &App) {
-    use crate::app::copy_to_clipboard;
     if let Some(fs_id) = &app.efs_state.current_file_system {
         // On the File system policy tab, copy the policy JSON.
         if app.efs_state.detail_tab == crate::ui::efs::DetailTab::FileSystemPolicy
             && !app.efs_state.policy_document.is_empty()
         {
-            copy_to_clipboard(&app.efs_state.policy_document);
+            app.clipboard.request_text(&app.efs_state.policy_document);
             return;
         }
         // Otherwise in detail view — copy the ARN
@@ -238,13 +237,13 @@ pub fn yank(app: &App) {
             .iter()
             .find(|f| &f.file_system_id == fs_id)
         {
-            copy_to_clipboard(&fs.file_system_arn);
+            app.clipboard.request_text(&fs.file_system_arn);
         }
     } else {
         // In list view — copy the file system ID
         let filtered = filtered_efs_file_systems(app);
         if let Some(fs) = app.efs_state.file_systems.get_selected(&filtered) {
-            copy_to_clipboard(&fs.file_system_id);
+            app.clipboard.request_text(&fs.file_system_id);
         }
     }
 }

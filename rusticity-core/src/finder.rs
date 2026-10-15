@@ -35,15 +35,16 @@ pub enum ResourceKind {
     Database,
     Bucket,
     Queue,
+    Topic,
     /// Generic linked target unsupported as an inventory-search kind.
     /// Related-resource discovery uses this for ARNs that don't map to a
     /// supported top-level inventory kind (e.g. subnets, volumes, layers).
-    /// Excluded from `ALL` so inventory search stays at 19 kinds.
+    /// Excluded from `ALL` so inventory search stays at 20 kinds.
     Reference,
 }
 
 impl ResourceKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Api,
         Self::Stack,
         Self::Alarm,
@@ -63,6 +64,7 @@ impl ResourceKind {
         Self::Database,
         Self::Bucket,
         Self::Queue,
+        Self::Topic,
     ];
     pub fn service(self) -> &'static str {
         match self {
@@ -83,6 +85,7 @@ impl ResourceKind {
             Self::Database => "rds",
             Self::Bucket => "s3",
             Self::Queue => "sqs",
+            Self::Topic => "sns",
             Self::Reference => "",
         }
     }
@@ -105,6 +108,7 @@ impl ResourceKind {
             Self::Database => "Database",
             Self::Bucket => "Bucket",
             Self::Queue => "Queue",
+            Self::Topic => "Topic",
             Self::Reference => "Reference",
         }
     }
@@ -129,6 +133,7 @@ impl ResourceKind {
             Self::Database => "rds:db",
             Self::Bucket => "s3:bucket",
             Self::Queue => "sqs:queue",
+            Self::Topic => "sns:topic",
             Self::Reference => "",
         }
     }
@@ -181,7 +186,7 @@ impl Resource {
             .find(|kind| kind.resource_types().split(',').any(|t| t == resource_type))?;
         let tail = arn.splitn(6, ':').nth(5)?;
         let id = match kind {
-            ResourceKind::Bucket | ResourceKind::Queue => tail,
+            ResourceKind::Bucket | ResourceKind::Queue | ResourceKind::Topic => tail,
             ResourceKind::Database | ResourceKind::Function | ResourceKind::Alarm => {
                 tail.split_once(':')?.1
             }
@@ -237,6 +242,8 @@ impl Resource {
             "s3" if !tail.contains('/') && !tail.contains(':') => Some(ResourceKind::Bucket),
             "s3" => None,
             "sqs" => Some(ResourceKind::Queue),
+            "sns" if !tail.contains('/') && !tail.contains(':') => Some(ResourceKind::Topic),
+            "sns" => None,
             _ => ResourceKind::ALL.into_iter().find(|kind| {
                 kind.resource_types().split(',').any(|resource_type| {
                     let Some((expected_service, resource_type)) = resource_type.split_once(':')

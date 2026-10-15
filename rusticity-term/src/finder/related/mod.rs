@@ -279,6 +279,18 @@ pub fn selected(app: &App) -> Option<Resource> {
             })
         }
 
+        Service::SnsTopics => {
+            let filtered = crate::ui::sns::filtered_topics(app);
+            let topic = filtered.get(app.sns_state.topics.selected)?;
+            Some(Resource {
+                kind: ResourceKind::Topic,
+                id: topic.name.clone(),
+                name: topic.name.clone(),
+                arn: topic.arn.clone(),
+                region: region.to_string(),
+            })
+        }
+
         Service::CloudWatchLogGroups => {
             // When viewing streams/events (Detail/Events mode) the
             // `log_groups.selected` index was reset to the unfiltered items

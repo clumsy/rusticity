@@ -876,7 +876,7 @@ fn from_arn_efs_access_point_stays_reference() {
 
 #[test]
 fn from_arn_unsupported_service_returns_reference() {
-    let r = Resource::from_arn("arn:aws:sns:us-east-1:123456789012:my-topic").unwrap();
+    let r = Resource::from_arn("arn:aws:secretsmanager:us-east-1:123456789012:my-topic").unwrap();
     assert_eq!(r.kind, ResourceKind::Reference);
     assert_eq!(r.id, "my-topic");
 }
@@ -919,7 +919,7 @@ fn from_arn_iam_role_with_path() {
 #[test]
 fn resource_kind_reference_excluded_from_all() {
     assert!(!ResourceKind::ALL.contains(&ResourceKind::Reference));
-    assert_eq!(ResourceKind::ALL.len(), 19);
+    assert_eq!(ResourceKind::ALL.len(), 20);
 }
 
 #[test]
@@ -930,7 +930,7 @@ fn search_query_matches_reference_on_unqualified() {
         kind: ResourceKind::Reference,
         id: "myfn".into(),
         name: "myfn".into(),
-        arn: "arn:aws:sns:us-east-1:123456789012:myfn".into(),
+        arn: "arn:aws:secretsmanager:us-east-1:123456789012:myfn".into(),
         region: "us-east-1".into(),
     };
     assert!(query.matches(&resource));
@@ -944,7 +944,7 @@ fn search_query_matches_references_only_for_their_service() {
         kind: ResourceKind::Reference,
         id: "myfn".into(),
         name: "myfn".into(),
-        arn: "arn:aws:sns:us-east-1:123456789012:myfn".into(),
+        arn: "arn:aws:secretsmanager:us-east-1:123456789012:myfn".into(),
         region: "us-east-1".into(),
     };
     assert!(!query.matches(&resource));

@@ -22,6 +22,7 @@ pub mod preferences;
 pub mod rds;
 pub mod s3;
 pub mod session;
+pub mod sns;
 pub mod sqs;
 pub mod table;
 pub mod tags;
@@ -65,6 +66,7 @@ pub fn init() {
     vpc::init(&mut i18n);
     s3::init(&mut i18n);
     cw::init(&mut i18n);
+    sns::init(&mut i18n);
     sqs::init(&mut i18n);
     cfn::init(&mut i18n);
     cloudtrail::init(&mut i18n);

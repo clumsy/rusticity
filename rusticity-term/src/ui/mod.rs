@@ -22,6 +22,7 @@ pub mod prefs;
 mod query_editor;
 pub mod rds;
 pub mod s3;
+pub mod sns;
 pub mod sqs;
 mod status;
 pub mod styles;
@@ -760,6 +761,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
+        Service::SnsTopics => sns::render_topics(frame, app, area),
         Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),
         Service::IamUsers => iam::render_users(frame, app, area),
@@ -1216,6 +1218,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::LambdaFunctions => lambda::render_functions(frame, app, area),
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
+        Service::SnsTopics => sns::render_topics(frame, app, area),
         Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),
         Service::IamUsers => iam::render_users(frame, app, area),

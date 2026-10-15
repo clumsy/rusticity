@@ -82,6 +82,7 @@ pub use crate::ui::s3::{
     calculate_total_bucket_rows, calculate_total_object_rows, BucketType as S3BucketType,
     ObjectTab as S3ObjectTab, State as S3State,
 };
+pub use crate::ui::sns::State as SnsState;
 pub use crate::ui::sqs::{
     extract_account_id, extract_region, filtered_eventbridge_pipes, filtered_lambda_triggers,
     filtered_queues, filtered_subscriptions, filtered_tags, QueueDetailTab as SqsQueueDetailTab,
@@ -100,7 +101,7 @@ use rusticity_core::LogStream;
 use rusticity_core::{
     AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
     CloudWatchClient, DynamoDbClient, Ec2Client, EcrClient, EfsClient, FsxClient, IamClient,
-    KmsClient, LambdaClient, S3Client, SqsClient,
+    KmsClient, LambdaClient, S3Client, SnsClient, SqsClient,
 };
 use rusticity_core::{RdsClient, VpcClient};
 
@@ -119,6 +120,7 @@ pub struct App {
     pub cloudtrail_client: CloudTrailClient,
     pub s3_client: S3Client,
     pub sqs_client: SqsClient,
+    pub sns_client: SnsClient,
     pub alarms_client: AlarmsClient,
     pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
@@ -144,6 +146,7 @@ pub struct App {
     pub cloudtrail_state: CloudTrailState,
     pub s3_state: S3State,
     pub sqs_state: SqsState,
+    pub sns_state: SnsState,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub kms_state: KmsState,
@@ -342,6 +345,7 @@ pub enum Service {
     CloudTrailEvents,
     RdsInstances,
     S3Buckets,
+    SnsTopics,
     SqsQueues,
     VpcVpcs,
     Ec2Instances,
@@ -368,6 +372,7 @@ impl Service {
             Service::CloudTrailEvents => "CloudTrail › Event History",
             Service::RdsInstances => "RDS › Databases",
             Service::S3Buckets => "S3 › Buckets",
+            Service::SnsTopics => "SNS › Topics",
             Service::SqsQueues => "SQS › Queues",
             Service::VpcVpcs => "VPC › VPCs",
             Service::Ec2Instances => "EC2 › Instances",
@@ -406,6 +411,9 @@ impl App {
         }
         if self.current_service == Service::RdsInstances {
             return Some(&mut self.rds_state.instances.filter);
+        }
+        if self.current_service == Service::SnsTopics {
+            return Some(&mut self.sns_state.topics.filter);
         }
         if self.current_service == Service::ApiGatewayApis {
             crate::apig::actions::get_active_filter_mut(self)
@@ -507,6 +515,8 @@ impl App {
                 self.rds_state.instances.reset();
             } else if self.current_service == Service::VpcVpcs {
                 self.vpc_state.vpcs.reset();
+            } else if self.current_service == Service::SnsTopics {
+                self.sns_state.topics.reset();
             }
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
@@ -564,6 +574,7 @@ impl App {
         let cloudtrail_client = CloudTrailClient::new(config.clone());
         let s3_client = S3Client::new(config.clone());
         let sqs_client = SqsClient::new(config.clone());
+        let sns_client = SnsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
         let ec2_client = Ec2Client::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
@@ -587,6 +598,7 @@ impl App {
             cloudtrail_client,
             s3_client,
             sqs_client,
+            sns_client,
             alarms_client,
             ec2_client,
             ecr_client,
@@ -620,6 +632,7 @@ impl App {
             },
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
+            sns_state: SnsState::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -821,6 +834,7 @@ impl App {
             cloudtrail_client: CloudTrailClient::new(config.clone()),
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),
+            sns_client: SnsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
             ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
@@ -854,6 +868,7 @@ impl App {
                 active_event_name_filter: None,
             },
             sqs_state: SqsState::new(),
+            sns_state: SnsState::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -1061,6 +1076,9 @@ impl App {
         if vpc_actions::handle_action(self, &action) || rds_actions::handle_action(self, &action) {
             return;
         }
+        if crate::sns::actions::handle_action(self, &action) {
+            return;
+        }
         match action {
             Action::Noop | Action::OpenResourceFinder | Action::OpenRelatedResources => {}
             Action::EnterFilterMode => match self.mode {
@@ -1247,6 +1265,7 @@ impl App {
                     }
                     Service::RdsInstances => self.rds_state.instances.reset(),
                     Service::VpcVpcs => self.vpc_state.vpcs.reset(),
+                    Service::SnsTopics => self.sns_state.topics.reset(),
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
                     }
@@ -1333,6 +1352,7 @@ impl App {
                             "CloudTrailEvents" => Service::CloudTrailEvents,
                             "S3Buckets" => Service::S3Buckets,
                             "SqsQueues" => Service::SqsQueues,
+                            "SnsTopics" => Service::SnsTopics,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "KmsKeys" => Service::KmsKeys,
@@ -2953,6 +2973,7 @@ impl App {
             }
             Service::RdsInstances => parts.extend(["RDS".into(), "Databases".into()]),
             Service::VpcVpcs => parts.extend(["VPC".into(), "VPCs".into()]),
+            Service::SnsTopics => parts.extend(["SNS".into(), "Topics".into()]),
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
@@ -3050,6 +3071,7 @@ impl App {
             Service::FsxFileSystems => crate::fsx::actions::console_url(self),
             Service::RdsInstances => rds_actions::console_url(self),
             Service::VpcVpcs => vpc_actions::console_url(self),
+            Service::SnsTopics => crate::sns::actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -3755,6 +3777,10 @@ impl App {
             rds_actions::go_to_page(self, page);
             return;
         }
+        if self.current_service == Service::SnsTopics {
+            crate::sns::actions::go_to_page(self, page);
+            return;
+        }
         if page == 0 {
             return;
         }
@@ -4042,6 +4068,7 @@ impl App {
                     "Lambda › Functions" => Service::LambdaFunctions,
                     "Lambda › Applications" => Service::LambdaApplications,
                     "S3 › Buckets" => Service::S3Buckets,
+                    "SNS › Topics" => Service::SnsTopics,
                     "SQS › Queues" => Service::SqsQueues,
                     _ => return,
                 };
@@ -4061,6 +4088,10 @@ impl App {
                 if new_service == Service::RdsInstances {
                     self.rds_state.instances.reset();
                     self.rds_state.instances.loading = true;
+                }
+                if new_service == Service::SnsTopics {
+                    self.sns_state.topics.reset();
+                    self.sns_state.topics.loading = true;
                 }
                 self.view_mode = ViewMode::List;
                 self.service_selected = true;
@@ -4101,6 +4132,7 @@ impl App {
                             "S3Buckets" => Service::S3Buckets,
                             "CloudTrailEvents" => Service::CloudTrailEvents,
                             "SqsQueues" => Service::SqsQueues,
+                            "SnsTopics" => Service::SnsTopics,
                             _ => Service::CloudWatchLogGroups,
                         },
                         title: if st.service == "RdsInstances" {
@@ -4852,6 +4884,16 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_sns_topics(&mut self) -> anyhow::Result<()> {
+        self.sns_state.topics.loading = true;
+        let result = self.sns_client.list_topics().await;
+        self.sns_state.topics.loading = false;
+        // A failed read must not discard the previously loaded inventory.
+        self.sns_state.topics.items = result?;
+        self.sns_state.topics.reset();
+        Ok(())
+    }
+
     pub async fn load_fsx_file_systems(&mut self) -> anyhow::Result<()> {
         let file_systems = self.fsx_client.list_file_systems().await?;
         self.fsx_state.file_systems.items = file_systems;
@@ -5508,6 +5550,7 @@ impl ServicePickerState {
                 "Lambda › Applications",
                 "RDS › Databases",
                 "S3 › Buckets",
+                "SNS › Topics",
                 "SQS › Queues",
                 "VPC › VPCs",
             ],

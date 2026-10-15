@@ -27,6 +27,7 @@ pub fn service(kind: ResourceKind) -> Service {
         ResourceKind::Vpc => Service::VpcVpcs,
         ResourceKind::Bucket => Service::S3Buckets,
         ResourceKind::Queue => Service::SqsQueues,
+        ResourceKind::Topic => Service::SnsTopics,
     }
 }
 
@@ -263,6 +264,14 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
                     .iter()
                     .position(|row| row.name == resource.id)
                     .unwrap_or(0);
+        }
+        ResourceKind::Topic => {
+            app.load_sns_topics().await?;
+            focus!(app.sns_state.topics, name);
+            app.sns_state.topics.selected = ui::sns::filtered_topics(app)
+                .iter()
+                .position(|row| row.name == resource.id)
+                .unwrap_or(0);
         }
         ResourceKind::User => {
             app.iam_state.current_user = None;

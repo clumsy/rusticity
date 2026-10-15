@@ -44,6 +44,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring
 - 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
 - 🪣 **S3**: Buckets and objects with navigation
+- 📣 **SNS**: Topics
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
 - 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns
 

@@ -32,6 +32,7 @@ enum Source {
     KmsKeys,
     RdsInstances,
     VpcVpcs,
+    SnsTopics,
 }
 
 fn columns(
@@ -135,6 +136,7 @@ impl Source {
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances => Self::RdsInstances,
             Service::VpcVpcs => Self::VpcVpcs,
+            Service::SnsTopics => Self::SnsTopics,
             _ => return None,
         })
     }
@@ -255,6 +257,12 @@ impl Source {
                 |id| crate::kms::key::Column::from_id(id).map(|c| c.name()),
                 Some(crate::kms::key::Column::Alias.id()),
             ),
+            Self::SnsTopics => columns(
+                &app.sns_state.column_ids,
+                &app.sns_state.visible_column_ids,
+                |id| crate::sns::columns::Column::from_id(id).map(|c| c.name()),
+                None,
+            ),
         };
         let prefs = match self {
             Self::EfsTags
@@ -314,6 +322,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.page_size,
             Self::RdsInstances => app.rds_state.instances.page_size,
             Self::VpcVpcs => app.vpc_state.vpcs.page_size,
+            Self::SnsTopics => app.sns_state.topics.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -350,6 +359,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
             Self::RdsInstances => app.rds_state.instances.set_page_size(size),
             Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
+            Self::SnsTopics => app.sns_state.topics.set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -378,6 +388,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.visible_column_ids_mut(),
             Self::RdsInstances => &mut app.rds_state.visible_column_ids,
             Self::VpcVpcs => &mut app.vpc_state.visible_column_ids,
+            Self::SnsTopics => &mut app.sns_state.visible_column_ids,
             _ => return None,
         })
     }

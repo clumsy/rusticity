@@ -224,7 +224,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         && app.service_selected
         && matches!(
             app.current_service,
-            Service::RdsInstances | Service::VpcVpcs
+            Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
@@ -455,6 +455,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
+        || app.sns_state.topics.loading
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading

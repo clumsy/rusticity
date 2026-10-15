@@ -1,5 +1,6 @@
 use super::{Resource, ResourceKind};
 use crate::config::AwsConfig;
+use crate::sns::SnsTopic;
 use anyhow::Result;
 
 // Per-source bound limits cache size and control-plane reads. UI reports partial results.
@@ -61,6 +62,16 @@ pub(super) async fn fetch(config: &AwsConfig, kind: ResourceKind) -> Result<(Vec
                 region
             )
         ),
+        ResourceKind::Topic => collect!(config.sns_client().list_topics(), topic, {
+            let topic = SnsTopic::from_arn(topic.topic_arn().unwrap_or_default())?;
+            Resource {
+                kind,
+                id: topic.name.clone(),
+                name: topic.name,
+                region: topic.arn.split(':').nth(3).unwrap_or(region).into(),
+                arn: topic.arn,
+            }
+        }),
         ResourceKind::Database => collect!(
             config.rds_client().describe_db_instances(),
             db,

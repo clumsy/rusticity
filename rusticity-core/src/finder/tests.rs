@@ -202,6 +202,25 @@ fn finder_vpc_qualifier_and_ec2_resource_type_are_supported() {
 }
 
 #[test]
+fn finder_sns_qualifier_and_topic_resource_type_are_supported() {
+    let query = SearchQuery::parse("@sns alerts").unwrap();
+    assert_eq!(query.kinds, [ResourceKind::Topic]);
+    assert!(query
+        .index_query("us-east-2")
+        .contains("resourcetype:sns:topic"));
+    let resource = Resource::from_index(
+        "sns:topic",
+        "arn:aws:sns:us-east-2:123456789012:my-topic",
+        "us-east-2",
+    )
+    .unwrap();
+    assert_eq!(resource.kind, ResourceKind::Topic);
+    assert_eq!(resource.kind.service(), "sns");
+    assert_eq!(resource.id, "my-topic");
+    assert_eq!(resource.arn, "arn:aws:sns:us-east-2:123456789012:my-topic");
+}
+
+#[test]
 fn finder_prefix_terms_use_resource_explorer_wildcards_without_quotes() {
     for (input, prefix) in [
         ("@lambda Fsx", "fsx*"),
@@ -237,4 +256,15 @@ fn finder_syntax_bearing_terms_stay_literal_without_standalone_wildcards() {
             format!("{literal} resourcetype:lambda:function region:us-east-1,global")
         );
     }
+}
+
+#[test]
+fn finder_sns_topic_arns_are_openable_but_subscription_arns_remain_references() {
+    let arn = "arn:aws:sns:us-east-1:123456789012:orders.fifo";
+    let topic = Resource::from_arn(arn).unwrap();
+    assert_eq!(topic.kind, ResourceKind::Topic);
+    assert_eq!(topic.id, "orders.fifo");
+    assert_eq!(topic.arn, arn);
+    let subscription = Resource::from_arn(&format!("{arn}:subscription-id")).unwrap();
+    assert_eq!(subscription.kind, ResourceKind::Reference);
 }

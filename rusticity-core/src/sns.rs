@@ -1,8 +1,9 @@
 //! Read-only SNS Topics inventory. ListTopics supplies all three columns;
 //! no per-topic GetTopicAttributes requests are needed.
 use crate::config::AwsConfig;
+use crate::pagination::{Pagination, StopReason};
 use anyhow::{bail, Context, Result};
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 // Fail explicitly at the bound rather than presenting an incomplete inventory.
@@ -63,7 +64,7 @@ impl SnsClient {
         let client = self.config.sns_client();
         let mut topics = Vec::new();
         let mut token = None;
-        let mut seen = HashSet::new();
+        let mut pagination = Pagination::new(max_pages);
         for _ in 0..max_pages {
             // ListTopics has a fixed page size; there is no maxResults parameter.
             let page = client
@@ -79,15 +80,17 @@ impl SnsClient {
                     .context("SNS ListTopics returned a topic with no ARN")?;
                 topics.push(SnsTopic::from_arn(arn)?);
             }
-            let next = page.next_token().filter(|t| !t.is_empty());
-            let Some(next) = next else {
-                topics.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arn.cmp(&b.arn)));
-                return Ok(topics);
-            };
-            if !seen.insert(next.to_owned()) {
-                bail!("SNS ListTopics returned a repeated pagination token; aborting");
+            match pagination.advance(page.next_token) {
+                Ok(Some(next)) => token = Some(next),
+                Ok(None) => {
+                    topics.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arn.cmp(&b.arn)));
+                    return Ok(topics);
+                }
+                Err(StopReason::RepeatedToken) => {
+                    bail!("SNS ListTopics returned a repeated pagination token; aborting");
+                }
+                Err(StopReason::PageLimit | StopReason::ResultLimit) => break,
             }
-            token = Some(next.to_owned());
         }
         bail!("SNS ListTopics exceeded {max_pages} pages; inventory is incomplete")
     }

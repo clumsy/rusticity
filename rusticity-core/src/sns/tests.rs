@@ -280,3 +280,19 @@ async fn requests_only_list_topics_and_sends_returned_continuation_token() {
     assert!(!requests[0].contains("NextToken"));
     assert!(requests[1].contains("NextToken=next-page"));
 }
+
+#[tokio::test]
+async fn final_sns_page_at_bound_is_complete_and_zero_bound_never_requests() {
+    let http = StaticReplayClient::new(vec![
+        ok(page(&[], Some("next"))),
+        ok(page(&["arn:aws:sns:us-east-1:123456789012:topic"], None)),
+    ]);
+    let topics = client(&http).list_topics_inner(2).await.unwrap();
+    assert_eq!(topics.len(), 1);
+    let http = StaticReplayClient::new(vec![]);
+    let error = client(&http).list_topics_inner(0).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "SNS ListTopics exceeded 0 pages; inventory is incomplete"
+    );
+}

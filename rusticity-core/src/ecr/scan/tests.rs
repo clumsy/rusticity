@@ -239,3 +239,44 @@ async fn scan_missing_digest_never_makes_a_request() {
     assert!(client.image_scan_findings("", "digest").await.is_err());
     assert!(requests.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn scan_final_page_at_page_bound_is_complete() {
+    let pages = (0..PAGE_LIMIT)
+        .map(|i| {
+            let token = (i + 1 < PAGE_LIMIT).then(|| format!("page-{i}"));
+            (200, page("COMPLETE", json!([]), token.as_deref()))
+        })
+        .collect();
+    let (client, requests) = client(pages);
+    let report = client.image_scan_findings("repo", "digest").await.unwrap();
+    assert_eq!(requests.lock().unwrap().len(), PAGE_LIMIT);
+    assert!(report.complete());
+    assert!(report.warning.is_none());
+}
+
+#[tokio::test]
+async fn scan_longer_token_cycle_keeps_rows_with_original_warning() {
+    let pages = ["a", "b", "a"]
+        .into_iter()
+        .map(|token| {
+            (
+                200,
+                page(
+                    "COMPLETE",
+                    json!([{"name":"CVE-test","severity":"HIGH"}]),
+                    Some(token),
+                ),
+            )
+        })
+        .collect();
+    let (client, requests) = client(pages);
+    let report = client.image_scan_findings("repo", "digest").await.unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 3);
+    assert_eq!(report.findings.len(), 3);
+    assert_eq!(
+        report.warning.as_deref(),
+        Some("Partial results: repeated pagination token")
+    );
+    assert!(!report.complete());
+}

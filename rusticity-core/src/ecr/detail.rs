@@ -2,6 +2,7 @@
 //! scan and never mutates registry state. Backs the image page's general
 //! metadata, referrers, replication status and managed signing status tabs.
 use super::EcrClient;
+use crate::pagination::{cap_results, Pagination, StopReason};
 use anyhow::{anyhow, ensure, Result};
 use aws_sdk_ecr::error::ProvideErrorMetadata;
 use aws_sdk_ecr::types::ImageIdentifier;
@@ -113,7 +114,7 @@ impl EcrClient {
             warning: None,
         };
         let mut token: Option<String> = None;
-        let mut seen = std::collections::HashSet::new();
+        let mut pagination = Pagination::new(PAGE_LIMIT);
         for page in 0..PAGE_LIMIT {
             let result = timeout_at(
                 deadline,
@@ -146,12 +147,31 @@ impl EcrClient {
                     ("Type".into(), kind),
                 ]);
             }
-            if cap_reached(&mut report, response.next_token.as_deref()) {
+            if cap_results(
+                &mut report.entries,
+                ENTRY_LIMIT,
+                response.next_token.as_deref(),
+            ) {
+                report.warning = Some(format!("Partial results: limited to {ENTRY_LIMIT} entries"));
                 break;
             }
-            match next_token(response.next_token, &mut seen, &mut report, page) {
-                Some(next) => token = Some(next),
-                None => break,
+            match pagination.advance(response.next_token) {
+                Ok(Some(next)) => token = Some(next),
+                Ok(None) => break,
+                Err(reason) => {
+                    report.warning = Some(match reason {
+                        StopReason::RepeatedToken => {
+                            "Partial results: repeated pagination token".into()
+                        }
+                        StopReason::ResultLimit => {
+                            format!("Partial results: limited to {ENTRY_LIMIT} entries")
+                        }
+                        StopReason::PageLimit => {
+                            format!("Partial results: stopped after {PAGE_LIMIT} pages")
+                        }
+                    });
+                    break;
+                }
             }
         }
         Ok(report)
@@ -330,39 +350,6 @@ where
             None
         }
     }
-}
-
-/// True when the entry cap is hit; truncates and records a warning. Keeping one
-/// extra entry (via the strict `>`) and the live token lets exactly-at-limit be
-/// told apart from truncated.
-fn cap_reached(report: &mut DetailReport, next_token: Option<&str>) -> bool {
-    let has_more = next_token.map(|t| !t.is_empty()).unwrap_or(false);
-    if report.entries.len() > ENTRY_LIMIT || (report.entries.len() == ENTRY_LIMIT && has_more) {
-        report.entries.truncate(ENTRY_LIMIT);
-        report.warning = Some(format!("Partial results: limited to {ENTRY_LIMIT} entries"));
-        return true;
-    }
-    false
-}
-
-/// Resolve the next pagination token, stopping (returns None) on an empty
-/// token, a repeated token, or the final allowed page.
-fn next_token(
-    token: Option<String>,
-    seen: &mut std::collections::HashSet<String>,
-    report: &mut DetailReport,
-    page: usize,
-) -> Option<String> {
-    let next = token.filter(|t| !t.is_empty())?;
-    if !seen.insert(next.clone()) {
-        report.warning = Some("Partial results: repeated pagination token".into());
-        return None;
-    }
-    if page + 1 == PAGE_LIMIT {
-        report.warning = Some(format!("Partial results: stopped after {PAGE_LIMIT} pages"));
-        return None;
-    }
-    Some(next)
 }
 
 fn service<E>(error: E) -> String

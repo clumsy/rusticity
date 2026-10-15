@@ -14,6 +14,7 @@ pub mod iam;
 pub mod kms;
 pub mod lambda;
 pub mod metrics;
+mod pagination;
 pub mod rds;
 pub mod related;
 pub mod s3;

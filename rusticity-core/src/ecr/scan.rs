@@ -1,8 +1,9 @@
 //! Read existing private ECR scan results by immutable image digest. Never starts a scan.
 use super::EcrClient;
+use crate::pagination::{cap_results, Pagination, StopReason};
 use anyhow::{anyhow, ensure, Result};
 use aws_sdk_ecr::types::{EnhancedImageScanFinding, ImageIdentifier, ImageScanFinding};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use tokio::time::{timeout_at, Duration, Instant};
 
 pub const FINDING_LIMIT: usize = 1_000;
@@ -48,7 +49,7 @@ impl EcrClient {
         let client = self.config.ecr_client();
         let mut report = ScanReport::default();
         let mut token = None;
-        let mut seen = HashSet::new();
+        let mut pagination = Pagination::new(PAGE_LIMIT);
         let deadline = Instant::now() + TIMEOUT;
         for page in 0..PAGE_LIMIT {
             let result = timeout_at(
@@ -124,23 +125,33 @@ impl EcrClient {
                 report.warning = Some("Scan findings payload unavailable; refresh to retry".into());
                 break;
             }
-            token = response.next_token.filter(|token| !token.is_empty());
-            if report.findings.len() > FINDING_LIMIT
-                || (report.findings.len() == FINDING_LIMIT && token.is_some())
-            {
-                report.findings.truncate(FINDING_LIMIT);
+            if cap_results(
+                &mut report.findings,
+                FINDING_LIMIT,
+                response.next_token.as_deref(),
+            ) {
                 report.warning = Some(format!(
                     "Partial results: limited to {FINDING_LIMIT} findings"
                 ));
                 break;
             }
-            let Some(next) = token.as_ref() else { break };
-            if !seen.insert(next.clone()) {
-                report.warning = Some("Partial results: repeated pagination token".into());
-                break;
-            }
-            if page + 1 == PAGE_LIMIT {
-                report.warning = Some(format!("Partial results: stopped after {PAGE_LIMIT} pages"));
+            match pagination.advance(response.next_token) {
+                Ok(Some(next)) => token = Some(next),
+                Ok(None) => break,
+                Err(reason) => {
+                    report.warning = Some(match reason {
+                        StopReason::RepeatedToken => {
+                            "Partial results: repeated pagination token".into()
+                        }
+                        StopReason::ResultLimit => {
+                            format!("Partial results: limited to {FINDING_LIMIT} findings")
+                        }
+                        StopReason::PageLimit => {
+                            format!("Partial results: stopped after {PAGE_LIMIT} pages")
+                        }
+                    });
+                    break;
+                }
             }
         }
         report.findings.sort_by(|a, b| {

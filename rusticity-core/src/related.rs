@@ -17,11 +17,11 @@
 //! Unsupported source kinds produce a `Warning`, not a silent empty result.
 use crate::config::AwsConfig;
 use crate::finder::{Resource, ResourceKind, SearchUpdate, RESULT_LIMIT};
+use crate::pagination::{Pagination, StopReason};
 use anyhow::{anyhow, Result};
 use aws_sdk_sqs::types::QueueAttributeName;
 use futures::{stream, StreamExt};
 use serde_json::Value;
-use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -315,26 +315,31 @@ fn network_interface_arn(config: &AwsConfig, id: &str) -> Option<Resource> {
 
 // ── Pagination helpers ─────────────────────────────────────────────────────────
 
-fn is_repeated_token(seen: &mut HashSet<String>, token: &Option<String>) -> bool {
-    match token {
-        Some(t) => {
-            if seen.contains(t) {
-                return true;
-            }
-            seen.insert(t.clone());
-            false
+/// Report stream truncation without changing the already-emitted rows. All
+/// paginated related resolvers share this adapter and the core continuation guard.
+async fn next_related_page(
+    pagination: &mut Pagination,
+    next: Option<String>,
+    count: usize,
+    tx: &mpsc::Sender<SearchUpdate>,
+) -> Result<Option<String>, ()> {
+    match pagination.advance_streamed(next, count) {
+        Ok(next) => Ok(next),
+        Err(reason) => {
+            let warning = match reason {
+                StopReason::RepeatedToken => {
+                    "Repeated pagination token; related results are incomplete".into()
+                }
+                StopReason::ResultLimit => {
+                    format!("Pagination capped at {RESULT_LIMIT} results (may be incomplete)")
+                }
+                StopReason::PageLimit => {
+                    "Pagination page limit reached; related results are incomplete".into()
+                }
+            };
+            let _ = tx.send(SearchUpdate::Warning(warning)).await;
+            Err(())
         }
-        None => false,
-    }
-}
-
-fn cap_warning(count: usize) -> Option<String> {
-    if count >= RESULT_LIMIT {
-        Some(format!(
-            "Pagination capped at {RESULT_LIMIT} results (may be incomplete)"
-        ))
-    } else {
-        None
     }
 }
 
@@ -545,7 +550,7 @@ async fn lambda_event_sources_inner(
 ) -> Result<bool> {
     let client = config.lambda_client();
     let mut marker: Option<String> = None;
-    let mut seen = HashSet::new();
+    let mut pagination = Pagination::streaming(RESULT_LIMIT);
     let mut count = 0;
     let mut limited = false;
     loop {
@@ -566,26 +571,14 @@ async fn lambda_event_sources_inner(
             count += 1;
         }
         let next = resp.next_marker().map(str::to_owned);
-        if next.is_none() {
-            break;
-        }
-        if is_repeated_token(&mut seen, &next) {
-            let _ = tx
-                .send(SearchUpdate::Warning(
-                    "Repeated pagination token; related results are incomplete".into(),
-                ))
-                .await;
-            limited = true;
-            break;
-        }
-        if count >= RESULT_LIMIT {
-            limited = true;
-            if let Some(w) = cap_warning(count) {
-                let _ = tx.send(SearchUpdate::Warning(w)).await;
+        match next_related_page(&mut pagination, next, count, &tx).await {
+            Ok(Some(next)) => marker = Some(next),
+            Ok(None) => break,
+            Err(()) => {
+                limited = true;
+                break;
             }
-            break;
         }
-        marker = next;
     }
     Ok(limited)
 }
@@ -663,7 +656,7 @@ async fn sqs_attributes_inner(
     }
     let client = config.lambda_client();
     let mut marker: Option<String> = None;
-    let mut seen = HashSet::new();
+    let mut pagination = Pagination::streaming(RESULT_LIMIT);
     let mut count = 0;
     let mut limited = partial;
     loop {
@@ -684,26 +677,14 @@ async fn sqs_attributes_inner(
             count += 1;
         }
         let next = resp.next_marker().map(str::to_owned);
-        if next.is_none() {
-            break;
-        }
-        if is_repeated_token(&mut seen, &next) {
-            let _ = tx
-                .send(SearchUpdate::Warning(
-                    "Repeated pagination token; related results are incomplete".into(),
-                ))
-                .await;
-            limited = true;
-            break;
-        }
-        if count >= RESULT_LIMIT {
-            limited = true;
-            if let Some(w) = cap_warning(count) {
-                let _ = tx.send(SearchUpdate::Warning(w)).await;
+        match next_related_page(&mut pagination, next, count, &tx).await {
+            Ok(Some(next)) => marker = Some(next),
+            Ok(None) => break,
+            Err(()) => {
+                limited = true;
+                break;
             }
-            break;
         }
-        marker = next;
     }
     Ok(limited)
 }
@@ -810,7 +791,7 @@ async fn cfn_stack_resources_inner(
 ) -> Result<bool> {
     let client = config.cloudformation_client();
     let mut token: Option<String> = None;
-    let mut seen = HashSet::new();
+    let mut pagination = Pagination::streaming(RESULT_LIMIT);
     let mut count = 0;
     let mut limited = false;
     loop {
@@ -832,26 +813,14 @@ async fn cfn_stack_resources_inner(
             count += 1;
         }
         let next = resp.next_token().map(str::to_owned);
-        if next.is_none() {
-            break;
-        }
-        if is_repeated_token(&mut seen, &next) {
-            let _ = tx
-                .send(SearchUpdate::Warning(
-                    "Repeated pagination token; related results are incomplete".into(),
-                ))
-                .await;
-            limited = true;
-            break;
-        }
-        if count >= RESULT_LIMIT {
-            limited = true;
-            if let Some(w) = cap_warning(count) {
-                let _ = tx.send(SearchUpdate::Warning(w)).await;
+        match next_related_page(&mut pagination, next, count, &tx).await {
+            Ok(Some(next)) => token = Some(next),
+            Ok(None) => break,
+            Err(()) => {
+                limited = true;
+                break;
             }
-            break;
         }
-        token = next;
     }
     Ok(limited)
 }

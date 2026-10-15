@@ -440,3 +440,42 @@ async fn signing_missing_scope_never_requests() {
     assert!(client.image_signing("", "sha256:x").await.is_err());
     assert!(requests.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn referrers_page_bound_keeps_partial_rows_but_allows_the_final_page() {
+    for has_more in [false, true] {
+        let pages = (0..PAGE_LIMIT).map(|i| {
+            let token = if i + 1 < PAGE_LIMIT || has_more { Some(format!("page-{i}")) } else { None };
+            (200, json!({"referrers":[{"digest":format!("sha256:{i}"),"mediaType":"test","size":1}],"nextToken":token}))
+        }).collect();
+        let (client, requests) = client("ListImageReferrers", pages);
+        let report = client
+            .image_referrers("repo", "sha256:subject")
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), PAGE_LIMIT);
+        assert_eq!(report.entries.len(), PAGE_LIMIT);
+        assert_eq!(
+            report.warning,
+            has_more.then(|| format!("Partial results: stopped after {PAGE_LIMIT} pages"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn referrers_longer_token_cycle_keeps_rows_with_original_warning() {
+    let pages = ["a", "b", "a"].into_iter().map(|token| {
+        (200, json!({"referrers":[{"digest":"sha256:row","mediaType":"test","size":1}],"nextToken":token}))
+    }).collect();
+    let (client, requests) = client("ListImageReferrers", pages);
+    let report = client
+        .image_referrers("repo", "sha256:subject")
+        .await
+        .unwrap();
+    assert_eq!(report.entries.len(), 3);
+    assert_eq!(requests.lock().unwrap().len(), 3);
+    assert_eq!(
+        report.warning.as_deref(),
+        Some("Partial results: repeated pagination token")
+    );
+}

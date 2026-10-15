@@ -15,6 +15,7 @@ pub mod kms;
 pub mod lambda;
 pub mod metrics;
 pub mod rds;
+pub mod related;
 pub mod s3;
 pub mod sqs;
 pub mod types;

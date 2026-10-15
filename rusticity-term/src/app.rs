@@ -1056,7 +1056,7 @@ impl App {
             return;
         }
         match action {
-            Action::Noop | Action::OpenResourceFinder => {}
+            Action::Noop | Action::OpenResourceFinder | Action::OpenRelatedResources => {}
             Action::EnterFilterMode => match self.mode {
                 Mode::ServicePicker => self.service_picker.filter_active = true,
                 Mode::RegionPicker => self.region_filter_active = true,

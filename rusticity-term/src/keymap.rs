@@ -33,6 +33,9 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenInConsole)
             }
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::CONTROL => {
+                Some(Action::OpenRelatedResources)
+            }
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Refresh),
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::PageUp)
@@ -303,6 +306,7 @@ pub enum Action {
     CloseMenu,
     OpenServicePicker,
     OpenResourceFinder,
+    OpenRelatedResources,
     OpenCloudWatch,
     OpenCloudWatchSplit,
     OpenCloudWatchAlarms,

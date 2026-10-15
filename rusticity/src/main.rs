@@ -94,7 +94,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // loaders in the main action path. Only Enter opens a resource.
                         if app.mode == Mode::ResourceFinder {
                             if let Some(action) = handle_key(key, app.mode) { app.handle_action(action); }
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if clipboard.flush(&mut app.clipboard, frame.buffer) {
+                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            }
                             if let Some(resource) = app.resource_finder.pending_open.take() {
                                 if let Err(error) = finder::navigation::open_resource(&mut app, resource).await {
                                     app.error_message = Some(format!("Failed to open resource: {error:#}"));

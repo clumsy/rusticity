@@ -4,9 +4,11 @@ use crate::keymap::Mode;
 use crate::ui;
 use anyhow::{bail, Result};
 use rusticity_core::finder::{Resource, ResourceKind};
+use rusticity_core::LogGroup;
 
 pub fn service(kind: ResourceKind) -> Service {
     match kind {
+        ResourceKind::Reference => unreachable!("unsupported references have no service view"),
         ResourceKind::Api => Service::ApiGatewayApis,
         ResourceKind::Stack => Service::CloudFormationStacks,
         ResourceKind::Alarm => Service::CloudWatchAlarms,
@@ -28,9 +30,22 @@ pub fn service(kind: ResourceKind) -> Service {
     }
 }
 
-pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
+pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -> Result<()> {
+    if resource.kind == ResourceKind::Reference {
+        bail!("This resource type has no Rusticity view yet");
+    }
+    if let Some(account) = resource
+        .arn
+        .split(':')
+        .nth(4)
+        .filter(|account| !account.is_empty())
+    {
+        if !config.account_id.is_empty() && account != config.account_id {
+            bail!("Resource is in account {account}; switch profile before opening it");
+        }
+    }
     // The finder never silently switches credentials or the regional client set.
-    if resource.region != app.config.region
+    if resource.region != config.region
         && resource.region != "global"
         && !resource.region.is_empty()
         && !matches!(
@@ -43,7 +58,11 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
             resource.region
         );
     }
-    let target = service(resource.kind);
+    Ok(())
+}
+
+fn start_resource_view(app: &mut App, kind: ResourceKind) {
+    let target = service(kind);
     app.current_service = target;
     app.service_selected = true;
     app.view_mode = ViewMode::List;
@@ -55,6 +74,34 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
         breadcrumb: target.name().into(),
     });
     app.current_tab = app.tabs.len() - 1;
+}
+
+fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -> Result<()> {
+    // Resolve errors before changing tabs, selection, or the current service.
+    let group = lookup?
+        .filter(|group| group.name == name)
+        .ok_or_else(|| anyhow::anyhow!("Log group not found or not visible: {name}"))?;
+    let page_size = app.log_groups_state.log_groups.page_size;
+    let stream_page_size = app.log_groups_state.stream_page_size;
+    let mut state = ui::cw::logs::CloudWatchLogGroupsState::new();
+    state.log_groups.page_size = page_size;
+    state.stream_page_size = stream_page_size;
+    state.log_groups.items = vec![group];
+    state.log_groups.filter = name.into();
+    state.exact_match = true;
+    app.log_groups_state = state;
+    start_resource_view(app, ResourceKind::LogGroup);
+    app.tabs[app.current_tab].breadcrumb = app.breadcrumbs();
+    Ok(())
+}
+
+pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
+    validate_scope(&app.config, &resource)?;
+    if resource.kind == ResourceKind::LogGroup {
+        let lookup = app.cloudwatch_client.get_log_group(&resource.id).await;
+        return open_log_group(app, &resource.id, lookup);
+    }
+    start_resource_view(app, resource.kind);
     // No search filter is reused accidentally from an older visit to this service.
     macro_rules! focus {
         ($table:expr, $field:ident) => {{
@@ -80,6 +127,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
         }};
     }
     match resource.kind {
+        ResourceKind::Reference => unreachable!("scope validation rejects unsupported references"),
         ResourceKind::Table => {
             app.dynamodb_state = ui::dynamodb::State::new();
             app.load_dynamodb_tables().await?;
@@ -232,10 +280,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
             focus!(app.iam_state.groups, group_name);
         }
         ResourceKind::LogGroup => {
-            app.log_groups_state.exact_match = true;
-            app.load_log_groups().await?;
-            focus!(app.log_groups_state.log_groups, name);
-            app.log_groups_state.log_groups.selected = 0;
+            unreachable!("exact log-group lookup is handled before opening a view")
         }
         ResourceKind::Alarm => {
             app.alarms_state.current_alarm = None;
@@ -246,4 +291,92 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
     }
     app.tabs[app.current_tab].breadcrumb = app.breadcrumbs();
     Ok(())
+}
+
+#[cfg(test)]
+mod log_group_navigation_tests {
+    use super::*;
+    use crate::common::PageSize;
+
+    fn group(name: &str) -> LogGroup {
+        LogGroup {
+            name: name.into(),
+            creation_time: None,
+            stored_bytes: Some(13529),
+            retention_days: Some(30),
+            log_class: Some("STANDARD".into()),
+            arn: None,
+            log_group_arn: None,
+            deletion_protection_enabled: Some(true),
+        }
+    }
+
+    #[test]
+    fn linked_log_group_outside_first_fifty_rows_opens_exact_target() {
+        let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
+        app.current_service = Service::LambdaFunctions;
+        app.service_selected = true;
+        app.mode = Mode::ResourceFinder;
+        app.log_groups_state.log_groups.items = (0..50)
+            .map(|i| group(&format!("/aws/earlier/{i}")))
+            .collect();
+        app.log_groups_state.log_groups.selected = 49;
+        app.log_groups_state.log_groups.scroll_offset = 40;
+        app.log_groups_state.log_groups.expanded_item = Some(49);
+        app.log_groups_state.log_groups.page_size = PageSize::TwentyFive;
+        app.log_groups_state.stream_filter = "previous-stream".into();
+        app.log_groups_state.stream_page_size = 10;
+        app.log_groups_state.loading = true;
+        app.page_input = "9".into();
+        let tabs = app.tabs.len();
+        let name = "/aws/lambda/GrantFn";
+        open_log_group(&mut app, name, Ok(Some(group(name)))).unwrap();
+        assert_eq!(app.current_service, Service::CloudWatchLogGroups);
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.view_mode, ViewMode::List);
+        assert_eq!(app.tabs.len(), tabs + 1);
+        assert_eq!(app.log_groups_state.log_groups.selected, 0);
+        assert_eq!(app.log_groups_state.log_groups.scroll_offset, 0);
+        assert_eq!(app.log_groups_state.log_groups.expanded_item, None);
+        assert_eq!(
+            app.log_groups_state.log_groups.page_size,
+            PageSize::TwentyFive
+        );
+        assert_eq!(app.log_groups_state.stream_page_size, 10);
+        assert!(app.page_input.is_empty());
+        assert!(app.log_groups_state.exact_match);
+        assert!(app.log_groups_state.stream_filter.is_empty());
+        assert!(!app.log_groups_state.loading);
+        let rows = ui::cw::logs::filtered_log_groups(&app);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, name);
+        assert_eq!(rows[0].stored_bytes, Some(13529));
+    }
+
+    #[test]
+    fn failed_log_group_lookup_preserves_the_original_view_and_tabs() {
+        for lookup in [
+            Ok(None),
+            Err(anyhow::anyhow!("AccessDenied")),
+            Ok(Some(group("/aws/lambda/GrantFn-other"))),
+        ] {
+            let mut app = App::new_without_client("test".into(), None);
+            app.current_service = Service::LambdaFunctions;
+            app.service_selected = true;
+            app.mode = Mode::ResourceFinder;
+            app.log_groups_state.log_groups.items = vec![group("old")];
+            app.log_groups_state.log_groups.filter = "old-filter".into();
+            app.page_input = "2".into();
+            let tabs = app.tabs.len();
+            let current_tab = app.current_tab;
+            assert!(open_log_group(&mut app, "/aws/lambda/GrantFn", lookup).is_err());
+            assert_eq!(app.current_service, Service::LambdaFunctions);
+            assert_eq!(app.mode, Mode::ResourceFinder);
+            assert_eq!(app.tabs.len(), tabs);
+            assert_eq!(app.current_tab, current_tab);
+            assert_eq!(app.log_groups_state.log_groups.items[0].name, "old");
+            assert_eq!(app.log_groups_state.log_groups.filter, "old-filter");
+            assert_eq!(app.page_input, "2");
+        }
+    }
 }

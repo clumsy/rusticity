@@ -32,24 +32,24 @@ impl CloudWatchClient {
     pub async fn list_log_groups(&self) -> Result<Vec<LogGroup>> {
         let resp = self.client.describe_log_groups().send().await?;
 
-        let groups = resp
+        Ok(resp.log_groups().iter().map(log_group).collect())
+    }
+
+    /// Resolve a known name without depending on the first inventory page.
+    /// Identifiers are exact names and retain all DescribeLogGroups metadata.
+    pub async fn get_log_group(&self, name: &str) -> Result<Option<LogGroup>> {
+        anyhow::ensure!(!name.is_empty(), "Log group name must not be empty");
+        let response = self
+            .client
+            .describe_log_groups()
+            .log_group_identifiers(name)
+            .send()
+            .await?;
+        Ok(response
             .log_groups()
             .iter()
-            .map(|g| LogGroup {
-                name: g.log_group_name().unwrap_or("").to_string(),
-                creation_time: g
-                    .creation_time()
-                    .map(|t| DateTime::from_timestamp_millis(t).unwrap_or_default()),
-                stored_bytes: g.stored_bytes(),
-                retention_days: g.retention_in_days(),
-                log_class: g.log_group_class().map(|c| c.as_str().to_string()),
-                arn: g.arn().map(|a| a.to_string()),
-                log_group_arn: g.log_group_arn().map(|a| a.to_string()),
-                deletion_protection_enabled: g.deletion_protection_enabled(),
-            })
-            .collect();
-
-        Ok(groups)
+            .find(|group| group.log_group_name() == Some(name))
+            .map(log_group))
     }
 
     pub async fn list_log_streams(&self, log_group: &str) -> Result<Vec<LogStream>> {
@@ -215,5 +215,20 @@ impl CloudWatchClient {
         };
 
         Ok(tags)
+    }
+}
+
+fn log_group(group: &aws_sdk_cloudwatchlogs::types::LogGroup) -> LogGroup {
+    LogGroup {
+        name: group.log_group_name().unwrap_or_default().into(),
+        creation_time: group
+            .creation_time()
+            .map(|time| DateTime::from_timestamp_millis(time).unwrap_or_default()),
+        stored_bytes: group.stored_bytes(),
+        retention_days: group.retention_in_days(),
+        log_class: group.log_group_class().map(|class| class.as_str().into()),
+        arn: group.arn().map(str::to_owned),
+        log_group_arn: group.log_group_arn().map(str::to_owned),
+        deletion_protection_enabled: group.deletion_protection_enabled(),
     }
 }

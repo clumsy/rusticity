@@ -396,7 +396,9 @@ pub fn prev_filter_focus(app: &mut App) {
 }
 
 pub fn filter_char_allowed(app: &App) -> bool {
-    if app.lambda_state.current_version.is_some()
+    if app.lambda_state.current_function.is_none() {
+        app.lambda_state.input_focus == InputFocus::Filter
+    } else if app.lambda_state.current_version.is_some()
         && app.lambda_state.detail_tab == LambdaDetailTab::Configuration
     {
         app.lambda_state.alias_input_focus == InputFocus::Filter
@@ -620,5 +622,111 @@ pub fn get_active_filter_mut(app: &mut App) -> Option<&mut String> {
         Some(&mut app.lambda_state.alias_table.filter)
     } else {
         Some(&mut app.lambda_state.table.filter)
+    }
+}
+
+#[cfg(test)]
+mod filter_input_regressions {
+    use super::*;
+    use crate::app::Service;
+    use crate::keymap::{handle_key, Action};
+    use crate::lambda::Function;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn press(app: &mut App, code: KeyCode) {
+        let action = handle_key(KeyEvent::new(code, KeyModifiers::NONE), app.mode).unwrap();
+        app.handle_action(action);
+    }
+
+    fn function(name: &str) -> Function {
+        Function {
+            name: name.into(),
+            arn: String::new(),
+            application: None,
+            description: String::new(),
+            package_type: "Zip".into(),
+            runtime: String::new(),
+            architecture: String::new(),
+            code_size: 0,
+            code_sha256: String::new(),
+            memory_mb: 128,
+            timeout_seconds: 30,
+            last_modified: String::new(),
+            layers: vec![],
+        }
+    }
+
+    #[test]
+    fn lambda_list_filter_accepts_typing_and_backspace_through_keymap() {
+        let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
+        app.current_service = Service::LambdaFunctions;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.lambda_state.table.items = vec![
+            function("BETA-GrafanaWorkspace-Provisioner"),
+            function("BETA-SagemakerHyperpodEks-FsxDraKmsGrantGrantFnDEE-test"),
+        ];
+        app.lambda_state.table.selected = 1;
+        app.lambda_state.table.scroll_offset = 50;
+        app.lambda_state.table.expanded_item = Some(1);
+        app.lambda_state.input_focus = InputFocus::Pagination;
+        press(&mut app, KeyCode::Char('i'));
+        assert_eq!(app.mode, Mode::FilterInput);
+        assert_eq!(app.lambda_state.input_focus, InputFocus::Filter);
+        for c in "Fsx".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.lambda_state.table.filter, "Fsx");
+        assert_eq!(filtered_lambda_functions(&app).len(), 1);
+        assert!(filtered_lambda_functions(&app)[0]
+            .name
+            .contains("FsxDraKmsGrant"));
+        assert_eq!(app.lambda_state.table.selected, 0);
+        assert_eq!(app.lambda_state.table.scroll_offset, 0);
+        assert_eq!(app.lambda_state.table.expanded_item, None);
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.lambda_state.table.filter, "Fs");
+        app.handle_action(Action::DeleteWord);
+        assert!(app.lambda_state.table.filter.is_empty());
+        assert_eq!(filtered_lambda_functions(&app).len(), 2);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn lambda_list_pagination_focus_does_not_accept_filter_text() {
+        let mut app = App::new_without_client("test".into(), None);
+        app.current_service = Service::LambdaFunctions;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        press(&mut app, KeyCode::Char('i'));
+        press(&mut app, KeyCode::Char('F'));
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.lambda_state.input_focus, InputFocus::Pagination);
+        press(&mut app, KeyCode::Char('s'));
+        press(&mut app, KeyCode::Char('2'));
+        assert_eq!(app.lambda_state.table.filter, "F");
+        assert_eq!(app.page_input, "2");
+        press(&mut app, KeyCode::BackTab);
+        press(&mut app, KeyCode::Char('s'));
+        assert_eq!(app.lambda_state.table.filter, "Fs");
+    }
+
+    #[test]
+    fn lambda_detail_filter_permission_stays_scoped_to_version_and_alias_controls() {
+        let mut app = App::new_without_client("test".into(), None);
+        app.lambda_state.current_function = Some("fn".into());
+        for tab in [LambdaDetailTab::Versions, LambdaDetailTab::Aliases] {
+            app.lambda_state.detail_tab = tab;
+            app.lambda_state.version_input_focus = InputFocus::Filter;
+            app.lambda_state.alias_input_focus = InputFocus::Filter;
+            assert!(filter_char_allowed(&app));
+            app.lambda_state.version_input_focus = InputFocus::Pagination;
+            app.lambda_state.alias_input_focus = InputFocus::Pagination;
+            assert!(!filter_char_allowed(&app));
+        }
+        app.lambda_state.detail_tab = LambdaDetailTab::Code;
+        app.lambda_state.input_focus = InputFocus::Filter;
+        assert!(!filter_char_allowed(&app));
     }
 }

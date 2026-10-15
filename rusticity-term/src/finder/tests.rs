@@ -410,3 +410,233 @@ fn finder_refresh_keeps_focus_and_escape_cancels_from_either_pane() {
         assert!(app.resource_finder.pending_open.is_none());
     }
 }
+
+fn related_app() -> App {
+    let mut app = app();
+    app.current_service = Service::SqsQueues;
+    app.service_selected = true;
+    app.mode = Mode::Normal;
+    app.sqs_state.current_queue = Some("orders".into());
+    app.sqs_state.queues.items.push(crate::sqs::queue::Queue {
+        name: "orders".into(),
+        url: String::new(),
+        queue_type: String::new(),
+        created_timestamp: String::new(),
+        messages_available: String::new(),
+        messages_in_flight: String::new(),
+        encryption: String::new(),
+        content_based_deduplication: String::new(),
+        last_modified_timestamp: String::new(),
+        visibility_timeout: String::new(),
+        message_retention_period: String::new(),
+        maximum_message_size: String::new(),
+        delivery_delay: String::new(),
+        receive_message_wait_time: String::new(),
+        high_throughput_fifo: String::new(),
+        deduplication_scope: String::new(),
+        fifo_throughput_limit: String::new(),
+        dead_letter_queue: String::new(),
+        messages_delayed: String::new(),
+        redrive_allow_policy: String::new(),
+        redrive_policy: String::new(),
+        redrive_task_id: String::new(),
+        redrive_task_start_time: String::new(),
+        redrive_task_status: String::new(),
+        redrive_task_percent: String::new(),
+        redrive_task_destination: String::new(),
+    });
+    open_related(&mut app);
+    app
+}
+
+#[test]
+fn related_shortcut_preserves_refresh_and_region_latency_bindings() {
+    let key = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+    assert_eq!(
+        handle_key(key, Mode::Normal),
+        Some(Action::OpenRelatedResources)
+    );
+    assert_eq!(
+        handle_key(key, Mode::RegionPicker),
+        Some(Action::MeasureLatency)
+    );
+    assert_eq!(
+        handle_key(
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            Mode::Normal
+        ),
+        Some(Action::Refresh)
+    );
+    assert_eq!(
+        handle_key(
+            KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+            Mode::Normal
+        ),
+        None
+    );
+    let mut empty = app();
+    let mode = empty.mode;
+    empty.handle_action(Action::OpenRelatedResources);
+    assert_eq!(empty.mode, mode);
+    let app = related_app();
+    assert_eq!(app.mode, Mode::ResourceFinder);
+    assert_eq!(
+        app.resource_finder.related_source.as_ref().unwrap().id,
+        "orders"
+    );
+    let text = screen(&app);
+    assert!(text.contains("Related to: orders"));
+    assert!(text.contains("Filter linked resources"));
+    assert!(!text.contains("Type at least"));
+}
+
+#[test]
+fn related_filter_is_local_includes_all_rows_and_restores_hidden_matches() {
+    let mut app = related_app();
+    let generation = app.resource_finder.generation;
+    app.resource_finder.started = true;
+    app.resource_finder.searching = true;
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Results(vec![
+            resource(ResourceKind::Queue, "dead-orders"),
+            resource(ResourceKind::Function, "worker"),
+        ]),
+    );
+    assert_eq!(app.resource_finder.rows.len(), 2);
+    for c in "@lambda w".chars() {
+        app.handle_action(Action::FilterInput(c));
+    }
+    assert_eq!(app.resource_finder.rows.len(), 1);
+    assert_eq!(app.resource_finder.rows[0].id, "worker");
+    assert_eq!(app.resource_finder.generation, generation);
+    assert!(
+        app.resource_finder.searching,
+        "typing must not cancel discovery"
+    );
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Results(vec![resource(ResourceKind::Function, "writer")]),
+    );
+    assert_eq!(app.resource_finder.rows.len(), 2);
+    for _ in 0.."@lambda w".len() {
+        app.handle_action(Action::FilterBackspace);
+    }
+    assert_eq!(app.resource_finder.rows.len(), 3);
+    app.handle_action(Action::Select);
+    app.handle_action(Action::NextItem);
+    app.handle_action(Action::Select);
+    assert_eq!(
+        app.resource_finder.pending_open.as_ref().unwrap().id,
+        "worker"
+    );
+    assert!(app.resource_finder.opening);
+}
+
+#[test]
+fn related_cache_refresh_and_finder_mode_do_not_mix_results() {
+    let mut app = related_app();
+    let generation = app.resource_finder.generation;
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Results(vec![resource(ResourceKind::Function, "worker")]),
+    );
+    app.resource_finder
+        .accept(generation, SearchUpdate::Finished { limited: false });
+    app.handle_action(Action::CloseMenu);
+    open_related(&mut app);
+    assert_eq!(app.resource_finder.rows.len(), 1);
+    assert!(app.resource_finder.started);
+    assert!(app.resource_finder.message().contains("cache"));
+    app.handle_action(Action::Refresh);
+    assert!(app.resource_finder.rows.is_empty());
+    assert!(!app.resource_finder.started);
+    assert!(app.resource_finder.related_cache.is_empty());
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Results(vec![resource(ResourceKind::Function, "stale")]),
+    );
+    assert!(app.resource_finder.rows.is_empty());
+    open(&mut app);
+    assert!(app.resource_finder.related_source.is_none());
+    assert!(app.resource_finder.rows.is_empty());
+    assert!(app.resource_finder.input.is_empty());
+}
+
+#[test]
+fn related_partial_results_are_not_cached_and_keep_warnings_during_filtering() {
+    let mut app = related_app();
+    let generation = app.resource_finder.generation;
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Warning("AccessDenied for event sources".into()),
+    );
+    app.resource_finder
+        .accept(generation, SearchUpdate::Finished { limited: true });
+    app.handle_action(Action::FilterInput('w'));
+    assert!(app.resource_finder.message().contains("AccessDenied"));
+    assert!(app.resource_finder.related_cache.is_empty());
+    assert!(app.resource_finder.limited);
+}
+
+#[test]
+fn related_unknown_and_foreign_resources_stay_visible_but_do_not_open_wrong_inventory() {
+    let mut app = related_app();
+    app.config.account_id = "123456789012".into();
+    let reference =
+        Resource::from_arn("arn:aws:ec2:us-east-2:123456789012:subnet/subnet-1").unwrap();
+    let foreign =
+        Resource::from_arn("arn:aws:lambda:us-east-2:999999999999:function:foreign").unwrap();
+    let generation = app.resource_finder.generation;
+    app.resource_finder.accept(
+        generation,
+        SearchUpdate::Results(vec![reference.clone(), foreign]),
+    );
+    app.handle_action(Action::Select);
+    app.handle_action(Action::Select);
+    assert!(app.resource_finder.pending_open.is_none());
+    assert!(app.resource_finder.message().contains("no Rusticity view"));
+    app.handle_action(Action::FilterInput('y'));
+    app.handle_action(Action::NextItem);
+    app.handle_action(Action::Select);
+    assert!(app.resource_finder.pending_open.is_none());
+    assert!(app.resource_finder.message().contains("switch profile"));
+    assert_eq!(app.current_service, Service::SqsQueues);
+    assert_eq!(app.resource_finder.rows.len(), 2);
+    assert!(screen(&app).contains("Not supported"));
+}
+
+#[tokio::test]
+async fn related_starts_without_minimum_query_and_cancels_on_escape_or_scope_change() {
+    let mut app = related_app();
+    // A source with no resolver finishes without a network call.
+    app.resource_finder.related_source.as_mut().unwrap().kind = ResourceKind::Bucket;
+    poll(&mut app);
+    assert!(app.resource_finder.started);
+    assert!(app.resource_finder.running.is_some());
+    app.handle_action(Action::CloseMenu);
+    assert!(app.resource_finder.running.is_none());
+    assert_eq!(app.sqs_state.current_queue.as_deref(), Some("orders"));
+    open_related(&mut app);
+    app.profile = "another-account".into();
+    poll(&mut app);
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.resource_finder.related_source.is_none());
+    assert!(app.resource_finder.related_cache.is_empty());
+}
+
+#[test]
+fn related_identity_includes_account_and_invalid_filter_can_recover() {
+    let mut app = related_app();
+    let a = Resource::from_arn("arn:aws:lambda:us-east-2:123456789012:function:worker").unwrap();
+    let b = Resource::from_arn("arn:aws:lambda:us-east-2:999999999999:function:worker").unwrap();
+    let generation = app.resource_finder.generation;
+    app.resource_finder
+        .accept(generation, SearchUpdate::Results(vec![a.clone(), a, b]));
+    assert_eq!(app.resource_finder.rows.len(), 2);
+    app.handle_action(Action::FilterInput('@'));
+    assert!(app.resource_finder.rows.is_empty());
+    assert!(app.resource_finder.message().contains("Unknown service"));
+    app.handle_action(Action::FilterBackspace);
+    assert_eq!(app.resource_finder.rows.len(), 2);
+}

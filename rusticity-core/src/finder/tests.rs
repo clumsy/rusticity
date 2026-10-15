@@ -24,7 +24,7 @@ fn finder_index_query_quotes_input_and_limits_resource_types_and_region() {
         .index_query("us-east-2");
     assert_eq!(
         query,
-        "\"orders\"* \"service:iam\"* resourcetype:dynamodb:table region:us-east-2,global"
+        "orders* \"service:iam\" resourcetype:dynamodb:table region:us-east-2,global"
     );
     assert!(SearchQuery::parse("@apig test")
         .unwrap()
@@ -199,4 +199,42 @@ fn finder_vpc_qualifier_and_ec2_resource_type_are_supported() {
     assert_eq!(resource.kind, ResourceKind::Vpc);
     assert_eq!(resource.kind.service(), "vpc");
     assert_eq!(resource.id, "vpc-test");
+}
+
+#[test]
+fn finder_prefix_terms_use_resource_explorer_wildcards_without_quotes() {
+    for (input, prefix) in [
+        ("@lambda Fsx", "fsx*"),
+        (
+            "@lambda BETA-SagemakerHyperpodEks-FsxDraKmsGrant",
+            "beta-sagemakerhyperpodeks-fsxdrakmsgrant*",
+        ),
+        ("@lambda my_function.v2", "my_function.v2*"),
+        ("@lambda fsx grant", "fsx* grant*"),
+    ] {
+        assert_eq!(
+            SearchQuery::parse(input).unwrap().index_query("us-east-1"),
+            format!("{prefix} resourcetype:lambda:function region:us-east-1,global")
+        );
+    }
+}
+
+#[test]
+fn finder_syntax_bearing_terms_stay_literal_without_standalone_wildcards() {
+    for (input, literal) in [
+        ("service:iam", "\"service:iam\""),
+        ("region:us-west-2", "\"region:us-west-2\""),
+        ("-orders", "\"-orders\""),
+        ("fsx*", "\"fsx*\""),
+        ("name,other", "\"name,other\""),
+        ("name\"quoted", "\"name\\\"quoted\""),
+        ("name\\path", "\"name\\\\path\""),
+        ("(orders)", "\"(orders)\""),
+    ] {
+        let query = SearchQuery::parse(&format!("@lambda {input}")).unwrap();
+        assert_eq!(
+            query.index_query("us-east-1"),
+            format!("{literal} resourcetype:lambda:function region:us-east-1,global")
+        );
+    }
 }

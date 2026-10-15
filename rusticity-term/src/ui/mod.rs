@@ -1256,6 +1256,10 @@ fn render_help_modal(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![Span::styled("⇤⇥ ", red_text()), Span::raw("  Tab")]),
         Line::from(vec![Span::styled("␣  ", red_text()), Span::raw("  Space")]),
+        Line::from(vec![
+            Span::styled("^l ", red_text()),
+            Span::raw("  Ctrl+l (related resources)"),
+        ]),
         Line::from(vec![Span::styled("^r ", red_text()), Span::raw("  Ctrl+r")]),
         Line::from(vec![Span::styled("^w ", red_text()), Span::raw("  Ctrl+w")]),
         Line::from(vec![Span::styled("^o ", red_text()), Span::raw("  Ctrl+o")]),

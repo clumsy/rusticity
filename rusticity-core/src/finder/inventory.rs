@@ -298,6 +298,9 @@ pub(super) async fn fetch(config: &AwsConfig, kind: ResourceKind) -> Result<(Vec
                 token = next;
             }
         }
+        ResourceKind::Reference => {
+            // Reference is not an inventory-search kind — no rows.
+        }
     }
     rows.retain(|r| !r.id.is_empty());
     Ok((rows, false))

@@ -282,7 +282,7 @@ fn bucket_page_jump(app: &mut App, forward: bool) {
     }
 }
 
-fn count_visual_rows_of_objects(
+pub(crate) fn count_visual_rows_of_objects(
     objects: &[crate::app::S3Object],
     expanded_prefixes: &std::collections::HashSet<String>,
     prefix_preview: &std::collections::HashMap<String, Vec<crate::app::S3Object>>,

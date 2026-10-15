@@ -134,6 +134,32 @@ The finder searches top-level resources, not DynamoDB items, S3 objects, log
 streams/events, or CloudTrail event contents. DynamoDB results open Items and S3
 results open the bucket; other results open their filtered service inventory.
 
+### Related resources
+
+Press `Ctrl+L` in Normal mode on a selected resource to open **Related resources**
+using the same table, filter, and navigation as the resource finder. All discovered
+links appear without typing; filter by name, ID, or ARN, optionally using `@service`.
+Enter moves to results; select a row and press Enter to open its existing resource
+view. Tab/Shift+Tab switches focus, `i` returns to the filter, `y` in results copies
+the reference, Esc closes the finder without changing the underlying view, and
+`Ctrl+R` refreshes the links. `Ctrl+L` in the Region picker still measures latency.
+
+Initial discovery supports Lambda functions, SQS queues, EC2 instances, DynamoDB
+tables, CloudFormation stacks (including Lambda applications backed by a stack),
+EFS/FSx file systems, and RDS instances. It extracts explicit references from
+resource-scoped read APIs—not an account-wide search or a complete runtime
+dependency graph. Lambda event sources and stack resources are paginated; lookups
+have bounded concurrency, timeouts, and a 1,000-result display cap. Successful
+results are cached in memory for 60 seconds; filtering makes no AWS requests.
+Changing profile, Region, or credential identity clears the cache.
+
+Unsupported source types, denied reads, and incomplete results are reported.
+Linked resource types without a Rusticity view remain visible as **Not supported**
+and can be copied. Cross-account/Region references remain visible but require
+switching context before opening; credentials are never switched automatically.
+Qualified functions, DynamoDB streams, and log streams navigate to their supported
+parent resource view. No AWS resources are created or modified.
+
 ### DynamoDB Items
 
 Press `m` in Normal mode to load the next Scan/Query page. Each request evaluates

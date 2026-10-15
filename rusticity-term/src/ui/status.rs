@@ -107,7 +107,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let help = if app.mode == Mode::ResourceFinder {
+    let mut help = if app.mode == Mode::ResourceFinder {
         let mut hints = if app.resource_finder.focus == FinderFocus::Filter {
             first_hint("⏎", "results")
         } else {
@@ -116,6 +116,11 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("i", "filter"));
             hints
         };
+        if app.resource_finder.related_source.is_some()
+            && app.resource_finder.focus == FinderFocus::Table
+        {
+            hints.extend(hint("y", "copy reference"));
+        }
         hints.extend(hint("⇤⇥", "switch"));
         hints.extend(hint("^r", "refresh"));
         hints.extend(last_hint("⎋", "cancel"));
@@ -385,6 +390,12 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(last_hint("q", "quit"));
         hints
     };
+    if app.mode == Mode::Normal && crate::finder::State::related_available(app) {
+        let mut related = first_hint("^l", "related");
+        related.push(Span::raw(" "));
+        related.extend(help);
+        help = related;
+    }
 
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)

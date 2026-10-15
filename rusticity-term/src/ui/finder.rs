@@ -7,7 +7,7 @@ use ratatui::{
     prelude::*,
     widgets::{Clear, Paragraph},
 };
-use rusticity_core::finder::Resource;
+use rusticity_core::finder::{Resource, ResourceKind};
 
 pub const FILTER_PLACEHOLDER: &str =
     "Type at least 3 search characters; @s3, @dynamodb, @ec2, @rds, @iam, @lambda limit services";
@@ -40,7 +40,11 @@ impl Column<Resource> for FinderColumn {
     }
     fn render(&self, resource: &Resource) -> (String, Style) {
         let text = match self {
+            Self::Service if resource.kind == ResourceKind::Reference => {
+                resource.arn.split(':').nth(2).unwrap_or("—")
+            }
             Self::Service => resource.kind.service(),
+            Self::Type if resource.kind == ResourceKind::Reference => "Not supported",
             Self::Type => resource.kind.label(),
             Self::Id => &resource.id,
             Self::Name => &resource.name,
@@ -68,7 +72,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(cursor);
         }
         spans.push(Span::styled(
-            FILTER_PLACEHOLDER,
+            if finder.related_source.is_some() {
+                "Filter linked resources; @service limits matches"
+            } else {
+                FILTER_PLACEHOLDER
+            },
             Style::default().fg(Color::DarkGray),
         ));
     } else {
@@ -94,7 +102,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             columns: &columns,
             sort_column: "",
             sort_direction: SortDirection::Asc,
-            title: format_title("AWS Resources"),
+            title: format_title(
+                &finder
+                    .related_source
+                    .as_ref()
+                    .map(|source| format!("Related to: {}", source.id))
+                    .unwrap_or_else(|| "AWS Resources".into()),
+            ),
             area: chunks[1],
             get_expanded_content: None,
             is_active: finder.focus == Focus::Table,

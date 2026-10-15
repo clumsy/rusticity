@@ -182,6 +182,25 @@ impl AwsConfig {
         }
     }
 
+    /// Test-only constructor: build an `AwsConfig` from a pre-built `SdkConfig`
+    /// (e.g. with a mock HTTP client) and a region/account. The `sdk_config`
+    /// replaces the one from `dummy`, allowing tests outside this module to
+    /// inject mock transport.
+    #[cfg(test)]
+    pub(crate) fn from_sdk_config(
+        sdk_config: aws_config::SdkConfig,
+        region: &str,
+        account_id: &str,
+    ) -> Self {
+        Self {
+            region: region.to_string(),
+            account_id: account_id.to_string(),
+            role_arn: String::new(),
+            region_auto_detected: false,
+            sdk_config,
+        }
+    }
+
     pub async fn get_account_for_profile(profile: &str, region: &str) -> Result<String> {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .profile_name(profile)
@@ -444,6 +463,60 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn linked_log_group_lookup_requests_exact_identifier_and_keeps_metadata() {
+        let name = "/aws/lambda/GrantFn";
+        let uri = "https://logs.us-east-1.amazonaws.com/";
+        let request = serde_json::json!({"logGroupIdentifiers": [name]}).to_string();
+        let http = StaticReplayClient::new(vec![replay(uri, request, 200,
+            r#"{"logGroups":[{"logGroupName":"/aws/lambda/GrantFn","storedBytes":13529,"retentionInDays":30,"creationTime":1700000000000,"logGroupClass":"STANDARD","arn":"arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/GrantFn:*","logGroupArn":"arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/GrantFn","deletionProtectionEnabled":true}]}"#.into())]);
+        let client = crate::CloudWatchClient::new(config(&http)).await.unwrap();
+        let row = client.get_log_group(name).await.unwrap().unwrap();
+        assert_eq!(row.name, name);
+        assert_eq!(row.stored_bytes, Some(13529));
+        assert_eq!(row.retention_days, Some(30));
+        assert_eq!(row.log_class.as_deref(), Some("STANDARD"));
+        assert!(row.creation_time.is_some());
+        assert!(row.arn.as_deref().unwrap().ends_with(":*"));
+        assert!(row.log_group_arn.as_deref().unwrap().ends_with(name));
+        assert_eq!(row.deletion_protection_enabled, Some(true));
+        http.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn linked_log_group_lookup_does_not_accept_neighbors_or_hide_access_errors() {
+        for (status, response) in [
+            (200, r#"{"logGroups":[]}"#),
+            (
+                200,
+                r#"{"logGroups":[{"logGroupName":"/aws/lambda/GrantFn-old"}]}"#,
+            ),
+            (
+                400,
+                r#"{"__type":"AccessDeniedException","message":"denied"}"#,
+            ),
+        ] {
+            let http = StaticReplayClient::new(vec![replay(
+                "https://logs.us-east-1.amazonaws.com/",
+                r#"{"logGroupIdentifiers":["/aws/lambda/GrantFn"]}"#.into(),
+                status,
+                response.into(),
+            )]);
+            let client = crate::CloudWatchClient::new(config(&http)).await.unwrap();
+            let result = client.get_log_group("/aws/lambda/GrantFn").await;
+            if status == 200 {
+                assert!(result.unwrap().is_none());
+            } else {
+                assert!(result.is_err());
+            }
+            http.assert_requests_match(&[]);
+        }
+        let http = StaticReplayClient::new(vec![]);
+        let client = crate::CloudWatchClient::new(config(&http)).await.unwrap();
+        assert!(client.get_log_group("").await.is_err());
+        http.assert_requests_match(&[]);
     }
 
     #[tokio::test]
@@ -821,7 +894,7 @@ mod pagination_tests {
         use crate::finder::{search, SearchCache, SearchQuery, SearchUpdate};
         use std::sync::Arc;
         use tokio::sync::{mpsc, Mutex};
-        let query = "\"rusticity\"* resourcetype:dynamodb:table region:us-east-1,global";
+        let query = "rusticity* resourcetype:dynamodb:table region:us-east-1,global";
         let request = serde_json::json!({"QueryString": query, "MaxResults": 100});
         let mut next = request.clone();
         next["NextToken"] = "page2".into();
@@ -881,7 +954,7 @@ mod pagination_tests {
         use crate::finder::{search, SearchCache, SearchQuery, SearchUpdate};
         use std::sync::Arc;
         use tokio::sync::{mpsc, Mutex};
-        let request = serde_json::json!({"QueryString": "\"rusticity\"* resourcetype:dynamodb:table region:us-east-1,global", "MaxResults": 100});
+        let request = serde_json::json!({"QueryString": "rusticity* resourcetype:dynamodb:table region:us-east-1,global", "MaxResults": 100});
         let http = StaticReplayClient::new(vec![
             replay("https://resource-explorer-2.us-east-1.amazonaws.com/Search", request.to_string(), 401, r#"{"message":"No default view"}"#.into()),
             replay("https://dynamodb.us-east-1.amazonaws.com/", "{}".into(), 200, r#"{"TableNames":["rusticity-orders"],"LastEvaluatedTableName":"rusticity-orders"}"#.into()),

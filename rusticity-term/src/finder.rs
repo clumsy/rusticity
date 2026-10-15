@@ -2,7 +2,8 @@
 use crate::app::App;
 use crate::keymap::{Action, Mode};
 use rusticity_core::finder::{
-    self, Resource, SearchCache, SearchQuery, SearchUpdate, SharedSearchCache, RESULT_LIMIT,
+    self, Resource, ResourceKind, SearchCache, SearchQuery, SearchUpdate, SharedSearchCache,
+    RESULT_LIMIT,
 };
 use std::{
     collections::HashSet,
@@ -15,6 +16,15 @@ use tokio::{
 };
 
 pub mod navigation;
+mod related;
+const RELATED_TTL: Duration = Duration::from_secs(60);
+
+struct RelatedCache {
+    source: Resource,
+    at: Instant,
+    rows: Vec<Resource>,
+}
+
 const DEBOUNCE: Duration = Duration::from_millis(250);
 
 struct RunningSearch {
@@ -55,6 +65,9 @@ pub struct State {
     pub provider: String,
     pub warnings: Vec<String>,
     pub pending_open: Option<Resource>,
+    pub related_source: Option<Resource>,
+    related_rows: Vec<Resource>,
+    related_cache: Vec<RelatedCache>,
     query: Option<SearchQuery>,
     changed: Instant,
     generation: u64,
@@ -78,6 +91,9 @@ impl Default for State {
             provider: String::new(),
             warnings: vec![],
             pending_open: None,
+            related_source: None,
+            related_rows: vec![],
+            related_cache: vec![],
             query: None,
             changed: Instant::now(),
             generation: 0,
@@ -103,6 +119,10 @@ impl State {
         self.generation = self.generation.wrapping_add(1);
     }
     fn changed(&mut self) {
+        if self.related_source.is_some() {
+            self.filter_related();
+            return;
+        }
         self.cancel();
         self.rows.clear();
         self.seen.clear();
@@ -120,6 +140,37 @@ impl State {
             }
         };
     }
+    pub fn related_available(app: &App) -> bool {
+        related::selected(app).is_some()
+    }
+
+    fn filter_related(&mut self) {
+        let selected = self.rows.get(self.selected).cloned();
+        self.query = SearchQuery::parse(&self.input).ok();
+        self.rows = self
+            .related_rows
+            .iter()
+            .filter(|row| self.query.as_ref().is_some_and(|query| query.matches(row)))
+            .cloned()
+            .collect();
+        self.selected = selected
+            .and_then(|selected| self.rows.iter().position(|row| *row == selected))
+            .unwrap_or(0);
+    }
+
+    fn restart_related(&mut self) {
+        self.cancel();
+        self.rows.clear();
+        self.related_rows.clear();
+        self.seen.clear();
+        self.warnings.clear();
+        self.limited = false;
+        self.selected = 0;
+        self.started = false;
+        self.provider = "Explicit resource references".into();
+        self.filter_related();
+    }
+
     fn accept(&mut self, generation: u64, update: SearchUpdate) {
         if generation != self.generation {
             return;
@@ -128,16 +179,38 @@ impl State {
             SearchUpdate::Provider(provider) => self.provider = provider.into(),
             SearchUpdate::Results(rows) => {
                 for row in rows {
-                    if self.rows.len() >= RESULT_LIMIT {
+                    if self.related_source.as_ref().is_some_and(|source| {
+                        !source.arn.is_empty() && source.arn == row.arn && source.kind == row.kind
+                    }) {
+                        continue;
+                    }
+                    let count = if self.related_source.is_some() {
+                        self.related_rows.len()
+                    } else {
+                        self.rows.len()
+                    };
+                    if count >= RESULT_LIMIT {
                         self.limited = true;
                         break;
                     }
-                    if self
-                        .seen
-                        .insert((row.kind, row.id.clone(), row.region.clone()))
-                    {
-                        self.rows.push(row);
+                    if self.seen.insert((
+                        row.kind,
+                        if self.related_source.is_some() && !row.arn.is_empty() {
+                            row.arn.clone()
+                        } else {
+                            row.id.clone()
+                        },
+                        row.region.clone(),
+                    )) {
+                        if self.related_source.is_some() {
+                            self.related_rows.push(row);
+                        } else {
+                            self.rows.push(row);
+                        }
                     }
+                }
+                if self.related_source.is_some() {
+                    self.filter_related();
                 }
                 // Append order keeps keyboard selection stable as later sources finish.
             }
@@ -145,6 +218,22 @@ impl State {
             SearchUpdate::Finished { limited } => {
                 self.searching = false;
                 self.limited |= limited;
+                if let Some(source) = self
+                    .related_source
+                    .clone()
+                    .filter(|_| self.warnings.is_empty() && !self.limited)
+                {
+                    self.related_cache
+                        .retain(|entry| entry.source != source && entry.at.elapsed() < RELATED_TTL);
+                    if self.related_cache.len() >= 16 {
+                        self.related_cache.remove(0);
+                    }
+                    self.related_cache.push(RelatedCache {
+                        source,
+                        at: Instant::now(),
+                        rows: self.related_rows.clone(),
+                    });
+                }
             }
         }
     }
@@ -157,6 +246,27 @@ impl State {
                 "{} warning(s): {}",
                 self.warnings.len(),
                 self.warnings.join(" | ")
+            );
+        }
+        if self.related_source.is_some() {
+            if let Err(error) = SearchQuery::parse(&self.input) {
+                return error.to_string();
+            }
+            return format!(
+                "{} matches / {} linked resources{}{} — {}",
+                self.rows.len(),
+                self.related_rows.len(),
+                if self.searching || !self.started {
+                    " ..."
+                } else {
+                    ""
+                },
+                if self.limited {
+                    " — partial results"
+                } else {
+                    ""
+                },
+                self.provider
             );
         }
         if !self.query.as_ref().is_some_and(SearchQuery::ready) {
@@ -188,6 +298,10 @@ pub fn open(app: &mut App) {
         app.resource_finder = State::default();
         app.resource_finder.scope = scope;
     }
+    if app.resource_finder.related_source.take().is_some() {
+        app.resource_finder.input.clear();
+        app.resource_finder.related_rows.clear();
+    }
     app.resource_finder.focus = Focus::Filter;
     app.resource_finder.opening = false;
     app.resource_finder.pending_open = None;
@@ -196,7 +310,41 @@ pub fn open(app: &mut App) {
     app.mode = Mode::ResourceFinder;
 }
 
+pub fn open_related(app: &mut App) {
+    let Some(source) = related::selected(app) else {
+        return;
+    };
+    let scope = State::scope(app);
+    if app.resource_finder.scope != scope {
+        app.resource_finder = State::default();
+        app.resource_finder.scope = scope;
+    }
+    let finder = &mut app.resource_finder;
+    finder.related_source = Some(source.clone());
+    finder.input.clear();
+    finder.opening = false;
+    finder.pending_open = None;
+    finder.focus = Focus::Filter;
+    finder.restart_related();
+    if let Some(entry) = finder
+        .related_cache
+        .iter()
+        .find(|entry| entry.source == source && entry.at.elapsed() < RELATED_TTL)
+    {
+        finder.related_rows = entry.rows.clone();
+        finder.started = true;
+        finder.provider = "Explicit resource references (60s cache)".into();
+        finder.filter_related();
+    }
+    app.pending_key = None;
+    app.mode = Mode::ResourceFinder;
+}
+
 pub fn handle_action(app: &mut App, action: &Action) -> bool {
+    if *action == Action::OpenRelatedResources {
+        open_related(app);
+        return true;
+    }
     if *action == Action::OpenResourceFinder {
         open(app);
         return true;
@@ -254,12 +402,46 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             finder.selected = finder.selected.saturating_sub(10)
         }
         Action::Refresh => {
-            finder.cache = Arc::new(Mutex::new(SearchCache::default()));
-            finder.changed();
+            if finder.related_source.is_some() {
+                finder
+                    .related_cache
+                    .retain(|entry| Some(&entry.source) != finder.related_source.as_ref());
+                finder.restart_related();
+            } else {
+                finder.cache = Arc::new(Mutex::new(SearchCache::default()));
+                finder.changed();
+            }
         }
         Action::Select if finder.focus == Focus::Filter => finder.focus = Focus::Table,
+        Action::FilterInput('y')
+            if finder.focus == Focus::Table && finder.related_source.is_some() =>
+        {
+            if let Some(resource) = finder.rows.get(finder.selected) {
+                app.clipboard.request_text(if resource.arn.is_empty() {
+                    &resource.id
+                } else {
+                    &resource.arn
+                });
+            }
+        }
         Action::Select => {
             if let Some(resource) = finder.rows.get(finder.selected).cloned() {
+                if resource.kind == ResourceKind::Reference {
+                    let warning =
+                        "This resource type has no Rusticity view yet; y copies its reference"
+                            .to_string();
+                    if !finder.warnings.contains(&warning) {
+                        finder.warnings.push(warning);
+                    }
+                    return true;
+                }
+                if let Err(error) = navigation::validate_scope(&app.config, &resource) {
+                    let warning = error.to_string();
+                    if !finder.warnings.contains(&warning) {
+                        finder.warnings.push(warning);
+                    }
+                    return true;
+                }
                 finder.cancel();
                 finder.pending_open = Some(resource);
                 finder.opening = true;
@@ -278,13 +460,33 @@ pub fn poll(app: &mut App) {
     }
     let scope = State::scope(app);
     if scope != app.resource_finder.scope {
+        if app.resource_finder.related_source.is_some() {
+            app.resource_finder = State::default();
+            app.mode = Mode::Normal;
+            return;
+        }
         open(app);
     }
     let finder = &mut app.resource_finder;
     if finder.opening {
         return;
     }
-    if !finder.started && finder.changed.elapsed() >= DEBOUNCE {
+    if !finder.started && finder.related_source.is_some() {
+        let source = finder.related_source.clone().expect("related source");
+        let (tx, receiver) = mpsc::channel(32);
+        let task = tokio::spawn(rusticity_core::related::discover(
+            app.config.clone(),
+            source,
+            tx,
+        ));
+        finder.running = Some(RunningSearch {
+            task,
+            receiver,
+            generation: finder.generation,
+        });
+        finder.started = true;
+        finder.searching = true;
+    } else if !finder.started && finder.changed.elapsed() >= DEBOUNCE {
         if let Some(query) = finder.query.clone().filter(SearchQuery::ready) {
             let (tx, receiver) = mpsc::channel(32);
             let config = app.config.clone();

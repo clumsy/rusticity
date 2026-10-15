@@ -35,6 +35,11 @@ pub enum ResourceKind {
     Database,
     Bucket,
     Queue,
+    /// Generic linked target unsupported as an inventory-search kind.
+    /// Related-resource discovery uses this for ARNs that don't map to a
+    /// supported top-level inventory kind (e.g. subnets, volumes, layers).
+    /// Excluded from `ALL` so inventory search stays at 19 kinds.
+    Reference,
 }
 
 impl ResourceKind {
@@ -78,6 +83,7 @@ impl ResourceKind {
             Self::Database => "rds",
             Self::Bucket => "s3",
             Self::Queue => "sqs",
+            Self::Reference => "",
         }
     }
     pub fn label(self) -> &'static str {
@@ -99,6 +105,7 @@ impl ResourceKind {
             Self::Database => "Database",
             Self::Bucket => "Bucket",
             Self::Queue => "Queue",
+            Self::Reference => "Reference",
         }
     }
     fn resource_types(self) -> &'static str {
@@ -122,9 +129,13 @@ impl ResourceKind {
             Self::Database => "rds:db",
             Self::Bucket => "s3:bucket",
             Self::Queue => "sqs:queue",
+            Self::Reference => "",
         }
     }
     fn accepts_qualifier(self, qualifier: &str) -> bool {
+        if self == Self::Reference {
+            return false;
+        }
         self.service() == qualifier
             || match qualifier {
                 "ddb" => self == Self::Table,
@@ -197,6 +208,82 @@ impl Resource {
             region: region.into(),
         })
     }
+
+    /// Convert an explicit ARN to a finder target. Qualified functions, table
+    /// streams and log streams open their parent view; the original ARN is retained.
+    /// Types without a view remain visible as generic references.
+    pub fn from_arn(arn: &str) -> Option<Self> {
+        let mut parts = arn.splitn(6, ':');
+        if parts.next()? != "arn" {
+            return None;
+        }
+        let partition = parts.next()?;
+        let service = parts.next()?;
+        let region = parts.next()?;
+        let account = parts.next()?;
+        let tail = parts.next()?;
+        if !matches!(
+            partition,
+            "aws" | "aws-cn" | "aws-us-gov" | "aws-iso" | "aws-iso-b" | "aws-iso-e" | "aws-iso-f"
+        ) || service.is_empty()
+            || tail.is_empty()
+            || [partition, service, region, account]
+                .iter()
+                .any(|part| part.chars().any(char::is_whitespace))
+        {
+            return None;
+        }
+        let kind = match service {
+            "s3" if !tail.contains('/') && !tail.contains(':') => Some(ResourceKind::Bucket),
+            "s3" => None,
+            "sqs" => Some(ResourceKind::Queue),
+            _ => ResourceKind::ALL.into_iter().find(|kind| {
+                kind.resource_types().split(',').any(|resource_type| {
+                    let Some((expected_service, resource_type)) = resource_type.split_once(':')
+                    else {
+                        return false;
+                    };
+                    let tail = tail.trim_start_matches('/');
+                    expected_service == service
+                        && tail.strip_prefix(resource_type).is_some_and(|suffix| {
+                            suffix.starts_with('/') || suffix.starts_with(':')
+                        })
+                })
+            }),
+        };
+        let mut row = if let Some(kind) = kind {
+            // Use the existing parser on a normalized parent ARN, then restore the
+            // original reference for display, copying and account-scope checks.
+            let parent_tail = match kind {
+                ResourceKind::Function => tail
+                    .rsplit_once(':')
+                    .filter(|_| tail.matches(':').count() > 1)
+                    .map_or(tail, |(parent, _)| parent),
+                ResourceKind::Table => tail
+                    .split("/stream/")
+                    .next()
+                    .unwrap_or(tail)
+                    .split("/index/")
+                    .next()
+                    .unwrap_or(tail),
+                ResourceKind::LogGroup => tail.split(":log-stream:").next().unwrap_or(tail),
+                _ => tail,
+            };
+            let normalized = format!("arn:{partition}:{service}:{region}:{account}:{parent_tail}");
+            Self::from_index(
+                kind.resource_types().split(',').find(|resource_type| {
+                    kind != ResourceKind::Api
+                        || parent_tail.contains(resource_type.split_once(':').unwrap().1)
+                })?,
+                &normalized,
+                region,
+            )?
+        } else {
+            Self::new(ResourceKind::Reference, tail, tail, region)
+        };
+        row.arn = arn.into();
+        Some(row)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,19 +326,39 @@ impl SearchQuery {
     }
     /// Fast name/ID/ARN matching for the fallback inventory cache.
     pub fn matches(&self, resource: &Resource) -> bool {
+        if resource.kind == ResourceKind::Reference {
+            let service = resource.arn.split(':').nth(2).unwrap_or_default();
+            let service_matches = self.kinds.len() == ResourceKind::ALL.len()
+                || self.kinds.iter().any(|kind| kind.service() == service);
+            return service_matches
+                && [&resource.id, &resource.name, &resource.arn]
+                    .iter()
+                    .any(|value| value.to_lowercase().contains(&self.text));
+        }
         self.kinds.contains(&resource.kind)
             && [&resource.id, &resource.name, &resource.arn]
                 .iter()
                 .any(|value| value.to_lowercase().contains(&self.text))
     }
     fn index_query(&self, region: &str) -> String {
-        // Quote literals so user text cannot inject AWS filters or broaden scope.
+        // Resource Explorer requires bare terms for prefix matching: `fsx*`,
+        // not `"fsx"*` (the latter changes the query's meaning). Only ordinary
+        // resource-name tokens may be bare; quote syntax-bearing literals so
+        // user input cannot inject filters, negation, or wildcards.
         let terms = self
             .text
             .split_whitespace()
             .map(|term| {
-                let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
-                format!("\"{escaped}\"*")
+                if !term.starts_with('-')
+                    && term
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+                {
+                    format!("{term}*")
+                } else {
+                    let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
+                    format!("\"{escaped}\"")
+                }
             })
             .collect::<Vec<_>>()
             .join(" ");

@@ -11,6 +11,7 @@ use std::borrow::Cow;
 enum Source {
     EcrRepositories,
     EcrImages,
+    EcrImageDetails,
     EfsFiles,
     EfsTags,
     EfsAccessPoints,
@@ -67,7 +68,9 @@ impl Source {
     fn for_service(app: &App, service: Service) -> Option<Self> {
         Some(match service {
             Service::EcrRepositories => {
-                if app.ecr_state.current_repository.is_some() {
+                if app.ecr_state.current_repository.is_some() && app.ecr_state.scan.view.is_some() {
+                    Self::EcrImageDetails
+                } else if app.ecr_state.current_repository.is_some() {
                     Self::EcrImages
                 } else {
                     Self::EcrRepositories
@@ -138,6 +141,24 @@ impl Source {
 
     fn model(self, app: &App) -> Preferences {
         let cols = match self {
+            Self::EcrImageDetails => {
+                let view = app
+                    .ecr_state
+                    .scan
+                    .view
+                    .as_ref()
+                    .expect("image detail source");
+                if view.tab.columns().is_empty() {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                }
+                let ids: Vec<_> = view.tab.columns().iter().map(|(id, _)| *id).collect();
+                columns(
+                    &ids,
+                    &view.data().visible_column_ids,
+                    |id| Some(id.into()),
+                    None,
+                )
+            }
             Self::EcrRepositories => columns(
                 &app.ecr_repo_column_ids,
                 &app.ecr_repo_visible_column_ids,
@@ -266,6 +287,16 @@ impl Source {
         match self {
             Self::EcrRepositories => app.ecr_state.repositories.page_size,
             Self::EcrImages => app.ecr_state.images.page_size,
+            Self::EcrImageDetails => {
+                app.ecr_state
+                    .scan
+                    .view
+                    .as_ref()
+                    .expect("image detail source")
+                    .data()
+                    .table
+                    .page_size
+            }
             Self::EfsFiles => app.efs_state.file_systems.page_size,
             Self::EfsTags => app.efs_state.tags_table.page_size,
             Self::EfsAccessPoints => app.efs_state.access_points.page_size,
@@ -293,6 +324,15 @@ impl Source {
         match self {
             Self::EcrRepositories => app.ecr_state.repositories.set_page_size(size),
             Self::EcrImages => app.ecr_state.images.set_page_size(size),
+            Self::EcrImageDetails => app
+                .ecr_state
+                .scan
+                .view
+                .as_mut()
+                .expect("image detail source")
+                .data_mut()
+                .table
+                .set_page_size(size),
             Self::EfsFiles => app.efs_state.file_systems.set_page_size(size),
             Self::EfsTags => app.efs_state.tags_table.set_page_size(size),
             Self::EfsAccessPoints => app.efs_state.access_points.set_page_size(size),
@@ -320,6 +360,16 @@ impl Source {
         Some(match self {
             Self::EcrRepositories => &mut app.ecr_repo_visible_column_ids,
             Self::EcrImages => &mut app.ecr_image_visible_column_ids,
+            Self::EcrImageDetails => {
+                &mut app
+                    .ecr_state
+                    .scan
+                    .view
+                    .as_mut()
+                    .expect("image detail source")
+                    .data_mut()
+                    .visible_column_ids
+            }
             Self::EfsFiles => &mut app.efs_visible_column_ids,
             Self::EfsAccessPoints => &mut app.efs_state.ap_visible_column_ids,
             Self::EfsMountTargets => &mut app.efs_state.mt_visible_column_ids,

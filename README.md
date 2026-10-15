@@ -1,4 +1,4 @@
-# Rusticity - Terminal UI for AWS 
+# Rusticity - Terminal UI for AWS
 
 [![Crate Badge]][Crate] [![License Badge]][License] [![CI Badge]][CI] [![Built With Ratatui]][Ratatui]
 
@@ -88,7 +88,7 @@ export AWS_SECRET_ACCESS_KEY=your-secret
 aws configure
 ```
 
-### Column Customization
+## Column Customization
 
 Customize column names by adding a `[columns]` section to `~/.config/rusticity/config.toml`:
 
@@ -112,91 +112,9 @@ rusticity
 AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 ```
 
-### Resource finder
-
-Press `Space`, then `f` to search supported AWS resource inventories in the current
-profile and Region. Type at least three search characters (excluding qualifiers),
-optionally adding `@s3`, `@dynamodb`/`@ddb`, `@ec2`, `@vpc`, `@rds`, `@iam`, `@lambda`, or
-another supported service. The filter starts focused. Enter moves to the results;
-there, use arrows to select and Enter to open. Tab/Shift+Tab switches focus,
-`i` returns to the filter, Esc cancels, and `Ctrl+R` refreshes.
-
-Search starts after a 250 ms pause and streams results without blocking typing.
-It uses an existing AWS Resource Explorer view for indexed prefix search; it does
-not create indexes or views. If unavailable, it searches supported inventories
-with at most four concurrent sources and a 60-second in-memory cache. Cached
-inventory matching is case-insensitive substring matching. Global services are
-included where the underlying API is global. Changing profile/Region clears the
-cache. Permission failures and result limits are shown rather than reported as
-complete empty results; indexed results are limited to 1,000 and can lag AWS changes.
-
-The finder searches top-level resources, not DynamoDB items, S3 objects, log
-streams/events, or CloudTrail event contents. DynamoDB results open Items and S3
-results open the bucket; other results open their filtered service inventory.
-
-### Related resources
-
-Press `Ctrl+L` in Normal mode on a selected resource to open **Related resources**
-using the same table, filter, and navigation as the resource finder. All discovered
-links appear without typing; filter by name, ID, or ARN, optionally using `@service`.
-Enter moves to results; select a row and press Enter to open its existing resource
-view. Tab/Shift+Tab switches focus, `i` returns to the filter, `y` in results copies
-the reference, Esc closes the finder without changing the underlying view, and
-`Ctrl+R` refreshes the links. `Ctrl+L` in the Region picker still measures latency.
-
-Initial discovery supports Lambda functions, SQS queues, EC2 instances, DynamoDB
-tables, CloudFormation stacks (including Lambda applications backed by a stack),
-EFS/FSx file systems, and RDS instances. It extracts explicit references from
-resource-scoped read APIs—not an account-wide search or a complete runtime
-dependency graph. Lambda event sources and stack resources are paginated; lookups
-have bounded concurrency, timeouts, and a 1,000-result display cap. Successful
-results are cached in memory for 60 seconds; filtering makes no AWS requests.
-Changing profile, Region, or credential identity clears the cache.
-
-Unsupported source types, denied reads, and incomplete results are reported.
-Linked resource types without a Rusticity view remain visible as **Not supported**
-and can be copied. Cross-account/Region references remain visible but require
-switching context before opening; credentials are never switched automatically.
-Qualified functions, DynamoDB streams, and log streams navigate to their supported
-parent resource view. No AWS resources are created or modified.
-
-### S3 objects
-
-In a bucket's **Objects** list, press **Enter** on a file to preview UTF-8 text.
-JSON and YAML use the shared syntax-highlighted viewer; other text uses the same
-line-numbered viewer without highlighting. Previews read at most 1 MiB plus one
-byte to detect truncation. Binary content is rejected; large text previews show a
-truncation notice. Arrow keys scroll, Ctrl+U/Ctrl+D page, `y` copies the displayed
-text, and Esc returns to the same object list. Enter on a folder still opens it.
-
-Press **Ctrl+D** on a file in the Objects list to download it to Rusticity's
-**current working directory**, using the object's basename. Existing files and
-symlinks are never overwritten. Downloads stream to a private temporary file and
-publish only after completion; failures or cancellation remove the partial file.
-A status message shows the saved path or error. Esc cancels an active transfer;
-changing bucket, prefix, profile, Region, or service also cancels it. Transfers time
-out after five minutes. These actions only read S3; no objects are modified.
-Ctrl+D retains page-down behavior outside the Objects list, including previews.
-
-### DynamoDB Items
-
-Press `m` in Normal mode to load the next Scan/Query page. Each request evaluates
-at most 100 items and is also subject to DynamoDB's response-size limit. Page
-navigation and Preferences only affect already-loaded items; they do not fetch
-more data. `Ctrl+R` restarts the scan/query, or retries the failed page when the
-error dialog is open. Changing the table, account context, index, projection,
-operation, or query key starts a new result set. Pagination shows only loaded
-pages followed by `...` while the total is unknown; the ellipsis disappears
-only after the final result page has loaded successfully.
-
-### RDS Databases
-
-Preferences lists database metadata plus optional monitoring, maintenance, and
-recommendation columns. Extra read APIs are called only when their columns are
-visible. Missing or inapplicable values show `-`; failed optional reads show
-`Unavailable` without hiding the inventory. CPU, current activity (average active
-sessions), and replica lag use the latest CloudWatch sample within 15 minutes;
-metrics not published for an instance remain `-`.
+Use the status bar for shortcuts available in the current view, and press `?`
+for keyboard help. Press `Space`, then `f` to find resources across services,
+or `Ctrl+L` on a resource to explore related resources where supported.
 
 ## Development
 

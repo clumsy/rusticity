@@ -20,6 +20,7 @@ pub struct State {
     pub current_repository_uri: Option<String>,
     pub images: TableState<EcrImage>,
     pub input_focus: InputFocus,
+    pub scan: crate::ecr::scan::State,
 }
 
 impl Default for State {
@@ -37,6 +38,7 @@ impl State {
             current_repository_uri: None,
             images: TableState::new(),
             input_focus: InputFocus::Filter,
+            scan: crate::ecr::scan::State::default(),
         }
     }
 }
@@ -93,7 +95,9 @@ pub fn render_repositories(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
     if app.ecr_state.current_repository.is_some() {
-        render_images(frame, app, area);
+        if !crate::ecr::scan::render(frame, app, area) {
+            render_images(frame, app, area);
+        }
     } else {
         render_repository_list(frame, app, area);
     }

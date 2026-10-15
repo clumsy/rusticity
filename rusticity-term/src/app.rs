@@ -1046,6 +1046,9 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if crate::ecr::scan::handle_action(self, &action) {
+            return;
+        }
         if crate::s3::object::handle_action(self, &action) {
             return;
         }

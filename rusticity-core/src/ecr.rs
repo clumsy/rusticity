@@ -1,3 +1,5 @@
+pub mod detail;
+pub mod scan;
 use crate::config::AwsConfig;
 use anyhow::Result;
 

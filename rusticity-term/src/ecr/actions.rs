@@ -261,6 +261,10 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
     let mut parts = vec!["ECR".to_string()];
     if let Some(repo) = &app.ecr_state.current_repository {
         parts.push(repo.clone());
+        if let Some(view) = &app.ecr_state.scan.view {
+            parts.push(view.digest.clone());
+            parts.push(view.tab.name().into());
+        }
     } else {
         parts.push("Repositories".to_string());
     }
@@ -270,8 +274,83 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 pub fn console_url(app: &App) -> String {
     use crate::ecr;
     if let Some(repo_name) = &app.ecr_state.current_repository {
+        if app.ecr_state.tab == crate::ui::ecr::Tab::Public {
+            return ecr::console_url_public_repository(&app.config.region, repo_name);
+        }
+        if let Some(view) = &app.ecr_state.scan.view {
+            if !view.digest.is_empty() {
+                return ecr::console_url_private_image(
+                    &app.config.region,
+                    &app.config.account_id,
+                    repo_name,
+                    &view.digest,
+                );
+            }
+        }
         ecr::console_url_private_repository(&app.config.region, &app.config.account_id, repo_name)
     } else {
         ecr::console_url_repositories(&app.config.region)
+    }
+}
+
+#[cfg(test)]
+mod console_tests {
+    use super::*;
+    use crate::{
+        ecr::image::Image,
+        keymap::{Action, Mode},
+    };
+
+    fn image_app() -> App {
+        let mut app = App::new_without_client("test".into(), Some("eu-west-1".into()));
+        app.config.account_id = "123456789012".into();
+        app.current_service = Service::EcrRepositories;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.ecr_state.current_repository = Some("team/image".into());
+        app.ecr_state.images.items.push(Image {
+            tag: "latest".into(),
+            digest: "sha256:abc123".into(),
+            artifact_type: String::new(),
+            pushed_at: String::new(),
+            size_bytes: 0,
+            uri: String::new(),
+            last_pull_time: String::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn every_image_detail_tab_links_to_the_open_image_not_repository_or_mutable_tag() {
+        let mut app = image_app();
+        assert!(!app.get_console_url().contains("/_/image/"));
+        app.handle_action(Action::Select);
+        // The open page's digest remains authoritative if the inventory changes.
+        app.ecr_state.images.items[0].digest = "sha256:changed".into();
+        let expected = crate::ecr::console_url_private_image(
+            "eu-west-1",
+            "123456789012",
+            "team/image",
+            "sha256:abc123",
+        );
+        for _ in 0..5 {
+            assert_eq!(app.get_console_url(), expected);
+            app.handle_action(Action::NextDetailTab);
+        }
+        app.handle_action(Action::GoBack);
+        assert!(!app.get_console_url().contains("/_/image/"));
+    }
+
+    #[test]
+    fn missing_digest_and_public_context_do_not_create_private_image_links() {
+        let mut app = image_app();
+        app.ecr_state.images.items[0].digest.clear();
+        app.handle_action(Action::Select);
+        assert!(!app.get_console_url().contains("/_/image/"));
+        app.handle_action(Action::GoBack);
+        app.ecr_state.tab = crate::ui::ecr::Tab::Public;
+        app.handle_action(Action::Select);
+        assert!(app.get_console_url().contains("/repositories/public/"));
+        assert!(!app.get_console_url().contains("/repositories/private/"));
     }
 }

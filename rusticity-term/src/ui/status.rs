@@ -107,7 +107,20 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let mut help = if app.mode == Mode::Normal && crate::s3::object::active(app) {
+    let mut help = if matches!(app.mode, Mode::Normal | Mode::FilterInput)
+        && crate::ecr::scan::active(app)
+        && app
+            .ecr_state
+            .scan
+            .view
+            .as_ref()
+            .is_some_and(|view| view.selecting_source())
+    {
+        let mut hints = first_hint("↑↓", "source");
+        hints.extend(hint("⏎", "select"));
+        hints.extend(last_hint("⎋", "cancel"));
+        hints
+    } else if app.mode == Mode::Normal && crate::s3::object::active(app) {
         let mut hints = first_hint("↑↓", "scroll");
         if app.s3_state.object_view.preview.is_some() {
             hints.extend(hint("^u/^d", "page"));
@@ -269,9 +282,28 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(last_hint("q", "quit"));
         hints
     } else if app.current_service == Service::EcrRepositories {
-        if app.ecr_state.current_repository.is_some() {
-            let mut hints = vec![];
-            hints.extend(first_hint("↑↓", "scroll"));
+        if let Some(view) = &app.ecr_state.scan.view {
+            let mut hints = first_hint("⇤⇥", "tabs");
+            if view.tab != crate::ecr::scan::DetailTab::General {
+                hints.extend(hint("i", "filter"));
+                hints.extend(hint("↑↓", "select"));
+                hints.extend(hint("⏎/←→", "expand"));
+                hints.extend(hint("^u/^d", "page"));
+                hints.extend(hint("p", "preferences"));
+            }
+            if view.tab == crate::ecr::scan::DetailTab::Replication {
+                hints.extend(hint("s", "status source"));
+            }
+            hints.extend(hint("y", "copy URI"));
+            hints.extend(hint("^p", "print"));
+            hints.extend(hint("^o", "console"));
+            hints.extend(hint("^r", "refresh"));
+            hints.extend(hint("⎋", "back / cancel"));
+            hints.extend(last_hint("q", "quit"));
+            hints
+        } else if app.ecr_state.current_repository.is_some() {
+            let mut hints = first_hint("⏎", "image details");
+            hints.extend(hint("↑↓", "scroll"));
             hints.extend(hint("←→", "toggle"));
             hints.extend(hint("⎋", "back"));
             hints.extend(hint("y", "yank"));
@@ -403,7 +435,10 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(last_hint("q", "quit"));
         hints
     };
-    if app.mode == Mode::Normal && crate::finder::State::related_available(app) {
+    if app.mode == Mode::Normal
+        && !(crate::ecr::scan::active(app) && app.ecr_state.scan.view.is_some())
+        && crate::finder::State::related_available(app)
+    {
         let mut related = first_hint("^l", "related");
         related.push(Span::raw(" "));
         related.extend(help);
@@ -416,7 +451,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         .as_millis();
 
     // Any service loading → show generic spinner inline with version on the right
-    let is_loading = app.s3_state.object_view.busy()
+    let is_loading = app.ecr_state.scan.busy()
+        || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
         || app.rds_state.instances.loading

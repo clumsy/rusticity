@@ -18,7 +18,7 @@ documentation = "https://docs.rs/rusticity"
 
 [workspace.dependencies]
 # Keep external versions in one place; Cargo.lock pins the full dependency graph.
-tokio = { version = "=1.53.2", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "=1.53.2", features = ["macros", "rt-multi-thread", "time", "fs", "io-util"] }
 
 # AWS SDK (requires Rust 1.94.1)
 aws-config = "=1.12.0"

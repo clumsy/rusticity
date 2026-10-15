@@ -160,6 +160,24 @@ switching context before opening; credentials are never switched automatically.
 Qualified functions, DynamoDB streams, and log streams navigate to their supported
 parent resource view. No AWS resources are created or modified.
 
+### S3 objects
+
+In a bucket's **Objects** list, press **Enter** on a file to preview UTF-8 text.
+JSON and YAML use the shared syntax-highlighted viewer; other text uses the same
+line-numbered viewer without highlighting. Previews read at most 1 MiB plus one
+byte to detect truncation. Binary content is rejected; large text previews show a
+truncation notice. Arrow keys scroll, Ctrl+U/Ctrl+D page, `y` copies the displayed
+text, and Esc returns to the same object list. Enter on a folder still opens it.
+
+Press **Ctrl+D** on a file in the Objects list to download it to Rusticity's
+**current working directory**, using the object's basename. Existing files and
+symlinks are never overwritten. Downloads stream to a private temporary file and
+publish only after completion; failures or cancellation remove the partial file.
+A status message shows the saved path or error. Esc cancels an active transfer;
+changing bucket, prefix, profile, Region, or service also cancels it. Transfers time
+out after five minutes. These actions only read S3; no objects are modified.
+Ctrl+D retains page-down behavior outside the Objects list, including previews.
+
 ### DynamoDB Items
 
 Press `m` in Normal mode to load the next Scan/Query page. Each request evaluates

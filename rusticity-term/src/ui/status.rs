@@ -107,7 +107,20 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let mut help = if app.mode == Mode::ResourceFinder {
+    let mut help = if app.mode == Mode::Normal && crate::s3::object::active(app) {
+        let mut hints = first_hint("↑↓", "scroll");
+        if app.s3_state.object_view.preview.is_some() {
+            hints.extend(hint("^u/^d", "page"));
+            hints.extend(hint("y", "copy text"));
+        } else {
+            hints.extend(hint("⏎", "open / preview"));
+            hints.extend(hint("^d", "download"));
+            hints.extend(hint("i", "filter"));
+        }
+        hints.extend(hint("⎋", "back / cancel"));
+        hints.extend(last_hint("q", "quit"));
+        hints
+    } else if app.mode == Mode::ResourceFinder {
         let mut hints = if app.resource_finder.focus == FinderFocus::Filter {
             first_hint("⏎", "results")
         } else {
@@ -403,7 +416,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         .as_millis();
 
     // Any service loading → show generic spinner inline with version on the right
-    let is_loading = app.log_groups_state.loading
+    let is_loading = app.s3_state.object_view.busy()
+        || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading
@@ -450,6 +464,16 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             "Go to page {} (press p to confirm)",
             app.page_input
         ))]))
+    } else if crate::s3::object::active(app) && app.s3_state.object_view.notice.is_some() {
+        let notice = app.s3_state.object_view.notice.as_ref().unwrap();
+        Some(Line::styled(
+            notice.message.clone(),
+            Style::default().fg(if notice.failed {
+                Color::Red
+            } else {
+                Color::Green
+            }),
+        ))
     } else {
         app.clipboard.notice().map(|notice| {
             Line::styled(

@@ -223,15 +223,10 @@ impl AwsConfig {
 
     pub async fn s3_client_with_region(&self, region: &str) -> aws_sdk_s3::Client {
         // Needs a different region — build a new config with the same credentials.
-        let config = aws_config::SdkConfig::builder()
-            .behavior_version(aws_config::BehaviorVersion::latest())
+        let config = self
+            .sdk_config
+            .to_builder()
             .region(aws_config::Region::new(region.to_string()))
-            .credentials_provider(
-                self.sdk_config
-                    .credentials_provider()
-                    .expect("credentials must be set")
-                    .clone(),
-            )
             .build();
         aws_sdk_s3::Client::new(&config)
     }
@@ -463,6 +458,123 @@ mod pagination_tests {
             sdk_config,
             ..AwsConfig::dummy(Some("us-east-1".to_string()))
         }
+    }
+
+    #[tokio::test]
+    async fn s3_object_preview_uses_bounded_range_in_the_bucket_region_and_handles_empty_objects() {
+        use aws_smithy_http_client::test_util::infallible_client_fn;
+        use std::sync::{Arc, Mutex};
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let capture = calls.clone();
+        let http = infallible_client_fn(move |request| {
+            assert_eq!(
+                request.uri().host(),
+                Some("fixture-bucket.s3.us-west-2.amazonaws.com")
+            );
+            capture.lock().unwrap().push((
+                request.method().to_string(),
+                request.uri().path().to_string(),
+            ));
+            if request.method() == http::Method::HEAD {
+                assert_eq!(request.uri().path(), "/empty.txt");
+                return http::Response::builder()
+                    .status(200)
+                    .header("content-length", "0")
+                    .header("content-type", "text/plain")
+                    .body(vec![])
+                    .unwrap();
+            }
+            assert_eq!(
+                request.headers()["range"],
+                format!("bytes=0-{}", crate::s3::object::PREVIEW_LIMIT)
+            );
+            if request.uri().path() == "/empty.txt" {
+                http::Response::builder()
+                    .status(416)
+                    .body(b"<Error><Code>InvalidRange</Code></Error>".to_vec())
+                    .unwrap()
+            } else {
+                assert_eq!(request.uri().path(), "/prefix/hello%20world.json");
+                http::Response::builder()
+                    .status(206)
+                    .header("content-type", "application/json")
+                    .body(br#"{"enabled":true}"#.to_vec())
+                    .unwrap()
+            }
+        });
+        let mut config = config(&StaticReplayClient::new(vec![]));
+        config.sdk_config = config.sdk_config.to_builder().http_client(http).build();
+        let client = crate::S3Client::new(config);
+        let preview = client
+            .preview_object("fixture-bucket", "us-west-2", "prefix/hello world.json")
+            .await
+            .unwrap();
+        assert_eq!(preview.format, crate::s3::object::TextFormat::Json);
+        assert!(preview.text.contains("\"enabled\": true"));
+        assert!(!preview.truncated);
+        let empty = client
+            .preview_object("fixture-bucket", "us-west-2", "empty.txt")
+            .await
+            .unwrap();
+        assert!(empty.text.is_empty());
+        assert_eq!(calls.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn s3_object_download_preserves_binary_bytes_and_existing_files_without_more_requests() {
+        use aws_smithy_http_client::test_util::infallible_client_fn;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let capture = calls.clone();
+        let http = infallible_client_fn(move |request| {
+            capture.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(request.method(), http::Method::GET);
+            assert_eq!(request.uri().path(), "/prefix/object.bin");
+            assert!(request.headers().get("range").is_none());
+            http::Response::builder()
+                .status(200)
+                .header("content-length", "5")
+                .body(vec![0, 1, 2, 254, 255])
+                .unwrap()
+        });
+        let mut config = config(&StaticReplayClient::new(vec![]));
+        config.sdk_config = config.sdk_config.to_builder().http_client(http).build();
+        let client = crate::S3Client::new(config);
+        let directory = std::env::temp_dir().join(format!(
+            "rusticity-s3-wire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = client
+            .download_object(
+                "fixture-bucket",
+                "us-east-1",
+                "prefix/object.bin",
+                &directory,
+            )
+            .await
+            .unwrap();
+        assert_eq!(path, directory.join("object.bin"));
+        assert_eq!(std::fs::read(&path).unwrap(), [0, 1, 2, 254, 255]);
+        assert!(client
+            .download_object(
+                "fixture-bucket",
+                "us-east-1",
+                "prefix/object.bin",
+                &directory
+            )
+            .await
+            .is_err());
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

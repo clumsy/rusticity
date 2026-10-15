@@ -50,12 +50,17 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        if rusticity_term::s3::object::poll(&mut app).await {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
         finder::poll(&mut app);
         if app.clipboard.expire_notice() {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         // Any service loading → animate the spinner via periodic redraws
-        let any_loading = app.clipboard.notice().is_some()
+        let any_loading = app.s3_state.object_view.busy()
+            || app.s3_state.object_view.notice.is_some()
+            || app.clipboard.notice().is_some()
             || app.mode == Mode::ResourceFinder
             || app.log_groups_state.loading
             || app.kms_state.keys.loading
@@ -108,6 +113,18 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             }
                             continue;
+                        }
+
+                        // Object previews/downloads are asynchronous; don't fall through
+                        // to generic refresh/select loaders after consuming these keys.
+                        if let Some(action) = handle_key(key, app.mode) {
+                            if rusticity_term::s3::object::handle_action(&mut app, &action) {
+                                let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                                if clipboard.flush(&mut app.clipboard, frame.buffer) {
+                                    terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                                }
+                                continue;
+                            }
                         }
 
                         // Handle 'g' prefix key combinations

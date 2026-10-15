@@ -24,6 +24,7 @@ pub struct State {
     pub current_bucket: Option<String>,
     pub prefix_stack: Vec<String>,
     pub objects: Vec<S3Object>,
+    pub object_view: crate::s3::object::State,
     pub selected_object: usize,
     pub object_scroll_offset: usize,
     pub object_visible_rows: std::cell::Cell<usize>,
@@ -55,6 +56,7 @@ impl State {
             current_bucket: None,
             prefix_stack: Vec::new(),
             objects: Vec::new(),
+            object_view: crate::s3::object::State::default(),
             selected_object: 0,
             object_scroll_offset: 0,
             object_visible_rows: std::cell::Cell::new(30),
@@ -106,30 +108,7 @@ impl State {
     }
 
     pub fn calculate_total_object_rows(&self) -> usize {
-        fn count_nested(
-            obj: &S3Object,
-            expanded_prefixes: &HashSet<String>,
-            prefix_preview: &HashMap<String, Vec<S3Object>>,
-        ) -> usize {
-            let mut count = 0;
-            if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-                if let Some(preview) = prefix_preview.get(&obj.key) {
-                    count += preview.len();
-                    for nested_obj in preview {
-                        count += count_nested(nested_obj, expanded_prefixes, prefix_preview);
-                    }
-                } else {
-                    count += 1;
-                }
-            }
-            count
-        }
-
-        let mut total = self.objects.len();
-        for obj in &self.objects {
-            total += count_nested(obj, &self.expanded_prefixes, &self.prefix_preview);
-        }
-        total
+        crate::s3::object::visible_objects(self).len()
     }
 }
 
@@ -865,6 +844,10 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_objects(frame: &mut Frame, app: &App, area: Rect) {
+    if crate::s3::object::render_preview(frame, app, area) {
+        return;
+    }
+
     let show_filter = app.s3_state.object_tab == ObjectTab::Objects;
 
     let chunks = if show_filter {
@@ -990,9 +973,10 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or(30)
         .max(30) as u16;
 
+    let visible_objects = crate::s3::object::visible_objects(&app.s3_state);
     let rows: Vec<Row> = filtered_objects
         .iter()
-        .flat_map(|(idx, obj)| {
+        .flat_map(|(_, obj)| {
             let icon = if obj.is_prefix { "📁" } else { "📄" };
 
             // Add expand indicator for prefixes
@@ -1037,18 +1021,10 @@ fn render_objects_table(frame: &mut Frame, app: &App, area: Rect) {
                     + &obj.storage_class[1..].to_lowercase()
             };
 
-            // Calculate row index including nested items
-            let mut row_idx = *idx;
-            for i in 0..*idx {
-                if let Some(prev_obj) = app.s3_state.objects.get(i) {
-                    if prev_obj.is_prefix && app.s3_state.expanded_prefixes.contains(&prev_obj.key)
-                    {
-                        if let Some(preview) = app.s3_state.prefix_preview.get(&prev_obj.key) {
-                            row_idx += preview.len();
-                        }
-                    }
-                }
-            }
+            let row_idx = visible_objects
+                .iter()
+                .position(|row| std::ptr::eq(*row, *obj))
+                .unwrap_or(0);
 
             let style = if row_idx == app.s3_state.selected_object {
                 Style::default().bg(Color::DarkGray)

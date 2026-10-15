@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod object;
 
 use crate::common::translate_column;
 use crate::common::{format_bytes, ColumnId, UTC_TIMESTAMP_WIDTH};

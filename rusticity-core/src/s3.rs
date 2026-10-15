@@ -1,6 +1,8 @@
 use crate::config::AwsConfig;
 use anyhow::Result;
 
+pub mod object;
+
 pub struct S3Client {
     config: AwsConfig,
 }

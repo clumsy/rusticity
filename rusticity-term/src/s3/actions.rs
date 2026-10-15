@@ -514,41 +514,6 @@ pub fn expand_row(app: &mut App) {
 
 // ── Select item ───────────────────────────────────────────────────────────────
 
-/// Recursively find an object at visual index for selection.
-fn find_object_for_select(
-    obj: &crate::app::S3Object,
-    visual_idx: &mut usize,
-    target_idx: usize,
-    expanded_prefixes: &std::collections::HashSet<String>,
-    prefix_preview: &std::collections::HashMap<String, Vec<crate::app::S3Object>>,
-    found_obj: &mut Option<crate::app::S3Object>,
-) {
-    if obj.is_prefix && expanded_prefixes.contains(&obj.key) {
-        if let Some(preview) = prefix_preview.get(&obj.key) {
-            for nested_obj in preview {
-                if *visual_idx == target_idx {
-                    *found_obj = Some(nested_obj.clone());
-                    return;
-                }
-                *visual_idx += 1;
-                find_object_for_select(
-                    nested_obj,
-                    visual_idx,
-                    target_idx,
-                    expanded_prefixes,
-                    prefix_preview,
-                    found_obj,
-                );
-                if found_obj.is_some() {
-                    return;
-                }
-            }
-        } else {
-            *visual_idx += 1; // loading row
-        }
-    }
-}
-
 pub fn select_item(app: &mut App) {
     if app.s3_state.current_bucket.is_none() {
         // Bucket list — find the row and drill in
@@ -621,33 +586,9 @@ pub fn select_item(app: &mut App) {
             }
         }
     } else {
-        // Objects view — map visual index to object
-        let mut visual_idx = 0;
-        let mut found_obj: Option<crate::app::S3Object> = None;
-
-        let objects = app.s3_state.objects.clone();
-        for obj in &objects {
-            if visual_idx == app.s3_state.selected_object {
-                found_obj = Some(obj.clone());
-                break;
-            }
-            visual_idx += 1;
-            find_object_for_select(
-                obj,
-                &mut visual_idx,
-                app.s3_state.selected_object,
-                &app.s3_state.expanded_prefixes,
-                &app.s3_state.prefix_preview,
-                &mut found_obj,
-            );
-            if found_obj.is_some() {
-                break;
-            }
-        }
-
-        if let Some(obj) = found_obj {
-            if obj.is_prefix {
-                app.s3_state.prefix_stack.push(obj.key.clone());
+        if let Some(object) = crate::s3::object::selected(app).cloned() {
+            if object.is_prefix {
+                app.s3_state.prefix_stack.push(object.key);
                 app.s3_state.buckets.loading = true;
             }
         }

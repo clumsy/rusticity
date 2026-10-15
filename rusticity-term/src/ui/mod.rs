@@ -1582,39 +1582,38 @@ fn highlight_yaml_scalar(value: &str) -> Vec<Span<'static>> {
     spans
 }
 
-/// Render text with YAML syntax highlighting, line numbers, and scrollbar.
-pub fn render_yaml_highlighted(
+/// Shared line-numbered text browser. Only visible lines are highlighted.
+fn render_text_lines(
     frame: &mut Frame,
     area: Rect,
-    yaml_text: &str,
+    text: &str,
     scroll_offset: usize,
     title: &str,
     is_active: bool,
+    highlight: fn(&str) -> Vec<Span<'_>>,
 ) {
-    let total_lines = yaml_text.lines().count();
+    let total_lines = text.lines().count();
     let line_num_width = total_lines.to_string().len().max(2);
-
-    let lines: Vec<Line> = yaml_text
+    let lines: Vec<Line> = text
         .lines()
         .enumerate()
         .skip(scroll_offset)
-        .map(|(idx, line)| {
-            let mut spans = Vec::new();
-            let line_num = format!("{:>width$} │ ", idx + 1, width = line_num_width);
-            spans.push(Span::styled(line_num, Style::default().fg(Color::DarkGray)));
-            spans.extend(highlight_yaml_line(line));
+        .take(area.height.saturating_sub(2) as usize)
+        .map(|(index, line)| {
+            let mut spans = vec![Span::styled(
+                format!("{:>width$} │ ", index + 1, width = line_num_width),
+                Style::default().fg(Color::DarkGray),
+            )];
+            spans.extend(highlight(line));
             Line::from(spans)
         })
         .collect();
-
     let block = titled_block(title).border_style(if is_active {
         active_border()
     } else {
         Style::default()
     });
-
     frame.render_widget(Paragraph::new(lines).block(block), area);
-
     if total_lines > 0 {
         render_scrollbar(
             frame,
@@ -1628,9 +1627,39 @@ pub fn render_yaml_highlighted(
     }
 }
 
-/// Render template text with format-aware syntax highlighting.
-/// Detects JSON (starts with `{` or `[`) and uses JSON highlighting;
-/// everything else uses YAML highlighting.
+pub fn render_yaml_highlighted(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+) {
+    render_text_lines(
+        frame,
+        area,
+        text,
+        scroll_offset,
+        title,
+        is_active,
+        highlight_yaml_line,
+    );
+}
+
+pub fn render_plain_text(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+) {
+    render_text_lines(frame, area, text, scroll_offset, title, is_active, |line| {
+        vec![Span::raw(line)]
+    });
+}
+
+/// Format-aware template browser: JSON objects/arrays, otherwise YAML.
 pub fn render_template_highlighted(
     frame: &mut Frame,
     area: Rect,
@@ -1639,8 +1668,7 @@ pub fn render_template_highlighted(
     title: &str,
     is_active: bool,
 ) {
-    let trimmed = text.trim_start();
-    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+    if text.trim_start().starts_with(['{', '[']) {
         render_json_highlighted(frame, area, text, scroll_offset, title, is_active);
     } else {
         render_yaml_highlighted(frame, area, text, scroll_offset, title, is_active);
@@ -1650,75 +1678,46 @@ pub fn render_template_highlighted(
 pub fn render_json_highlighted(
     frame: &mut Frame,
     area: Rect,
-    json_text: &str,
+    text: &str,
     scroll_offset: usize,
     title: &str,
     is_active: bool,
 ) {
-    let total_lines = json_text.lines().count();
-    let line_num_width = total_lines.to_string().len().max(2);
+    render_text_lines(
+        frame,
+        area,
+        text,
+        scroll_offset,
+        title,
+        is_active,
+        highlight_json_line,
+    );
+}
 
-    let lines: Vec<Line> = json_text
-        .lines()
-        .enumerate()
-        .skip(scroll_offset)
-        .map(|(idx, line)| {
-            let mut spans = Vec::new();
-
-            // Add line number gutter
-            let line_num = format!("{:>width$} │ ", idx + 1, width = line_num_width);
-            spans.push(Span::styled(line_num, Style::default().fg(Color::DarkGray)));
-
-            let trimmed = line.trim_start();
-            let indent = line.len() - trimmed.len();
-
-            if indent > 0 {
-                spans.push(Span::raw(" ".repeat(indent)));
-            }
-
-            if trimmed.starts_with('"') && trimmed.contains(':') {
-                if let Some(colon_pos) = trimmed.find(':') {
-                    spans.push(Span::styled(
-                        &trimmed[..colon_pos],
-                        Style::default().fg(Color::Blue),
-                    ));
-                    spans.push(Span::raw(&trimmed[colon_pos..]));
-                } else {
-                    spans.push(Span::raw(trimmed));
-                }
-            } else if trimmed.starts_with('"') {
-                spans.push(Span::styled(trimmed, Style::default().fg(Color::Green)));
-            } else if trimmed.starts_with("true") || trimmed.starts_with("false") {
-                spans.push(Span::styled(trimmed, Style::default().fg(Color::Yellow)));
-            } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                spans.push(Span::styled(trimmed, Style::default().fg(Color::Magenta)));
-            } else {
-                spans.push(Span::raw(trimmed));
-            }
-
-            Line::from(spans)
-        })
-        .collect();
-
-    let block = titled_block(title).border_style(if is_active {
-        active_border()
-    } else {
-        Style::default()
-    });
-
-    frame.render_widget(Paragraph::new(lines).block(block), area);
-
-    if total_lines > 0 {
-        render_scrollbar(
-            frame,
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            total_lines,
-            scroll_offset,
-        );
+fn highlight_json_line(line: &str) -> Vec<Span<'_>> {
+    let trimmed = line.trim_start();
+    let indent = line.len() - trimmed.len();
+    let mut spans = Vec::new();
+    if indent > 0 {
+        spans.push(Span::raw(" ".repeat(indent)));
     }
+    if trimmed.starts_with('"') && trimmed.contains(':') {
+        let colon = trimmed.find(':').unwrap();
+        spans.push(Span::styled(
+            &trimmed[..colon],
+            Style::default().fg(Color::Blue),
+        ));
+        spans.push(Span::raw(&trimmed[colon..]));
+    } else if trimmed.starts_with('"') {
+        spans.push(Span::styled(trimmed, Style::default().fg(Color::Green)));
+    } else if trimmed.starts_with("true") || trimmed.starts_with("false") {
+        spans.push(Span::styled(trimmed, Style::default().fg(Color::Yellow)));
+    } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        spans.push(Span::styled(trimmed, Style::default().fg(Color::Magenta)));
+    } else {
+        spans.push(Span::raw(trimmed));
+    }
+    spans
 }
 
 // Render a tags tab with description and table

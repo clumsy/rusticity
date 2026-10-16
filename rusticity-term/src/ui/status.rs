@@ -231,6 +231,19 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     {
         // Service-specific Items hints must precede the legacy ViewMode branches.
         dynamodb_items_hotkeys(app)
+    } else if app.mode == Mode::Normal && crate::kms::detail::active(app) {
+        let mut hints = first_hint("⇤⇥", "tabs");
+        hints.extend(hint("↑↓", "scroll / select"));
+        hints.extend(hint("i", "filter table"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^u/^d", "page"));
+        hints.extend(hint("y", "copy ARN"));
+        hints.extend(hint("^o", "console"));
+        hints.extend(hint("^p", "print"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(hint("⎋", "back / cancel"));
+        hints.extend(last_hint("q", "quit"));
+        hints
     } else if app.mode == Mode::Normal && crate::sns::subscriptions::active(app) {
         let mut hints = first_hint("↑↓", "select");
         hints.extend(hint("⏎/←→", "expand"));
@@ -252,10 +265,15 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::VpcVpcs
                 | Service::SnsTopics
                 | Service::SecretsManagerSecrets
+                | Service::KmsKeys
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
-        if app.current_service == Service::SnsTopics {
+        if app.current_service == Service::KmsKeys {
+            hints.extend(hint("⏎", "key details"));
+            hints.extend(hint("⇤⇥", "tabs"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::SnsTopics {
             hints.extend(hint("⏎", "subscriptions"));
             hints.extend(hint("←→", "toggle"));
         } else {
@@ -504,6 +522,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
         || app.sns_state.topics.loading
+        || app.kms_state.detail.busy()
         || app.sns_state.subscriptions.busy()
         || app.secretsmanager_state.secrets.loading
         || app.rds_state.instances.loading

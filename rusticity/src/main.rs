@@ -50,6 +50,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        if rusticity_term::kms::detail::poll(&mut app).await {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
         if rusticity_term::sns::subscriptions::poll(&mut app).await {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
@@ -90,6 +93,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.efs_state.file_systems.loading
             || app.vpc_state.vpcs.loading
             || app.sns_state.topics.loading
+            || app.kms_state.detail.busy()
             || app.sns_state.subscriptions.busy()
             || app.secretsmanager_state.secrets.loading
             || app.rds_state.instances.loading
@@ -146,7 +150,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Async detail reads/transfers must not fall through to
                         // generic refresh/select loaders after consuming these keys.
                         if let Some(action) = handle_key(key, app.mode) {
-                            if rusticity_term::sns::subscriptions::handle_action(&mut app, &action)
+                            if rusticity_term::kms::detail::handle_action(&mut app, &action)
+                                || rusticity_term::sns::subscriptions::handle_action(&mut app, &action)
                                 || rusticity_term::cli_command::handle_action(&mut app, &action)
                                 || rusticity_term::ecr::scan::handle_action(&mut app, &action)
                                 || rusticity_term::s3::object::handle_action(&mut app, &action) {

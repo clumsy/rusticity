@@ -1107,6 +1107,9 @@ impl App {
         if vpc_actions::handle_action(self, &action) || rds_actions::handle_action(self, &action) {
             return;
         }
+        if crate::kms::detail::handle_action(self, &action) {
+            return;
+        }
         if crate::sns::actions::handle_action(self, &action) {
             return;
         }
@@ -4143,6 +4146,9 @@ impl App {
                 if new_service == Service::RdsInstances {
                     self.rds_state.instances.reset();
                     self.rds_state.instances.loading = true;
+                }
+                if new_service == Service::KmsKeys {
+                    self.kms_state.detail.close();
                 }
                 if new_service == Service::SnsTopics {
                     self.sns_state.subscriptions.close();

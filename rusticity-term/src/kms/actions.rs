@@ -114,22 +114,30 @@ pub fn prev_detail_tab(app: &mut App) {
 // ── Yank / console URL / breadcrumb ──────────────────────────────────────────
 
 pub fn yank(app: &App) {
+    if let Some(key) = &app.kms_state.detail.source {
+        app.clipboard.request_text(&key.key_arn);
+        return;
+    }
     let filtered = filtered_kms_keys(app);
     if let Some(key) = app.kms_state.keys.get_selected(&filtered) {
         app.clipboard.request_text(&key.key_arn);
     }
 }
 
-pub fn breadcrumb(_app: &App) -> Vec<String> {
-    // Keep stable — the tab switcher inside the view shows the sub-tab name.
-    // Using the sub-tab name here would cause the session tab title to
-    // change on every tab switch, making it disappear/reappear.
-    vec!["KMS".to_string(), "Managed Keys".to_string()]
+pub fn breadcrumb(app: &App) -> Vec<String> {
+    let mut parts = vec!["KMS".to_string(), "Managed Keys".to_string()];
+    if let Some(key) = &app.kms_state.detail.source {
+        parts.push(key.key_id.clone());
+    }
+    parts
 }
 
 pub fn console_url(app: &App) -> String {
     use crate::kms;
     use crate::ui::kms::Tab;
+    if let Some(key) = &app.kms_state.detail.source {
+        return kms::console_url_key(&app.config.region, &key.key_id);
+    }
     match app.kms_state.tab {
         Tab::AwsManaged => kms::console_url_aws_managed_keys(&app.config.region),
         Tab::CustomerManaged => kms::console_url_keys(&app.config.region),

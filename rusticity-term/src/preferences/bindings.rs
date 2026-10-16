@@ -30,6 +30,7 @@ enum Source {
     IamUserTags,
     IamRoleTags,
     KmsKeys,
+    KmsKeyDetails,
     RdsInstances,
     VpcVpcs,
     SnsTopics,
@@ -135,6 +136,7 @@ impl Source {
             {
                 Self::IamRoleTags
             }
+            Service::KmsKeys if crate::kms::detail::active(app) => Self::KmsKeyDetails,
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances => Self::RdsInstances,
             Service::VpcVpcs => Self::VpcVpcs,
@@ -263,6 +265,21 @@ impl Source {
                 |id| crate::kms::key::Column::from_id(id).map(|c| c.name()),
                 Some(crate::kms::key::Column::Alias.id()),
             ),
+            Self::KmsKeyDetails => {
+                let view = app.kms_state.detail.view().expect("kms key detail source");
+                // General/Rotation/Policy carry no columns — a read-only empty
+                // model so no inventory column preferences leak into them.
+                if view.tab.columns().is_empty() {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                }
+                let ids: Vec<_> = view.tab.columns().iter().map(|(id, _)| *id).collect();
+                columns(
+                    &ids,
+                    &view.data().visible_column_ids,
+                    |id| Some(id.into()),
+                    None,
+                )
+            }
             Self::SnsSubscriptions => columns(
                 &app.sns_state.subscriptions.column_ids,
                 &app.sns_state.subscriptions.visible_column_ids,
@@ -338,6 +355,15 @@ impl Source {
             Self::DdbBackups => app.dynamodb_state.backups.page_size,
             Self::DdbTags => app.dynamodb_state.tags_table.page_size,
             Self::KmsKeys => app.kms_state.keys.page_size,
+            Self::KmsKeyDetails => {
+                app.kms_state
+                    .detail
+                    .view()
+                    .expect("kms key detail source")
+                    .data()
+                    .table
+                    .page_size
+            }
             Self::RdsInstances => app.rds_state.instances.page_size,
             Self::VpcVpcs => app.vpc_state.vpcs.page_size,
             Self::SnsSubscriptions => app.sns_state.subscriptions.table.page_size,
@@ -377,6 +403,14 @@ impl Source {
             Self::DdbBackups => app.dynamodb_state.backups.set_page_size(size),
             Self::DdbTags => app.dynamodb_state.tags_table.set_page_size(size),
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
+            Self::KmsKeyDetails => app
+                .kms_state
+                .detail
+                .view_mut()
+                .expect("kms key detail source")
+                .data_mut()
+                .table
+                .set_page_size(size),
             Self::RdsInstances => app.rds_state.instances.set_page_size(size),
             Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
             Self::SnsSubscriptions => app.sns_state.subscriptions.table.set_page_size(size),
@@ -408,6 +442,15 @@ impl Source {
             Self::FsxFiles => &mut app.fsx_visible_column_ids,
             Self::DdbTables => &mut app.dynamodb_visible_column_ids,
             Self::KmsKeys => app.kms_state.visible_column_ids_mut(),
+            Self::KmsKeyDetails => {
+                &mut app
+                    .kms_state
+                    .detail
+                    .view_mut()
+                    .expect("kms key detail source")
+                    .data_mut()
+                    .visible_column_ids
+            }
             Self::RdsInstances => &mut app.rds_state.visible_column_ids,
             Self::VpcVpcs => &mut app.vpc_state.visible_column_ids,
             Self::SnsSubscriptions => &mut app.sns_state.subscriptions.visible_column_ids,

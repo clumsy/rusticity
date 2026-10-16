@@ -1,6 +1,8 @@
 use crate::config::AwsConfig;
 use anyhow::Result;
 
+pub mod detail;
+
 #[derive(Clone, Debug)]
 pub struct KmsKey {
     pub key_id: String,
@@ -171,5 +173,15 @@ impl KmsClient {
         result.sort_by(|a, b| a.alias.cmp(&b.alias).then_with(|| a.key_id.cmp(&b.key_id)));
 
         Ok(result)
+    }
+
+    /// Read-only detail view for a single key, identified by its full ARN.
+    /// Metadata comes fresh from DescribeKey (authoritative); aliases, rotation,
+    /// policy and tags are gathered independently so a permission or
+    /// unsupported-state failure in one section surfaces as that section's
+    /// error rather than failing or emptying the whole view. See
+    /// [`detail::KmsKeyDetail`].
+    pub async fn key_details(&self, key_arn: &str) -> Result<detail::KmsKeyDetail> {
+        detail::key_details(&self.config, key_arn).await
     }
 }

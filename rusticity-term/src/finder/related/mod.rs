@@ -182,7 +182,12 @@ pub fn selected(app: &App) -> Option<Resource> {
 
         Service::KmsKeys => {
             let filtered = crate::ui::kms::filtered_kms_keys(app);
-            let key = filtered.get(app.kms_state.keys.selected)?;
+            let key = app
+                .kms_state
+                .detail
+                .source
+                .as_ref()
+                .or_else(|| filtered.get(app.kms_state.keys.selected).copied())?;
             Some(Resource {
                 kind: ResourceKind::Key,
                 id: key.key_id.clone(),

@@ -12,6 +12,7 @@ use ratatui::prelude::*;
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 pub struct State {
+    pub detail: crate::kms::detail::State,
     pub keys: TableState<KmsKey>,
     pub tab: Tab,
     pub input_focus: InputFocus,
@@ -31,6 +32,7 @@ impl State {
     pub fn new() -> Self {
         use crate::kms::key::Column;
         Self {
+            detail: crate::kms::detail::State::default(),
             keys: TableState::new(),
             tab: Tab::AwsManaged,
             input_focus: InputFocus::Filter,
@@ -107,6 +109,10 @@ pub fn filtered_kms_keys(app: &App) -> Vec<&KmsKey> {
 }
 
 pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
+    if crate::kms::detail::active(app) {
+        crate::kms::detail::render(frame, app, area);
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

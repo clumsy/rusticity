@@ -202,6 +202,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
             focus!(app.fsx_state.file_systems, file_system_id);
         }
         ResourceKind::Key => {
+            app.kms_state.detail.close();
             app.load_kms_keys().await?;
             let key = app
                 .kms_state

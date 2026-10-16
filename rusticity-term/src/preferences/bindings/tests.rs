@@ -286,3 +286,56 @@ fn stale_selector_index_is_safe_after_dynamic_schema_shrinks() {
     app.handle_action(Action::NextItem);
     assert_eq!(app.column_selector_index, active(&app).unwrap().max_index());
 }
+
+#[test]
+fn kms_detail_routes_to_detail_source_and_summary_tabs_are_read_only() {
+    use crate::kms::detail::Tab;
+    use crate::kms::key::Key;
+    let mut app = App::new_without_client("test".into(), None);
+    app.service_selected = true;
+    app.current_service = Service::KmsKeys;
+    app.mode = Mode::Normal;
+    app.kms_state.tab = crate::ui::kms::Tab::CustomerManaged;
+    app.kms_state.keys.items = vec![Key {
+        key_id: "id".into(),
+        key_arn: "arn:aws:kms:us-east-1:123456789012:key/id".into(),
+        alias: "k".into(),
+        description: String::new(),
+        key_state: "Enabled".into(),
+        key_usage: "EncryptDecrypt".into(),
+        key_spec: "SymmetricDefault".into(),
+        key_manager: "Customer".into(),
+        creation_date: String::new(),
+        expiration_date: String::new(),
+        deletion_date: String::new(),
+        custom_key_store_id: String::new(),
+        origin: "AwsKms".into(),
+        enabled: true,
+        multi_region: false,
+    }];
+
+    // Inventory (no detail open) routes to the flat KmsKeys source.
+    assert!(matches!(
+        Source::for_service(&app, Service::KmsKeys),
+        Some(Source::KmsKeys)
+    ));
+
+    // Open the detail page; routing switches to the detail source.
+    assert!(crate::kms::detail::handle_action(&mut app, &Action::Select));
+    assert!(matches!(
+        Source::for_service(&app, Service::KmsKeys),
+        Some(Source::KmsKeyDetails)
+    ));
+
+    // General (summary) tab: read-only, zero columns — no inventory leakage.
+    assert_eq!(app.kms_state.detail.view().unwrap().tab, Tab::General);
+    let model = model_for(&app, Service::KmsKeys);
+    assert!(!model.is_enabled());
+    assert_eq!(model.column_count(), 0);
+
+    // Aliases (table) tab: enabled with real columns.
+    crate::kms::detail::handle_action(&mut app, &Action::NextDetailTab);
+    assert_eq!(app.kms_state.detail.view().unwrap().tab, Tab::Aliases);
+    let model = model_for(&app, Service::KmsKeys);
+    assert!(model.column_count() >= 2);
+}

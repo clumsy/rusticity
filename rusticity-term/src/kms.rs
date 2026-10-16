@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod detail;
 pub mod key;
 
 use crate::console::{component, ConsoleUrl};

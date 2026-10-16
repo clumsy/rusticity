@@ -226,15 +226,13 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 }
 
 pub fn console_url(app: &App) -> String {
-    if let Some(instance_id) = &app.ec2_state.current_instance {
-        format!(
-            "https://{}.console.aws.amazon.com/ec2/home?region={}#InstanceDetails:instanceId={}",
-            app.config.region, app.config.region, instance_id
-        )
-    } else {
-        format!(
-            "https://{}.console.aws.amazon.com/ec2/home?region={}#Instances:",
-            app.config.region, app.config.region
-        )
-    }
+    use crate::console::{component, ConsoleUrl};
+    let route = match &app.ec2_state.current_instance {
+        Some(id) => format!("InstanceDetails:instanceId={}", component(id)),
+        None => "Instances:".into(),
+    };
+    ConsoleUrl::regional(&app.config.region, "/ec2/home")
+        .query("region", &app.config.region)
+        .fragment(route)
+        .finish()
 }

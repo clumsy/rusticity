@@ -2,6 +2,7 @@ pub mod actions;
 pub mod columns;
 pub mod subscription;
 pub mod subscriptions;
+use crate::console::{component, ConsoleUrl};
 use std::collections::HashMap;
 
 pub fn init(i18n: &mut HashMap<String, String>) {
@@ -15,20 +16,14 @@ pub fn init(i18n: &mut HashMap<String, String>) {
     }
 }
 
+/// Regional SNS console link. A topic ARN deep-links to the topic detail route;
+/// otherwise the topics list. The ARN is a raw value encoded exactly once.
+/// Account/session-specific host prefixes are never part of the resource link.
 pub fn console_url(region: &str, topic_arn: Option<&str>) -> String {
-    // Use the canonical regional hostname, never a browser-session-specific prefix.
-    let domain = if region.starts_with("cn-") {
-        "amazonaws.cn"
-    } else {
-        "aws.amazon.com"
-    };
-    let base = format!(
-        "https://{region}.console.{domain}/sns/v3/home?region={}",
-        urlencoding::encode(region)
-    );
+    let url = ConsoleUrl::regional(region, "/sns/v3/home").query("region", region);
     match topic_arn {
-        Some(arn) if !arn.is_empty() => format!("{base}#/topic/{}", urlencoding::encode(arn)),
-        _ => format!("{base}#/topics"),
+        Some(arn) if !arn.is_empty() => url.fragment(format!("/topic/{}", component(arn))).finish(),
+        _ => url.fragment("/topics").finish(),
     }
 }
 

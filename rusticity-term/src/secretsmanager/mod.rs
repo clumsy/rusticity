@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod columns;
+use crate::console::ConsoleUrl;
 use std::collections::HashMap;
 
 pub fn init(i18n: &mut HashMap<String, String>) {
@@ -8,18 +9,13 @@ pub fn init(i18n: &mut HashMap<String, String>) {
             .or_insert_with(|| column.default_name().into());
     }
 }
-/// This service currently shows an inventory table, so Ctrl+O opens the list.
-/// Browser-session-specific hostname prefixes are deliberately not hardcoded.
+/// This service currently shows an inventory table, so Ctrl+O always opens the
+/// list page — there is no per-secret route. Browser-session-specific hostname
+/// prefixes are deliberately not hardcoded.
 pub fn console_url(region: &str) -> String {
-    let domain = if region.starts_with("cn-") {
-        "amazonaws.cn"
-    } else {
-        "aws.amazon.com"
-    };
-    format!(
-        "https://{region}.console.{domain}/secretsmanager/listsecrets?region={}",
-        urlencoding::encode(region)
-    )
+    ConsoleUrl::regional(region, "/secretsmanager/listsecrets")
+        .query("region", region)
+        .finish()
 }
 #[cfg(test)]
 mod tests;

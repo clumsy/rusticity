@@ -1990,7 +1990,7 @@ mod tests {
 
         app.dynamodb_state.current_table = None;
         let url = crate::dynamodb::actions::console_url(&app);
-        assert!(url.contains("tab=overview"), "{}", url);
+        assert!(url.ends_with("#tables"), "{}", url);
     }
 
     #[test]

@@ -2,6 +2,7 @@ pub mod actions;
 
 use crate::common::t;
 use crate::common::{format_duration_seconds, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::console::{component, ConsoleUrl};
 use crate::ui::table::Column;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,40 +29,104 @@ pub fn format_arn(account_id: &str, resource_type: &str, resource_name: &str) ->
     )
 }
 
-pub fn console_url_users(_region: &str) -> String {
-    "https://console.aws.amazon.com/iam/home#/users".to_string()
+pub fn console_url_users(region: &str) -> String {
+    ConsoleUrl::global(region, "/iam/home")
+        .fragment("/users")
+        .finish()
 }
 
 pub fn console_url_user_detail(region: &str, user_name: &str, section: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/iam/home?region={}#/users/details/{}?section={}",
-        region, region, user_name, section
-    )
+    ConsoleUrl::regional(region, "/iam/home")
+        .query("region", region)
+        .fragment(format!(
+            "/users/details/{}?section={}",
+            component(user_name),
+            component(section)
+        ))
+        .finish()
 }
 
-pub fn console_url_roles(_region: &str) -> String {
-    "https://console.aws.amazon.com/iam/home#/roles".to_string()
+pub fn console_url_roles(region: &str) -> String {
+    ConsoleUrl::global(region, "/iam/home")
+        .fragment("/roles")
+        .finish()
 }
 
 pub fn console_url_role_detail(region: &str, role_name: &str, section: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/iam/home?region={}#/roles/details/{}?section={}",
-        region, region, role_name, section
-    )
+    ConsoleUrl::regional(region, "/iam/home")
+        .query("region", region)
+        .fragment(format!(
+            "/roles/details/{}?section={}",
+            component(role_name),
+            component(section)
+        ))
+        .finish()
 }
 
 pub fn console_url_role_policy(region: &str, role_name: &str, policy_name: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/iam/home?region={}#/roles/details/{}/editPolicy/{}?step=addPermissions",
-        region, region, role_name, policy_name
-    )
+    ConsoleUrl::regional(region, "/iam/home")
+        .query("region", region)
+        .fragment(format!(
+            "/roles/details/{}/editPolicy/{}?step=addPermissions",
+            component(role_name),
+            component(policy_name)
+        ))
+        .finish()
 }
 
 pub fn console_url_groups(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/iam/home?region={}#/groups",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/iam/home")
+        .query("region", region)
+        .fragment("/groups")
+        .finish()
+}
+
+#[cfg(test)]
+mod console_url_tests {
+    use super::*;
+
+    #[test]
+    fn users_and_roles_lists_are_global_no_region_query() {
+        assert_eq!(
+            console_url_users("us-east-1"),
+            "https://console.aws.amazon.com/iam/home#/users"
+        );
+        assert_eq!(
+            console_url_roles("eu-west-1"),
+            "https://console.aws.amazon.com/iam/home#/roles"
+        );
+        // Keep the global route (no region prefix/query) within the active
+        // console domain rather than sending China-region users to commercial.
+        assert_eq!(
+            console_url_users("cn-north-1"),
+            "https://console.amazonaws.cn/iam/home#/users"
+        );
+        assert_eq!(
+            console_url_roles("cn-northwest-1"),
+            "https://console.amazonaws.cn/iam/home#/roles"
+        );
+    }
+
+    #[test]
+    fn role_policy_encodes_policy_name_with_plus_once() {
+        // '+' is a raw character in the policy name and must encode once to %2B
+        // (not survive as a literal '+' meaning space, and not double-encode).
+        let url = console_url_role_policy("us-east-1", "My Role", "Allow+S3/Read");
+        assert_eq!(
+            url,
+            "https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/roles/details/My%20Role/editPolicy/Allow%2BS3%2FRead?step=addPermissions"
+        );
+        assert!(!url.contains("%252B"));
+    }
+
+    #[test]
+    fn user_detail_encodes_name_and_section_in_fragment() {
+        let url = console_url_user_detail("ap-south-1", "a+b", "permissions?x");
+        assert_eq!(
+            url,
+            "https://ap-south-1.console.aws.amazon.com/iam/home?region=ap-south-1#/users/details/a%2Bb?section=permissions%3Fx"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

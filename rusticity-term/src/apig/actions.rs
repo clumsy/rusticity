@@ -285,22 +285,18 @@ pub fn console_url(app: &App) -> String {
         if app.apig_state.detail_tab == ApiDetailTab::Routes {
             let protocol = api.protocol_type.to_uppercase();
             if protocol == "REST" {
-                let (filtered_items, _) = crate::ui::apig::filter_tree_items(
+                let (filtered_items, filtered_children) = crate::ui::apig::filter_tree_items(
                     &app.apig_state.resources.items,
                     &app.apig_state.resource_children,
                     &app.apig_state.route_filter,
                 );
-                let resource_id = if app.apig_state.resources.selected < filtered_items.len() {
-                    let mut current_row = 0;
-                    find_resource_at_row(
-                        app,
-                        &filtered_items,
-                        app.apig_state.resources.selected,
-                        &mut current_row,
-                    )
-                } else {
-                    None
-                };
+                let resource_id = find_resource_at_row_with_children(
+                    app,
+                    &filtered_items,
+                    &filtered_children,
+                    app.apig_state.resources.selected,
+                    &mut 0,
+                );
                 apig::console_url_resources(&app.config.region, &api.id, resource_id.as_deref())
             } else {
                 let (filtered_items, filtered_children) = crate::ui::apig::filter_tree_items(
@@ -492,6 +488,38 @@ fn find_resource_parent_row_recursive(
                     find_resource_parent_row_recursive(app, children, child_id, current_row)
                 {
                     return Some(row);
+                }
+            }
+        }
+    }
+    None
+}
+
+// Console navigation must walk the same filtered child map as the rendered
+// resource tree. Counting only roots drops expanded children; using the raw
+// child map can target a different row after filtering.
+fn find_resource_at_row_with_children(
+    app: &App,
+    resources: &[ApigResource],
+    children_map: &HashMap<String, Vec<ApigResource>>,
+    target_row: usize,
+    current_row: &mut usize,
+) -> Option<String> {
+    for resource in resources {
+        if *current_row == target_row {
+            return Some(resource.id.clone());
+        }
+        *current_row += 1;
+        if app.apig_state.expanded_resources.contains(&resource.id) {
+            if let Some(children) = children_map.get(&resource.id) {
+                if let Some(id) = find_resource_at_row_with_children(
+                    app,
+                    children,
+                    children_map,
+                    target_row,
+                    current_row,
+                ) {
+                    return Some(id);
                 }
             }
         }

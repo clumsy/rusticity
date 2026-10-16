@@ -265,6 +265,8 @@ pub fn console_url(app: &App) -> String {
             }
         }
         ecr::console_url_private_repository(&app.config.region, &app.config.account_id, repo_name)
+    } else if app.ecr_state.tab == crate::ui::ecr::Tab::Public {
+        ecr::console_url_public_repositories(&app.config.region)
     } else {
         ecr::console_url_repositories(&app.config.region)
     }

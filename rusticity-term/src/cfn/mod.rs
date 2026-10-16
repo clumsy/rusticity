@@ -1,6 +1,7 @@
 pub mod actions;
 
 use crate::common::{translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::console::{component, ConsoleUrl};
 use crate::ui::cfn::DetailTab;
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
@@ -37,17 +38,21 @@ pub fn init(i18n: &mut HashMap<String, String>) {
 }
 
 pub fn console_url_stacks(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/cloudformation/home?region={}#/stacks",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/cloudformation/home")
+        .query("region", region)
+        .fragment("/stacks")
+        .finish()
 }
 
 pub fn console_url_stack_detail(region: &str, stack_name: &str, stack_id: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/cloudformation/home?region={}#/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}",
-        region, region, stack_name, stack_id
-    )
+    ConsoleUrl::regional(region, "/cloudformation/home")
+        .query("region", region)
+        .fragment(format!(
+            "/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}",
+            component(stack_name),
+            component(stack_id)
+        ))
+        .finish()
 }
 
 pub fn console_url_stack_detail_with_tab(region: &str, stack_id: &str, tab: &DetailTab) -> String {
@@ -61,17 +66,53 @@ pub fn console_url_stack_detail_with_tab(region: &str, stack_id: &str, tab: &Det
         DetailTab::ChangeSets => "changesets",
         DetailTab::GitSync => "gitsync",
     };
-    let encoded_arn = urlencoding::encode(stack_id);
     // The ChangeSets tab requires the extra eventsView=graph query parameter
     let extra = if matches!(tab, DetailTab::ChangeSets) {
         "&eventsView=graph"
     } else {
         ""
     };
-    format!(
-        "https://{}.console.aws.amazon.com/cloudformation/home?region={}#/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}{}",
-        region, region, tab_path, encoded_arn, extra
-    )
+    ConsoleUrl::regional(region, "/cloudformation/home")
+        .query("region", region)
+        .fragment(format!(
+            "/stacks/{}?filteringText=&filteringStatus=active&viewNested=true&stackId={}{}",
+            component(tab_path),
+            component(stack_id),
+            extra
+        ))
+        .finish()
+}
+
+#[cfg(test)]
+mod console_url_tests {
+    use super::*;
+
+    #[test]
+    fn stack_detail_encodes_raw_stack_arn_once() {
+        let arn = "arn:aws:cloudformation:us-east-1:123456789012:stack/my-stack/abc-123";
+        let url = console_url_stack_detail("us-east-1", "my-stack", arn);
+        assert!(url.starts_with(
+            "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/my-stack?"
+        ));
+        // Raw ARN colons and slashes encoded exactly once in the stackId value.
+        assert!(url.contains(
+            "stackId=arn%3Aaws%3Acloudformation%3Aus-east-1%3A123456789012%3Astack%2Fmy-stack%2Fabc-123"
+        ));
+        // Deliberate pre-authored fragment query stays verbatim.
+        assert!(url.contains("?filteringText=&filteringStatus=active&viewNested=true&stackId="));
+        // No double-encoding.
+        assert!(!url.contains("%253A"));
+        assert!(!url.contains("%252F"));
+    }
+
+    #[test]
+    fn changesets_tab_appends_events_view_verbatim() {
+        let arn = "arn:aws:cloudformation:eu-west-1:1:stack/s/x";
+        let url = console_url_stack_detail_with_tab("eu-west-1", arn, &DetailTab::ChangeSets);
+        assert!(url.contains("#/stacks/changesets?"));
+        assert!(url.ends_with("&eventsView=graph"));
+        assert!(url.contains("stackId=arn%3Aaws%3Acloudformation%3Aeu-west-1%3A1%3Astack%2Fs%2Fx"));
+    }
 }
 
 #[derive(Debug, Clone, Default)]

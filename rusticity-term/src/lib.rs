@@ -7,6 +7,7 @@ pub mod cli_output;
 pub mod clipboard;
 pub mod cloudtrail;
 pub mod common;
+mod console;
 pub mod cw;
 pub mod dynamodb;
 pub mod ec2;

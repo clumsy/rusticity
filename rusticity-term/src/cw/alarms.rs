@@ -209,21 +209,15 @@ impl AlarmColumn {
 }
 
 pub fn console_url(region: &str, alarm_name: Option<&str>) -> String {
-    match alarm_name {
-        Some(name) => {
-            let encoded = urlencoding::encode(name);
-            format!(
-                "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarm/{}?~(sortingColumn~'Last*2520state*2520update~sortingDirection~'ASC~timeRange~(startDate~'PT3H~endDate~'PT0S))",
-                region, region, encoded
-            )
-        }
-        None => {
-            format!(
-                "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#alarmsV2:alarms?~(sortingColumn~'Last*2520state*2520update~sortingDirection~'ASC~timeRange~(startDate~'PT3H~endDate~'PT0S))",
-                region, region
-            )
-        }
-    }
+    use crate::console::{component, ConsoleUrl};
+    let route = match alarm_name {
+        Some(name) => format!("alarmsV2:alarm/{}", component(name)),
+        None => "alarmsV2:alarms".into(),
+    };
+    ConsoleUrl::regional(region, "/cloudwatch/home")
+        .query("region", region)
+        .fragment(format!("{route}?~(sortingColumn~'Last*2520state*2520update~sortingDirection~'ASC~timeRange~(startDate~'PT3H~endDate~'PT0S))"))
+        .finish()
 }
 
 #[cfg(test)]

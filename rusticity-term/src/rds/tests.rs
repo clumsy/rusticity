@@ -135,9 +135,9 @@ fn rds_refresh_retry_and_out_of_range_navigation_are_safe() {
 }
 
 #[test]
-fn rds_urls_use_selection_region_and_encode_identifier() {
+fn rds_inventory_urls_ignore_selection_and_detail_builder_encodes_identifier() {
     let app = app();
-    assert!(actions::console_url(&app).ends_with("#database:id=database-00;is-cluster=false"));
+    assert!(actions::console_url(&app).ends_with("#databases:"));
     assert!(console_url_instance("eu-west-1", "db name").contains("id=db%20name;"));
     assert_eq!(
         console_url_instances("us-east-2"),

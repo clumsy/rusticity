@@ -37,27 +37,32 @@ pub fn init(i18n: &mut HashMap<String, String>) {
 }
 
 pub fn console_url_list(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#logsV2:log-groups",
-        region, region
-    )
+    crate::console::ConsoleUrl::regional(region, "/cloudwatch/home")
+        .query("region", region)
+        .fragment("logsV2:log-groups")
+        .finish()
 }
 
 pub fn console_url_detail(region: &str, group_name: &str) -> String {
-    let encoded_group = urlencoding::encode(group_name);
-    format!(
-        "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#logsV2:log-groups/log-group/{}",
-        region, region, encoded_group
-    )
+    crate::console::ConsoleUrl::regional(region, "/cloudwatch/home")
+        .query("region", region)
+        .fragment(format!(
+            "logsV2:log-groups/log-group/{}",
+            crate::console::component(group_name)
+        ))
+        .finish()
 }
 
 pub fn console_url_stream(region: &str, group_name: &str, stream_name: &str) -> String {
-    let encoded_group = urlencoding::encode(group_name);
-    let encoded_stream = urlencoding::encode(stream_name);
-    format!(
-        "https://{}.console.aws.amazon.com/cloudwatch/home?region={}#logsV2:log-groups/log-group/{}/log-events/{}",
-        region, region, encoded_group, encoded_stream
-    )
+    use crate::console::{component, ConsoleUrl};
+    ConsoleUrl::regional(region, "/cloudwatch/home")
+        .query("region", region)
+        .fragment(format!(
+            "logsV2:log-groups/log-group/{}/log-events/{}",
+            component(group_name),
+            component(stream_name)
+        ))
+        .finish()
 }
 
 // Log Group Columns

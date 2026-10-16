@@ -98,7 +98,7 @@ fn sns_columns_are_shared_with_preferences_and_i18n() {
 }
 
 #[test]
-fn sns_filter_sort_selection_copy_and_console_use_the_same_visible_row() {
+fn sns_filter_sort_and_copy_use_visible_row_but_console_opens_topics_list() {
     let mut app = app();
     assert_eq!(filtered_topics(&app)[0].name, "topic-000.fifo");
     for (filter, count) in [
@@ -114,7 +114,7 @@ fn sns_filter_sort_selection_copy_and_console_use_the_same_visible_row() {
     app.sns_state.topics.filter = "topic-024".into();
     let arn = "arn:aws:sns:us-east-1:123456789012:topic-024.fifo";
     assert_eq!(actions::selected_arn(&app).as_deref(), Some(arn));
-    assert_eq!(app.get_console_url(), console_url("us-east-1", Some(arn)));
+    assert_eq!(app.get_console_url(), console_url("us-east-1", None));
     press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
     assert!(app
         .clipboard
@@ -125,6 +125,45 @@ fn sns_filter_sort_selection_copy_and_console_use_the_same_visible_row() {
     app.sns_state.topics.selected = usize::MAX;
     assert!(actions::selected_arn(&app).is_none());
     assert!(app.get_console_url().ends_with("#/topics"));
+}
+
+#[test]
+fn sns_topics_ctrl_o_never_deep_links_to_a_highlighted_or_expanded_row() {
+    assert_eq!(
+        handle_key(
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+            Mode::Normal
+        ),
+        Some(Action::OpenInConsole)
+    );
+    for (region, domain) in [
+        ("us-east-1", "aws.amazon.com"),
+        ("eu-west-1", "aws.amazon.com"),
+        ("cn-north-1", "amazonaws.cn"),
+    ] {
+        for view in [ViewMode::List, ViewMode::Detail, ViewMode::Events] {
+            let mut app = app();
+            app.config.region = region.into();
+            app.view_mode = view;
+            let expected =
+                format!("https://{region}.console.{domain}/sns/v3/home?region={region}#/topics");
+            for (filter, selected) in [
+                ("", 0),
+                ("", 11),
+                ("topic-024", 0),
+                ("missing", 0),
+                ("", usize::MAX),
+            ] {
+                app.sns_state.topics.filter = filter.into();
+                app.sns_state.topics.selected = selected;
+                app.sns_state.topics.expanded_item = Some(selected);
+                assert!(app.sns_state.subscriptions.topic.is_none());
+                assert_eq!(app.get_console_url(), expected);
+            }
+            app.sns_state.topics.items.clear();
+            assert_eq!(app.get_console_url(), expected);
+        }
+    }
 }
 
 #[test]

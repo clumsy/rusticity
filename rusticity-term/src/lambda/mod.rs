@@ -2,6 +2,7 @@ pub mod applications;
 pub mod functions;
 
 use crate::common::{format_bytes, translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::console::{component, ConsoleUrl};
 use crate::ui::lambda::{ApplicationDetailTab, DetailTab};
 use crate::ui::table;
 use ratatui::prelude::*;
@@ -450,17 +451,17 @@ mod tests {
 }
 
 pub fn console_url_functions(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/lambda/home?region={}#/functions",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/lambda/home")
+        .query("region", region)
+        .fragment("/functions")
+        .finish()
 }
 
 pub fn console_url_function_detail(region: &str, function_name: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/lambda/home?region={}#/functions/{}",
-        region, region, function_name
-    )
+    ConsoleUrl::regional(region, "/lambda/home")
+        .query("region", region)
+        .fragment(format!("/functions/{}", component(function_name)))
+        .finish()
 }
 
 pub fn console_url_function_version(
@@ -474,17 +475,22 @@ pub fn console_url_function_version(
         DetailTab::Configuration => "configure",
         _ => "code",
     };
-    format!(
-        "https://{}.console.aws.amazon.com/lambda/home?region={}#/functions/{}/versions/{}?tab={}",
-        region, region, function_name, version, tab
-    )
+    ConsoleUrl::regional(region, "/lambda/home")
+        .query("region", region)
+        .fragment(format!(
+            "/functions/{}/versions/{}?tab={}",
+            component(function_name),
+            component(version),
+            component(tab)
+        ))
+        .finish()
 }
 
 pub fn console_url_applications(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/lambda/home?region={}#/applications",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/lambda/home")
+        .query("region", region)
+        .fragment("/applications")
+        .finish()
 }
 
 pub fn console_url_application_detail(
@@ -496,10 +502,47 @@ pub fn console_url_application_detail(
         ApplicationDetailTab::Overview => "overview",
         ApplicationDetailTab::Deployments => "deployments",
     };
-    format!(
-        "https://{}.console.aws.amazon.com/lambda/home?region={}#/applications/{}?tab={}",
-        region, region, app_name, tab_param
-    )
+    ConsoleUrl::regional(region, "/lambda/home")
+        .query("region", region)
+        .fragment(format!(
+            "/applications/{}?tab={}",
+            component(app_name),
+            component(tab_param)
+        ))
+        .finish()
+}
+
+#[cfg(test)]
+mod console_url_tests {
+    use super::*;
+
+    #[test]
+    fn function_name_encoded_once_in_fragment() {
+        let url = console_url_function_detail("us-east-1", "my fn/v2+beta");
+        assert_eq!(
+            url,
+            "https://us-east-1.console.aws.amazon.com/lambda/home?region=us-east-1#/functions/my%20fn%2Fv2%2Bbeta"
+        );
+        assert!(!url.contains("%252F"));
+    }
+
+    #[test]
+    fn function_version_tab_query_lives_in_fragment() {
+        let url = console_url_function_version("eu-west-1", "a+b", "1", &DetailTab::Configuration);
+        assert_eq!(
+            url,
+            "https://eu-west-1.console.aws.amazon.com/lambda/home?region=eu-west-1#/functions/a%2Bb/versions/1?tab=configure"
+        );
+    }
+
+    #[test]
+    fn region_query_precedes_fragment() {
+        let url = console_url_functions("ap-south-1");
+        assert_eq!(
+            url,
+            "https://ap-south-1.console.aws.amazon.com/lambda/home?region=ap-south-1#/functions"
+        );
+    }
 }
 
 #[derive(Debug, Clone)]

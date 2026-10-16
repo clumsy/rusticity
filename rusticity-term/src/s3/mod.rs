@@ -3,6 +3,7 @@ pub mod object;
 
 use crate::common::translate_column;
 use crate::common::{format_bytes, ColumnId, UTC_TIMESTAMP_WIDTH};
+use crate::console::{component, ConsoleUrl};
 use crate::ui::table::Column as TableColumn;
 use ratatui::prelude::*;
 use std::collections::HashMap;
@@ -29,25 +30,43 @@ pub fn init(i18n: &mut HashMap<String, String>) {
 }
 
 pub fn console_url_buckets(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/s3/buckets?region={}",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/s3/buckets")
+        .query("region", region)
+        .finish()
 }
 
 pub fn console_url_bucket(region: &str, bucket: &str, prefix: &str) -> String {
+    let url = ConsoleUrl::s3(region, &format!("/s3/buckets/{}", component(bucket)))
+        .query("region", region);
     if prefix.is_empty() {
-        format!(
-            "https://s3.console.aws.amazon.com/s3/buckets/{}?region={}",
-            bucket, region
-        )
+        url.finish()
     } else {
-        format!(
-            "https://s3.console.aws.amazon.com/s3/buckets/{}?region={}&prefix={}",
-            bucket,
-            region,
-            urlencoding::encode(prefix)
-        )
+        url.query("prefix", prefix).finish()
+    }
+}
+
+#[cfg(test)]
+mod console_url_tests {
+    use super::*;
+
+    #[test]
+    fn bucket_uses_s3_service_host() {
+        assert_eq!(
+            console_url_bucket("us-east-1", "my-bucket", ""),
+            "https://s3.console.aws.amazon.com/s3/buckets/my-bucket?region=us-east-1"
+        );
+    }
+
+    #[test]
+    fn prefix_with_literal_percent_encoded_once_not_double() {
+        // A prefix that already contains a literal '%' must be encoded exactly
+        // once as a raw query value (% -> %25), never double-encoded.
+        let url = console_url_bucket("eu-west-1", "data", "logs/100%done/");
+        assert_eq!(
+            url,
+            "https://s3.console.aws.amazon.com/s3/buckets/data?region=eu-west-1&prefix=logs%2F100%25done%2F"
+        );
+        assert!(!url.contains("%2525"));
     }
 }
 

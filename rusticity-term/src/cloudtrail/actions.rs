@@ -156,15 +156,16 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 }
 
 pub fn console_url(app: &App) -> String {
-    if let Some(event) = &app.cloudtrail_state.current_event {
-        format!(
-            "https://{}.console.aws.amazon.com/cloudtrailv2/home?region={}#/events/{}",
-            app.config.region, app.config.region, event.event_id
-        )
-    } else {
-        format!(
-            "https://{}.console.aws.amazon.com/cloudtrail/home?region={}#/events",
-            app.config.region, app.config.region
-        )
-    }
+    use crate::console::{component, ConsoleUrl};
+    let (path, route) = match &app.cloudtrail_state.current_event {
+        Some(event) => (
+            "/cloudtrailv2/home",
+            format!("/events/{}", component(&event.event_id)),
+        ),
+        None => ("/cloudtrail/home", "/events".into()),
+    };
+    ConsoleUrl::regional(&app.config.region, path)
+        .query("region", &app.config.region)
+        .fragment(route)
+        .finish()
 }

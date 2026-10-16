@@ -2,6 +2,7 @@ pub mod actions;
 pub mod image;
 pub mod repo;
 pub mod scan;
+use crate::console::{component, ConsoleUrl};
 use std::collections::HashMap;
 
 pub fn init(i18n: &mut HashMap<String, String>) {
@@ -10,24 +11,31 @@ pub fn init(i18n: &mut HashMap<String, String>) {
 }
 
 pub fn console_url_repositories(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/ecr/private-registry/repositories?region={}",
-        region, region
-    )
+    ConsoleUrl::regional(region, "/ecr/private-registry/repositories")
+        .query("region", region)
+        .finish()
 }
 
 pub fn console_url_private_repository(region: &str, account_id: &str, repo_name: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/ecr/repositories/private/{}/{}?region={}",
-        region, account_id, repo_name, region
+    ConsoleUrl::regional(
+        region,
+        &format!(
+            "/ecr/repositories/private/{}/{}",
+            component(account_id),
+            component(repo_name)
+        ),
     )
+    .query("region", region)
+    .finish()
 }
 
 pub fn console_url_public_repository(region: &str, repo_name: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/ecr/repositories/public/{}?region={}",
-        region, repo_name, region
+    ConsoleUrl::regional(
+        region,
+        &format!("/ecr/repositories/public/{}", component(repo_name)),
     )
+    .query("region", region)
+    .finish()
 }
 
 /// Canonical regional console link. Account-specific sign-in host prefixes are
@@ -38,11 +46,25 @@ pub fn console_url_private_image(
     repo_name: &str,
     digest: &str,
 ) -> String {
-    format!(
-        "https://{region}.console.aws.amazon.com/ecr/repositories/private/{account_id}/{}/_/image/{}/details?region={region}",
-        urlencoding::encode(repo_name),
-        urlencoding::encode(digest),
+    ConsoleUrl::regional(
+        region,
+        &format!(
+            "/ecr/repositories/private/{}/{}/_/image/{}/details",
+            component(account_id),
+            component(repo_name),
+            component(digest),
+        ),
     )
+    .query("region", region)
+    .finish()
+}
+
+/// Public repository inventory entry point documented by ECR Public. Unlike the
+/// private-registry route, this does not force the private registry section.
+pub fn console_url_public_repositories(region: &str) -> String {
+    ConsoleUrl::regional(region, "/ecr/repositories")
+        .query("region", region)
+        .finish()
 }
 
 #[cfg(test)]
@@ -58,5 +80,22 @@ mod console_tests {
         let url = console_url_private_image("us-west-2", "999999999999", "repo?x#y", "sha256:a/b");
         assert!(url.contains("/999999999999/repo%3Fx%23y/_/image/sha256%3Aa%2Fb/details"));
         assert!(url.ends_with("?region=us-west-2"));
+    }
+
+    #[test]
+    fn repo_slash_encoded_once_no_double_encode_of_existing_digest() {
+        // Slash in repo name is encoded once; an already-escaped-looking digest
+        // (literal '%' in sha256:...) is treated as raw and escaped exactly once,
+        // never double-encoded.
+        let url = console_url_private_image(
+            "us-east-1",
+            "111111111111",
+            "team/sub/repo",
+            "sha256:dead%beef",
+        );
+        assert!(url.contains("/team%2Fsub%2Frepo/_/image/sha256%3Adead%25beef/details"));
+        // No double-encoding: the single-encoded forms do not reappear encoded again.
+        assert!(!url.contains("%252F"));
+        assert!(!url.contains("%253A"));
     }
 }

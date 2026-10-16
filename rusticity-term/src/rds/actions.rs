@@ -5,13 +5,7 @@ use crate::rds;
 use crate::ui::rds::filtered_instances;
 
 pub fn console_url(app: &App) -> String {
-    let instances = filtered_instances(app);
-    match app.rds_state.instances.get_selected(&instances) {
-        Some(instance) if !instance.identifier.is_empty() => {
-            rds::console_url_instance(&app.config.region, &instance.identifier)
-        }
-        _ => rds::console_url_instances(&app.config.region),
-    }
+    rds::console_url_instances(&app.config.region)
 }
 
 pub fn selected_arn(app: &App) -> Option<String> {

@@ -334,16 +334,7 @@ pub fn console_url(app: &App) -> String {
             app.dynamodb_state.detail_tab.console_tab(),
         );
     }
-    let filtered = filtered_dynamodb_tables(app);
-    if let Some(t) = app.dynamodb_state.tables.get_selected(&filtered) {
-        dynamodb::console_url_table(
-            &app.config.region,
-            &t.name,
-            DetailTab::Settings.console_tab(),
-        )
-    } else {
-        dynamodb::console_url_tables(&app.config.region)
-    }
+    dynamodb::console_url_tables(&app.config.region)
 }
 
 // ── Select / go back / detail tabs ───────────────────────────────────────────

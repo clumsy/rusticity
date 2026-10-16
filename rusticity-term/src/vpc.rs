@@ -1,8 +1,8 @@
 pub mod actions;
 pub mod columns;
 
+use crate::console::ConsoleUrl;
 use std::collections::HashMap;
-use urlencoding::encode;
 
 pub fn init(i18n: &mut HashMap<String, String>) {
     for column in columns::Column::ALL {
@@ -12,11 +12,10 @@ pub fn init(i18n: &mut HashMap<String, String>) {
 }
 
 pub fn console_url(region: &str) -> String {
-    format!(
-        "https://{}.console.aws.amazon.com/vpcconsole/home?region={}#vpcs:",
-        region,
-        encode(region)
-    )
+    ConsoleUrl::regional(region, "/vpcconsole/home")
+        .query("region", region)
+        .fragment("vpcs:")
+        .finish()
 }
 
 #[cfg(test)]

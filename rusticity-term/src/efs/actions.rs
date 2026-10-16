@@ -368,12 +368,7 @@ pub fn console_url(app: &App) -> String {
             app.efs_state.detail_tab,
         );
     }
-    let filtered = filtered_efs_file_systems(app);
-    if let Some(fs) = app.efs_state.file_systems.get_selected(&filtered) {
-        efs::console_url_file_system(&app.config.region, &fs.file_system_id)
-    } else {
-        efs::console_url_file_systems(&app.config.region)
-    }
+    efs::console_url_file_systems(&app.config.region)
 }
 
 // ── Column preferences ────────────────────────────────────────────────────────

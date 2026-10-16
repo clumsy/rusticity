@@ -130,14 +130,9 @@ pub fn breadcrumb(_app: &App) -> Vec<String> {
 pub fn console_url(app: &App) -> String {
     use crate::kms;
     use crate::ui::kms::Tab;
-    let filtered = filtered_kms_keys(app);
-    if let Some(key) = app.kms_state.keys.get_selected(&filtered) {
-        kms::console_url_key(&app.config.region, &key.key_id)
-    } else {
-        match app.kms_state.tab {
-            Tab::AwsManaged => kms::console_url_aws_managed_keys(&app.config.region),
-            Tab::CustomerManaged => kms::console_url_keys(&app.config.region),
-        }
+    match app.kms_state.tab {
+        Tab::AwsManaged => kms::console_url_aws_managed_keys(&app.config.region),
+        Tab::CustomerManaged => kms::console_url_keys(&app.config.region),
     }
 }
 

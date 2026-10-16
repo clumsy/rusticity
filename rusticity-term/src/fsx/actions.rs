@@ -208,12 +208,7 @@ pub fn console_url(app: &App) -> String {
     if let Some(fs_id) = &app.fsx_state.current_file_system {
         return fsx::console_url_file_system(&app.config.region, fs_id);
     }
-    let filtered = filtered_fsx_file_systems(app);
-    if let Some(fs) = app.fsx_state.file_systems.get_selected(&filtered) {
-        fsx::console_url_file_system(&app.config.region, &fs.file_system_id)
-    } else {
-        fsx::console_url_file_systems(&app.config.region)
-    }
+    fsx::console_url_file_systems(&app.config.region)
 }
 
 // ── Select / go back / detail tabs ───────────────────────────────────────────

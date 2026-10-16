@@ -3103,21 +3103,10 @@ impl App {
                 &self.insights_state.insights.query_text,
                 &self.insights_state.insights.selected_log_groups,
             ),
-            Service::CloudWatchAlarms => {
-                // If drilled into alarm detail use that name; otherwise use selected row
-                let alarm_name = if let Some(name) = self.alarms_state.current_alarm.as_deref() {
-                    Some(name.to_string())
-                } else {
-                    // In list view — get the currently selected alarm name
-                    let page_size = self.alarms_state.table.page_size.value();
-                    let current_page = self.alarms_state.table.selected / page_size;
-                    let start = current_page * page_size;
-                    let filtered: Vec<_> = self.alarms_state.table.items.iter().collect();
-                    let relative = self.alarms_state.table.selected.saturating_sub(start);
-                    filtered.get(start + relative).map(|a| a.name.clone())
-                };
-                cw::alarms::console_url(&self.config.region, alarm_name.as_deref())
-            }
+            Service::CloudWatchAlarms => cw::alarms::console_url(
+                &self.config.region,
+                self.alarms_state.current_alarm.as_deref(),
+            ),
             Service::CloudTrailEvents => crate::cloudtrail::actions::console_url(self),
             Service::S3Buckets => crate::s3::actions::console_url(self),
             Service::SqsQueues => crate::sqs::actions::console_url(self),
@@ -20443,9 +20432,9 @@ mod lambda_version_tab_tests {
     }
 
     #[test]
-    fn test_cloudwatch_alarms_console_url_from_list_selected_alarm() {
-        // Regression: ^o from list view with expanded row was returning the list URL
-        // because current_alarm was None. Should use the selected alarm's name.
+    fn test_cloudwatch_alarms_console_url_from_list_ignores_selected_alarm() {
+        // Inventory Ctrl+O is a list action. Only entering alarm detail may
+        // produce a resource link; highlighting/expanding a row must not.
         let mut app = test_app();
         app.current_service = Service::CloudWatchAlarms;
         app.service_selected = true;
@@ -20464,8 +20453,8 @@ mod lambda_version_tab_tests {
 
         let url = app.get_console_url();
         assert!(
-            url.contains("alarmsV2:alarm/alarm-1"),
-            "^o from list view must link to selected alarm, got: {url}"
+            url.contains("#alarmsV2:alarms?"),
+            "^o from inventory must link to the alarm list, got: {url}"
         );
     }
 

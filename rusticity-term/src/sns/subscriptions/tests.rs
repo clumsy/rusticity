@@ -311,3 +311,20 @@ fn columns_and_status_bar_are_complete_without_live_aws_data() {
         assert_eq!(Column::from_id(col.id()), Some(col));
     }
 }
+
+#[test]
+fn returning_from_subscriptions_restores_topics_list_console_link() {
+    let mut app = loaded();
+    assert!(app.get_console_url().contains("#/subscription/"));
+    press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(app.sns_state.subscriptions.topic.is_none());
+    // The topic remains selected, but the table must not inherit its deep link.
+    assert_eq!(
+        crate::sns::actions::selected_arn(&app).as_deref(),
+        Some(TOPIC)
+    );
+    assert_eq!(
+        app.get_console_url(),
+        "https://us-east-1.console.aws.amazon.com/sns/v3/home?region=us-east-1#/topics"
+    );
+}

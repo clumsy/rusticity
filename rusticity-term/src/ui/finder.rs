@@ -20,13 +20,13 @@ enum FinderColumn {
     Region,
 }
 impl Column<Resource> for FinderColumn {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Self::Service => "Service",
-            Self::Type => "Resource type",
-            Self::Id => "ID",
-            Self::Name => "Name",
-            Self::Region => "Region",
+            Self::Service => "Service".into(),
+            Self::Type => "Resource type".into(),
+            Self::Id => "ID".into(),
+            Self::Name => "Name".into(),
+            Self::Region => "Region".into(),
         }
     }
     fn width(&self) -> u16 {

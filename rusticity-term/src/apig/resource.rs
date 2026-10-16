@@ -60,11 +60,11 @@ impl Column {
 }
 
 impl TableColumn<Resource> for Column {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Column::Path => "Resource",
-            Column::Id => "ID",
-            Column::Arn => "ARN",
+            Column::Path => "Resource".into(),
+            Column::Id => "ID".into(),
+            Column::Arn => "ARN".into(),
         }
     }
 

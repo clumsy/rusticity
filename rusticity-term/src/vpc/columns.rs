@@ -149,8 +149,8 @@ struct VpcColumn {
     label: String,
 }
 impl TableColumn<Vpc> for VpcColumn {
-    fn name(&self) -> &str {
-        &self.label
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.label.as_str().into()
     }
     fn width(&self) -> u16 {
         self.label

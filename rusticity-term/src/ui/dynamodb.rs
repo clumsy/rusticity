@@ -453,8 +453,8 @@ struct FieldCol<T: 'static> {
 }
 
 impl<T> Column<T> for FieldCol<T> {
-    fn name(&self) -> &str {
-        self.label
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.label.into()
     }
     fn width(&self) -> u16 {
         self.width
@@ -1057,8 +1057,8 @@ struct ItemCol {
 }
 
 impl Column<DdbItem> for ItemCol {
-    fn name(&self) -> &str {
-        &self.label
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.label.as_str().into()
     }
     fn width(&self) -> u16 {
         (self.label.len().max(18) as u16).min(40)

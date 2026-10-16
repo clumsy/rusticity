@@ -64,8 +64,8 @@ impl EventResourceColumn {
 }
 
 impl TableColumn<EventResource> for EventResourceColumn {
-    fn name(&self) -> &str {
-        self.name()
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.name().into()
     }
 
     fn width(&self) -> u16 {

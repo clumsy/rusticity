@@ -80,30 +80,12 @@ impl Column {
         (text, Style::default().fg(color))
     }
     pub fn into_table_column(self) -> Box<dyn TableColumn<SnsSubscription>> {
-        Box::new(OwnedColumn {
-            column: self,
-            label: self.name(),
-        })
-    }
-}
-struct OwnedColumn {
-    column: Column,
-    label: String,
-}
-impl TableColumn<SnsSubscription> for OwnedColumn {
-    fn name(&self) -> &str {
-        &self.label
-    }
-    fn width(&self) -> u16 {
-        self.column
-            .definition()
-            .2
-            .max(self.label.chars().count().min(u16::MAX as usize) as u16)
-    }
-    fn fit_content(&self) -> bool {
-        !matches!(self.column, Column::Endpoint | Column::Arn)
-    }
-    fn render(&self, item: &SnsSubscription) -> (String, Style) {
-        self.column.render(item)
+        Box::new(crate::ui::table::OwnedColumn::new(
+            self.id(),
+            self.default_name(),
+            self.definition().2,
+            !matches!(self, Self::Endpoint | Self::Arn),
+            move |item: &SnsSubscription| self.render(item),
+        ))
     }
 }

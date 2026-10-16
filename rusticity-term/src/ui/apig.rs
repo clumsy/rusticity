@@ -365,8 +365,9 @@ fn render_api_detail(frame: &mut Frame, app: &App, area: Rect) {
                                 .collect()
                         });
 
-                        let headers: Vec<&str> =
+                        let header_labels: Vec<_> =
                             visible_columns.iter().map(|col| col.name()).collect();
+                        let headers: Vec<&str> = header_labels.iter().map(|s| s.as_ref()).collect();
 
                         let widths: Vec<Constraint> = visible_columns
                             .iter()
@@ -457,8 +458,9 @@ fn render_api_detail(frame: &mut Frame, app: &App, area: Rect) {
                                 .collect()
                         });
 
-                        let headers: Vec<&str> =
+                        let header_labels: Vec<_> =
                             visible_columns.iter().map(|col| col.name()).collect();
+                        let headers: Vec<&str> = header_labels.iter().map(|s| s.as_ref()).collect();
 
                         let widths: Vec<Constraint> = visible_columns
                             .iter()

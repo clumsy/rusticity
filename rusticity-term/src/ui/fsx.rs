@@ -345,8 +345,8 @@ struct FieldCol<T: 'static> {
 }
 
 impl<T> Column<T> for FieldCol<T> {
-    fn name(&self) -> &str {
-        self.label
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.label.into()
     }
     fn width(&self) -> u16 {
         self.width

@@ -834,8 +834,8 @@ impl VersionColumn {
         }
 
         impl table::Column<Version> for VersionCol {
-            fn name(&self) -> &str {
-                self.variant.name()
+            fn name(&self) -> std::borrow::Cow<'_, str> {
+                self.variant.name().into()
             }
 
             fn width(&self) -> u16 {
@@ -894,8 +894,8 @@ impl AliasColumn {
         }
 
         impl table::Column<Alias> for AliasCol {
-            fn name(&self) -> &str {
-                self.variant.name()
+            fn name(&self) -> std::borrow::Cow<'_, str> {
+                self.variant.name().into()
             }
 
             fn width(&self) -> u16 {

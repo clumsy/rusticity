@@ -89,13 +89,13 @@ impl Column {
 }
 
 impl TableColumn<Route> for Column {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Column::RouteKey => "Route",
-            Column::RouteId => "ID",
-            Column::Arn => "ARN",
-            Column::AuthorizationType => "Authorization",
-            Column::Target => "Integration",
+            Column::RouteKey => "Route".into(),
+            Column::RouteId => "ID".into(),
+            Column::Arn => "ARN".into(),
+            Column::AuthorizationType => "Authorization".into(),
+            Column::Target => "Integration".into(),
         }
     }
 

@@ -199,8 +199,8 @@ impl Column {
         }
 
         impl TableColumn<&Stack> for StackColumn {
-            fn name(&self) -> &str {
-                Box::leak(self.variant.name().into_boxed_str())
+            fn name(&self) -> std::borrow::Cow<'_, str> {
+                self.variant.name().into()
             }
 
             fn width(&self) -> u16 {

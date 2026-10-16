@@ -52,30 +52,12 @@ impl Column {
         )
     }
     pub fn into_table_column(self) -> Box<dyn TableColumn<SnsTopic>> {
-        Box::new(TopicColumn {
-            column: self,
-            label: self.name(),
-        })
-    }
-}
-struct TopicColumn {
-    column: Column,
-    label: String,
-}
-impl TableColumn<SnsTopic> for TopicColumn {
-    fn name(&self) -> &str {
-        &self.label
-    }
-    fn width(&self) -> u16 {
-        self.column
-            .definition()
-            .2
-            .max(self.label.chars().count().min(u16::MAX as usize) as u16)
-    }
-    fn fit_content(&self) -> bool {
-        self.column != Column::Arn
-    }
-    fn render(&self, topic: &SnsTopic) -> (String, Style) {
-        self.column.render(topic)
+        Box::new(crate::ui::table::OwnedColumn::new(
+            self.id(),
+            self.default_name(),
+            self.definition().2,
+            self != Self::Arn,
+            move |topic: &SnsTopic| self.render(topic),
+        ))
     }
 }

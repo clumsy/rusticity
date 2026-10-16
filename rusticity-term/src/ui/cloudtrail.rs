@@ -13,8 +13,8 @@ struct CloudTrailEventTableColumn {
 }
 
 impl Column<CloudTrailEvent> for CloudTrailEventTableColumn {
-    fn name(&self) -> &str {
-        Box::leak(self.column_type.name().into_boxed_str())
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.column_type.name().into()
     }
 
     fn width(&self) -> u16 {

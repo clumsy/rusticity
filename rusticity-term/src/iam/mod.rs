@@ -471,13 +471,13 @@ impl<'a> Column<&'a IamUser> for UserColumn {
         }
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         let key = self.id();
         let translated = t(key);
         if translated == key {
-            self.default_name()
+            self.default_name().into()
         } else {
-            Box::leak(translated.into_boxed_str())
+            translated.into()
         }
     }
 
@@ -630,13 +630,13 @@ impl Column<IamRole> for RoleColumn {
 }
 
 impl Column<GroupUser> for GroupUserColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::UserName => "User name",
             Self::Groups => "Groups",
             Self::LastActivity => "Last activity",
             Self::CreationTime => "Creation time",
-        }
+        })
     }
 
     fn width(&self) -> u16 {
@@ -661,8 +661,8 @@ impl Column<GroupUser> for GroupUserColumn {
 }
 
 impl Column<Policy> for PolicyColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::PolicyName => "Policy name",
             Self::Type => "Type",
             Self::AttachedVia => "Attached via",
@@ -670,7 +670,7 @@ impl Column<Policy> for PolicyColumn {
             Self::Description => "Description",
             Self::CreationTime => "Creation time",
             Self::EditedTime => "Edited time",
-        }
+        })
     }
 
     fn width(&self) -> u16 {
@@ -700,11 +700,11 @@ impl Column<Policy> for PolicyColumn {
 }
 
 impl Column<RoleTag> for TagColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::Key => "Key",
             Self::Value => "Value",
-        }
+        })
     }
 
     fn width(&self) -> u16 {
@@ -724,11 +724,11 @@ impl Column<RoleTag> for TagColumn {
 }
 
 impl Column<UserTag> for TagColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::Key => "Key",
             Self::Value => "Value",
-        }
+        })
     }
 
     fn width(&self) -> u16 {
@@ -748,11 +748,11 @@ impl Column<UserTag> for TagColumn {
 }
 
 impl Column<UserGroup> for UserGroupColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::GroupName => "Group name",
             Self::AttachedPolicies => "Attached policies",
-        }
+        })
     }
 
     fn width(&self) -> u16 {
@@ -772,12 +772,12 @@ impl Column<UserGroup> for UserGroupColumn {
 }
 
 impl Column<LastAccessedService> for LastAccessedServiceColumn {
-    fn name(&self) -> &str {
-        match self {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(match self {
             Self::Service => "Service",
             Self::PoliciesGranting => "Policies granting permissions",
             Self::LastAccessed => "Last accessed",
-        }
+        })
     }
 
     fn width(&self) -> u16 {

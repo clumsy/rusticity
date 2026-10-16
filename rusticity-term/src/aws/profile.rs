@@ -21,13 +21,13 @@ enum ProfileColumn {
 }
 
 impl TableColumn<Profile> for ProfileColumn {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Self::Name => "Profile",
-            Self::Account => "Account",
-            Self::Region => "Region",
-            Self::Role => "Role/User",
-            Self::Source => "Source",
+            Self::Name => "Profile".into(),
+            Self::Account => "Account".into(),
+            Self::Region => "Region".into(),
+            Self::Role => "Role/User".into(),
+            Self::Source => "Source".into(),
         }
     }
 

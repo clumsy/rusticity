@@ -2175,10 +2175,10 @@ enum TagColumn {
 }
 
 impl Column<(String, String)> for TagColumn {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            TagColumn::Key => "Key",
-            TagColumn::Value => "Value",
+            TagColumn::Key => "Key".into(),
+            TagColumn::Value => "Value".into(),
         }
     }
 

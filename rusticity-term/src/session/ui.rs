@@ -14,13 +14,13 @@ enum SessionColumn {
 }
 
 impl table::Column<Session> for SessionColumn {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Self::Timestamp => "Timestamp",
-            Self::Profile => "Profile",
-            Self::Region => "Region",
-            Self::Account => "Account",
-            Self::Tabs => "Tabs",
+            Self::Timestamp => "Timestamp".into(),
+            Self::Profile => "Profile".into(),
+            Self::Region => "Region".into(),
+            Self::Account => "Account".into(),
+            Self::Tabs => "Tabs".into(),
         }
     }
 

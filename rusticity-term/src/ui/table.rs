@@ -1,3 +1,5 @@
+mod owned_column;
+pub use owned_column::OwnedColumn;
 use ratatui::{prelude::*, widgets::*};
 
 use super::{rounded_block, styles};
@@ -103,13 +105,14 @@ pub trait Column<T> {
         unimplemented!("default_name() must be implemented if using default name() implementation")
     }
 
-    fn name(&self) -> &str {
+    /// Static labels may be borrowed; translations are owned, never leaked.
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         let id = self.id();
         let translated = t(id);
         if translated == id {
-            self.default_name()
+            self.default_name().into()
         } else {
-            Box::leak(translated.into_boxed_str())
+            translated.into()
         }
     }
 
@@ -184,7 +187,7 @@ fn column_constraints<T>(
         .enumerate()
         .map(|(index, column)| {
             if column.fit_content() {
-                let header = formatted_column_header(column.name(), index, sort_column, direction);
+                let header = formatted_column_header(&column.name(), index, sort_column, direction);
                 let header_width = Line::raw(header).width();
                 let data_width = items
                     .iter()
@@ -197,7 +200,7 @@ fn column_constraints<T>(
                 Constraint::Fill(1)
             } else {
                 // Preserve existing layouts for columns that have not opted in.
-                let header_width = format_header_cell(column.name(), index).chars().count() as u16;
+                let header_width = format_header_cell(&column.name(), index).chars().count() as u16;
                 Constraint::Length(column.width().max(header_width))
             }
         })
@@ -220,7 +223,7 @@ pub fn render_table<T>(frame: &mut Frame, config: TableConfig<T>) {
     // Headers with sort indicators
     let header_cells = config.columns.iter().enumerate().map(|(index, column)| {
         Cell::from(formatted_column_header(
-            column.name(),
+            &column.name(),
             index,
             config.sort_column,
             config.sort_direction,
@@ -760,8 +763,8 @@ mod compact_column_tests {
         compact: bool,
     }
     impl Column<String> for TestColumn {
-        fn name(&self) -> &str {
-            self.label
+        fn name(&self) -> std::borrow::Cow<'_, str> {
+            self.label.into()
         }
         fn width(&self) -> u16 {
             self.width

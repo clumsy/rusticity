@@ -292,8 +292,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) -> bool {
 }
 struct FieldColumn(&'static str, u16);
 impl Column<Row> for FieldColumn {
-    fn name(&self) -> &str {
-        self.0
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.0.into()
     }
     fn width(&self) -> u16 {
         self.1

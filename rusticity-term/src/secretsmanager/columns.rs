@@ -131,10 +131,13 @@ impl Column {
         (text, Style::default())
     }
     pub fn into_table_column(self) -> Box<dyn TableColumn<SecretMetadata>> {
-        Box::new(OwnedColumn {
-            column: self,
-            label: self.name(),
-        })
+        Box::new(crate::ui::table::OwnedColumn::new(
+            self.id(),
+            self.default_name(),
+            self.definition().2,
+            self != Self::Description,
+            move |secret: &SecretMetadata| self.render(secret),
+        ))
     }
 }
 /// Classify only when AWS supplies PrimaryRegion and the resource Region.
@@ -147,26 +150,5 @@ pub fn replication_type(secret: &SecretMetadata) -> &'static str {
         Some(region) if region == secret.primary_region => "Primary",
         Some(_) => "Replica",
         None => "-",
-    }
-}
-struct OwnedColumn {
-    column: Column,
-    label: String,
-}
-impl TableColumn<SecretMetadata> for OwnedColumn {
-    fn name(&self) -> &str {
-        &self.label
-    }
-    fn width(&self) -> u16 {
-        self.column
-            .definition()
-            .2
-            .max(self.label.chars().count().min(u16::MAX as usize) as u16)
-    }
-    fn fit_content(&self) -> bool {
-        self.column != Column::Description
-    }
-    fn render(&self, secret: &SecretMetadata) -> (String, Style) {
-        self.column.render(secret)
     }
 }

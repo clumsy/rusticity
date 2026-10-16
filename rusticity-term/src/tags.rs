@@ -75,10 +75,10 @@ pub enum TagColumn {
     Value,
 }
 impl<T: Tag> Column<T> for TagColumn {
-    fn name(&self) -> &str {
+    fn name(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Self::Key => COLUMN_NAMES[0],
-            Self::Value => COLUMN_NAMES[1],
+            Self::Key => COLUMN_NAMES[0].into(),
+            Self::Value => COLUMN_NAMES[1].into(),
         }
     }
     fn width(&self) -> u16 {

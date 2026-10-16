@@ -87,8 +87,8 @@ impl Column {
 }
 
 impl TableColumn<Repository> for Column {
-    fn name(&self) -> &str {
-        Box::leak(translate_column(self.id(), self.default_name()).into_boxed_str())
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        translate_column(self.id(), self.default_name()).into()
     }
 
     fn width(&self) -> u16 {

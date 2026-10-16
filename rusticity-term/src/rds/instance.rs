@@ -299,8 +299,8 @@ struct InstanceColumn {
     label: String,
 }
 impl TableColumn<RdsInstance> for InstanceColumn {
-    fn name(&self) -> &str {
-        &self.label
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.label.as_str().into()
     }
     fn width(&self) -> u16 {
         self.label

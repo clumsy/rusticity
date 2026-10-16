@@ -107,7 +107,18 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let mut help = if matches!(app.mode, Mode::Normal | Mode::FilterInput)
+    let mut help = if app.mode == Mode::Normal && crate::cli_output::active(app) {
+        let mut hints = first_hint("[]", "tabs");
+        hints.extend(hint("↑↓", "scroll"));
+        hints.extend(hint("^u/^d", "page"));
+        hints.extend(hint("y", "copy output"));
+        hints.extend(hint("^y", "copy CLI"));
+        hints.extend(hint("^p", "print"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(hint("^w/⎋", "close / cancel"));
+        hints.extend(last_hint("q", "quit"));
+        hints
+    } else if matches!(app.mode, Mode::Normal | Mode::FilterInput)
         && crate::ecr::scan::active(app)
         && app
             .ecr_state
@@ -445,13 +456,29 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         help = related;
     }
 
+    if crate::cli_command::shortcut_visible(app) {
+        // Do not displace the essential load-more/retry hint on narrow Items views.
+        if app.current_service == Service::DynamoDbTables && is_items_tab(app) && can_load_more(app)
+        {
+            help.extend(hint("^y", "copy CLI"));
+            help.extend(hint("^e", "CLI output"));
+        } else {
+            let mut cli = first_hint("^y", "copy CLI");
+            cli.extend(hint("^e", "CLI output"));
+            cli.push(Span::raw(" "));
+            cli.extend(help);
+            help = cli;
+        }
+    }
+
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis();
 
     // Any service loading → show generic spinner inline with version on the right
-    let is_loading = app.ecr_state.scan.busy()
+    let is_loading = app.cli_output.busy()
+        || app.ecr_state.scan.busy()
         || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading

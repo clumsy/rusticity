@@ -21,6 +21,15 @@ pub enum Mode {
 }
 
 pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
+    if key.code == KeyCode::Char('e') && key.modifiers == KeyModifiers::CONTROL {
+        return matches!(mode, Mode::Normal | Mode::ResourceFinder)
+            .then_some(Action::OpenCliOutput);
+    }
+    // Never insert a literal 'y' for this control chord in text-entry modes.
+    if key.code == KeyCode::Char('y') && key.modifiers == KeyModifiers::CONTROL {
+        return matches!(mode, Mode::Normal | Mode::ResourceFinder)
+            .then_some(Action::CopyCliCommand);
+    }
     match mode {
         Mode::Normal => match key.code {
             KeyCode::Char('q') => Some(Action::Quit),
@@ -364,6 +373,8 @@ pub enum Action {
     LoadSession,
     SaveSession,
     CopyToClipboard,
+    CopyCliCommand,
+    OpenCliOutput,
     EnterFilterMode,
     ExitFilterMode,
     Noop,

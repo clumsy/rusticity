@@ -33,6 +33,16 @@ impl ClipboardState {
     pub fn request_snapshot(&self) {
         self.pending.replace(Some(CopyRequest::Snapshot));
     }
+    /// Surface a copy refusal without touching the system clipboard or leaking
+    /// a previously queued request into the next flush.
+    pub fn report_failure(&mut self, message: impl Into<String>) {
+        self.pending.take();
+        self.notice = Some(CopyNotice {
+            message: message.into(),
+            failed: true,
+            created: Instant::now(),
+        });
+    }
     pub fn snapshot_requested(&self) -> bool {
         matches!(*self.pending.borrow(), Some(CopyRequest::Snapshot))
     }

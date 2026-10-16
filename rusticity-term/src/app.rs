@@ -251,6 +251,7 @@ pub struct App {
     pub profile_filter_active: bool,
     pub available_profiles: Vec<AwsProfile>,
     pub clipboard: ClipboardState,
+    pub cli_output: crate::cli_output::State,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -338,6 +339,8 @@ pub enum ViewMode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Service {
+    /// Ephemeral output tab, not an AWS service picker entry.
+    CliOutput(u64),
     ApiGatewayApis,
     CloudWatchLogGroups,
     CloudWatchInsights,
@@ -365,6 +368,7 @@ pub enum Service {
 impl Service {
     pub fn name(&self) -> &str {
         match self {
+            Service::CliOutput(_) => "CLI output",
             Service::ApiGatewayApis => "API Gateway › APIs",
             Service::CloudWatchLogGroups => "CloudWatch › Log Groups",
             Service::CloudWatchInsights => "CloudWatch › Logs Insights",
@@ -821,6 +825,7 @@ impl App {
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
             clipboard: ClipboardState::default(),
+            cli_output: crate::cli_output::State::default(),
         })
     }
 
@@ -1057,10 +1062,17 @@ impl App {
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
             clipboard: ClipboardState::default(),
+            cli_output: crate::cli_output::State::default(),
         }
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if crate::cli_output::handle_action(self, &action) {
+            return;
+        }
+        if crate::cli_command::handle_action(self, &action) {
+            return;
+        }
         if crate::ecr::scan::handle_action(self, &action) {
             return;
         }
@@ -1080,7 +1092,11 @@ impl App {
             return;
         }
         match action {
-            Action::Noop | Action::OpenResourceFinder | Action::OpenRelatedResources => {}
+            Action::Noop
+            | Action::OpenResourceFinder
+            | Action::OpenRelatedResources
+            | Action::CopyCliCommand
+            | Action::OpenCliOutput => {}
             Action::EnterFilterMode => match self.mode {
                 Mode::ServicePicker => self.service_picker.filter_active = true,
                 Mode::RegionPicker => self.region_filter_active = true,
@@ -2926,6 +2942,13 @@ impl App {
         let mut parts = vec![];
 
         match self.current_service {
+            Service::CliOutput(_) => {
+                return self
+                    .tabs
+                    .get(self.current_tab)
+                    .map(|t| t.breadcrumb.clone())
+                    .unwrap_or_else(|| "CLI output".into())
+            }
             Service::CloudWatchLogGroups => {
                 parts.push("CloudWatch".to_string());
                 parts.push("Log groups".to_string());
@@ -3019,6 +3042,7 @@ impl App {
         use crate::cw;
 
         match self.current_service {
+            Service::CliOutput(_) => String::new(),
             Service::CloudWatchLogGroups => {
                 if self.view_mode == ViewMode::Events {
                     if let Some(group) = selected_log_group(self) {
@@ -3998,7 +4022,11 @@ impl App {
                         self.config.role_arn.clone(),
                     );
 
-                    for tab in &self.tabs {
+                    for tab in self
+                        .tabs
+                        .iter()
+                        .filter(|tab| !matches!(tab.service, Service::CliOutput(_)))
+                    {
                         session.tabs.push(SessionTab {
                             service: format!("{:?}", tab.service),
                             title: tab.title.clone(),
@@ -8173,6 +8201,7 @@ impl App {
             current.tabs = self
                 .tabs
                 .iter()
+                .filter(|t| !matches!(t.service, Service::CliOutput(_)))
                 .map(|t| SessionTab {
                     service: format!("{:?}", t.service),
                     title: t.title.clone(),
@@ -8198,6 +8227,7 @@ impl App {
             session.tabs = self
                 .tabs
                 .iter()
+                .filter(|t| !matches!(t.service, Service::CliOutput(_)))
                 .map(|t| SessionTab {
                     service: format!("{:?}", t.service),
                     title: t.title.clone(),

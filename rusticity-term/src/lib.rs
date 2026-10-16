@@ -2,6 +2,8 @@ pub mod apig;
 pub mod app;
 pub mod aws;
 pub mod cfn;
+pub mod cli_command;
+pub mod cli_output;
 pub mod clipboard;
 pub mod cloudtrail;
 pub mod common;

@@ -16,7 +16,7 @@ use tokio::{
 };
 
 pub mod navigation;
-mod related;
+pub(crate) mod related;
 const RELATED_TTL: Duration = Duration::from_secs(60);
 
 struct RelatedCache {

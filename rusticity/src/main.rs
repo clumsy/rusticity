@@ -50,10 +50,17 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
-        if rusticity_term::ecr::scan::poll(&mut app).await {
+        if rusticity_term::cli_output::poll(&mut app).await {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
-        if rusticity_term::s3::object::poll(&mut app).await {
+        if !rusticity_term::cli_output::active(&app)
+            && rusticity_term::ecr::scan::poll(&mut app).await
+        {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
+        if !rusticity_term::cli_output::active(&app)
+            && rusticity_term::s3::object::poll(&mut app).await
+        {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         finder::poll(&mut app);
@@ -61,7 +68,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         // Any service loading → animate the spinner via periodic redraws
-        let any_loading = app.ecr_state.scan.busy()
+        let any_loading = app.cli_output.busy()
+            || app.ecr_state.scan.busy()
             || app.s3_state.object_view.busy()
             || app.s3_state.object_view.notice.is_some()
             || app.clipboard.notice().is_some()
@@ -99,6 +107,16 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                 match event? {
                     Some(Event::Key(key)) => {
                         use crossterm::event::KeyCode;
+                        // Output-tab keys bypass service loaders; opening is explicit.
+                        // Shared g-prefix navigation must still reach its handler below.
+                        if rusticity_term::cli_output::handle_key(&mut app, key)
+                            || handle_key(key, app.mode).is_some_and(|action| action == rusticity_term::keymap::Action::OpenCliOutput && rusticity_term::cli_output::handle_action(&mut app, &action)) {
+                            let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if clipboard.flush(&mut app.clipboard, frame.buffer) {
+                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            }
+                            continue;
+                        }
 
                         // Finder edits and idle results never wait for service inventory
                         // loaders in the main action path. Only Enter opens a resource.
@@ -123,7 +141,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Async detail reads/transfers must not fall through to
                         // generic refresh/select loaders after consuming these keys.
                         if let Some(action) = handle_key(key, app.mode) {
-                            if rusticity_term::ecr::scan::handle_action(&mut app, &action)
+                            if rusticity_term::cli_command::handle_action(&mut app, &action)
+                                || rusticity_term::ecr::scan::handle_action(&mut app, &action)
                                 || rusticity_term::s3::object::handle_action(&mut app, &action) {
                                 let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                                 if clipboard.flush(&mut app.clipboard, frame.buffer) {

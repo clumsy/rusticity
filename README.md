@@ -116,6 +116,20 @@ AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 Use the status bar for shortcuts available in the current view, and press `?`
 for keyboard help. Press `Space`, then `f` to find resources across services,
 or `Ctrl+L` on a resource to explore related resources where supported.
+Press `Ctrl+Y` on a resource or focused finder result to copy a read-only AWS CLI
+command for your active profile and Region; it is never executed automatically.
+Commands are quoted for POSIX shells (sh/bash/zsh). They contain no credentials;
+the selected profile must be available wherever you paste them.
+Press `Ctrl+E` from any service view or focused finder result to open a separate
+**CLI output** tab for the supported read-only command. The command is shown at
+the top; it describes the selected resource rather than reconstructing all tab
+data. `[`/`]` switches tabs, arrows scroll, `Ctrl+U/Ctrl+D` page, `y` copies output,
+`Ctrl+Y` copies the command, `Ctrl+R` reruns it, and `Ctrl+W`/Esc closes/cancels.
+Reads can finish in the background while you use other tabs. AWS CLI v2 must be on
+PATH with credentials for the active profile. Execution is limited to 30 seconds
+and 1 MiB of stdout, uses no shell, and shows unsupported targets or failed reads
+explicitly. Output tabs are not saved in sessions; their in-memory results may
+contain sensitive AWS metadata and are discarded on close or AWS context change.
 
 ## Development
 

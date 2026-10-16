@@ -39,6 +39,7 @@ pub fn selected(app: &App) -> Option<Resource> {
     let region = app.config.region.as_str();
 
     match app.current_service {
+        Service::CliOutput(_) => None,
         // ── Services with explicit detail parent tracking ──
         Service::DynamoDbTables => {
             if let Some(name) = &app.dynamodb_state.current_table {

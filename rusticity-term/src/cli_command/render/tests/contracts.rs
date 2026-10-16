@@ -10,7 +10,7 @@ use std::{
 };
 
 fn targets() -> Vec<Target> {
-    let mut targets = Vec::new();
+    let mut targets = view_targets();
     for kind in ResourceKind::ALL {
         if kind == ResourceKind::Api {
             continue;
@@ -27,6 +27,11 @@ fn targets() -> Vec<Target> {
         resource.id = id.into();
         if kind == ResourceKind::Topic {
             resource.arn = "arn:aws:sns:us-east-1:123456789012:selected-resource".into();
+        }
+        if kind == ResourceKind::StateMachine {
+            resource.arn =
+                "arn:aws:states:us-east-1:123456789012:stateMachine:selected-resource".into();
+            resource.id = resource.arn.clone();
         }
         if kind == ResourceKind::Secret {
             resource.arn =
@@ -258,4 +263,45 @@ fn installed_aws_cli_accepts_every_generated_command() {
             format!("/test-bucket/{key}")
         );
     }
+}
+
+fn view_targets() -> Vec<Target> {
+    super::super::VIEW_OPERATIONS.iter().map(|&operation| {
+        let input = match operation {
+            "stepfunctions list-executions" => json!({"stateMachineArn":"arn:aws:states:us-east-1:123456789012:stateMachine:orders"}),
+            "sns list-subscriptions-by-topic" => json!({"TopicArn":"arn:aws:sns:us-east-1:123456789012:orders"}),
+            "sqs list-queue-tags" => json!({"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/orders"}),
+            "sqs list-message-move-tasks" => json!({"SourceArn":"arn:aws:sqs:us-east-1:123456789012:orders"}),
+            "lambda list-event-source-mappings" => json!({"EventSourceArn":"arn:aws:sqs:us-east-1:123456789012:orders"}),
+            "kms list-aliases" | "kms list-resource-tags" => json!({"KeyId":"arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"}),
+            "efs describe-access-points" | "efs describe-mount-targets" => json!({"FileSystemId":"fs-0123456789abcdef0"}),
+            "efs list-tags-for-resource" => json!({"ResourceId":"fs-0123456789abcdef0"}),
+            "fsx describe-backups" => json!({"Filters":[{"Name":"file-system-id","Values":["fs-0123456789abcdef0"]}]}),
+            "fsx list-tags-for-resource" => json!({"ResourceARN":"arn:aws:fsx:us-east-1:123456789012:file-system/fs-0123456789abcdef0"}),
+            "ec2 describe-tags" => json!({"Filters":[{"Name":"resource-id","Values":["i-0123456789abcdef0"]}]}),
+            "s3api list-objects-v2" => json!({"Bucket":"test-bucket","Prefix":"folder/","Delimiter":"/"}),
+            "ecr describe-images" | "ecr-public describe-images" => json!({"repositoryName":"team/repo"}),
+            "ecr list-image-referrers" => json!({"repositoryName":"team/repo","subjectId":{"imageDigest":format!("sha256:{}", "a".repeat(64))}}),
+            "ecr describe-image-scan-findings" | "ecr describe-image-replication-status" | "ecr describe-image-signing-status" => json!({"repositoryName":"team/repo","imageId":{"imageDigest":format!("sha256:{}", "a".repeat(64))}}),
+            "logs describe-log-streams" => json!({"logGroupName":"/aws/demo"}),
+            "logs get-log-events" => json!({"logGroupName":"/aws/demo","logStreamName":"stream","startFromHead":false}),
+            "logs filter-log-events" => json!({"logGroupName":"/aws/demo","logStreamNames":["stream"],"filterPattern":"ERROR"}),
+            "logs list-tags-for-resource" => json!({"resourceArn":"arn:aws:logs:us-east-1:123456789012:log-group:/aws/demo"}),
+            "cloudwatch describe-alarm-history" => json!({"AlarmName":"test"}),
+            "cloudwatch list-tags-for-resource" => json!({"ResourceARN":"arn:aws:cloudwatch:us-east-1:123456789012:alarm:test"}),
+            "dynamodb describe-table" | "dynamodb list-backups" => json!({"TableName":"orders"}),
+            "dynamodb scan" => json!({"TableName":"orders","Limit":100}),
+            "dynamodb query" => json!({"TableName":"orders","KeyConditionExpression":"#pk = :pk","ExpressionAttributeNames":{"#pk":"id"},"ExpressionAttributeValues":{":pk":{"S":"literal key"}},"Limit":100}),
+            "dynamodb list-tags-of-resource" => json!({"ResourceArn":"arn:aws:dynamodb:us-east-1:123456789012:table/orders"}),
+            "lambda list-versions-by-function" | "lambda list-aliases" => json!({"FunctionName":"test-function"}),
+            "cloudformation describe-stack-resources" | "cloudformation list-stack-resources" | "cloudformation describe-stack-events" | "cloudformation list-change-sets" => json!({"StackName":"test-stack"}),
+            "iam list-groups-for-user" | "iam list-user-tags" => json!({"UserName":"user"}),
+            "iam list-role-tags" => json!({"RoleName":"role"}),
+            "iam get-group" => json!({"GroupName":"group"}),
+            "apigateway get-resources" => json!({"restApiId":"abc123"}),
+            "apigatewayv2 get-routes" => json!({"ApiId":"abc123"}),
+            _ => json!({}),
+        };
+        Target::View { operation, input, region:None, scope:None }
+    }).collect()
 }

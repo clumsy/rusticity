@@ -104,7 +104,7 @@ async fn common_json_renderer_scrolling_and_copy_work_in_output_tab() {
     }));
     press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
     assert!(app.clipboard.complete_with(&buffer, |copied| {
-        assert!(copied.starts_with("aws sns get-topic-attributes"));
+        assert!(copied.starts_with("aws sns list-topics"));
         Ok(())
     }));
     press(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);

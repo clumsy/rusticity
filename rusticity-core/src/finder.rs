@@ -37,15 +37,16 @@ pub enum ResourceKind {
     Queue,
     Topic,
     Secret,
+    StateMachine,
     /// Generic linked target unsupported as an inventory-search kind.
     /// Related-resource discovery uses this for ARNs that don't map to a
     /// supported top-level inventory kind (e.g. subnets, volumes, layers).
-    /// Excluded from `ALL` so inventory search stays at 21 kinds.
+    /// Excluded from `ALL` so inventory search stays at 22 kinds.
     Reference,
 }
 
 impl ResourceKind {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Api,
         Self::Stack,
         Self::Alarm,
@@ -67,6 +68,7 @@ impl ResourceKind {
         Self::Queue,
         Self::Topic,
         Self::Secret,
+        Self::StateMachine,
     ];
     pub fn service(self) -> &'static str {
         match self {
@@ -89,6 +91,7 @@ impl ResourceKind {
             Self::Queue => "sqs",
             Self::Topic => "sns",
             Self::Secret => "secretsmanager",
+            Self::StateMachine => "states",
             Self::Reference => "",
         }
     }
@@ -113,6 +116,7 @@ impl ResourceKind {
             Self::Queue => "Queue",
             Self::Topic => "Topic",
             Self::Secret => "Secret",
+            Self::StateMachine => "State machine",
             Self::Reference => "Reference",
         }
     }
@@ -139,6 +143,7 @@ impl ResourceKind {
             Self::Queue => "sqs:queue",
             Self::Topic => "sns:topic",
             Self::Secret => "secretsmanager:secret",
+            Self::StateMachine => "states:stateMachine",
             Self::Reference => "",
         }
     }
@@ -156,6 +161,7 @@ impl ResourceKind {
                 "elasticfilesystem" => self == Self::Efs,
                 "ecr" => matches!(self, Self::Repository | Self::PublicRepository),
                 "secrets" | "sm" => self == Self::Secret,
+                "stepfunctions" | "sfn" => self == Self::StateMachine,
                 _ => false,
             }
     }
@@ -199,6 +205,11 @@ impl Resource {
             // The random suffix makes same-named secrets distinct, so display the
             // full `Name-AbCdEf` (strip only the `secret:` prefix, never the suffix).
             ResourceKind::Secret => tail.strip_prefix("secret:")?,
+            // A state machine's display name is the segment after `stateMachine:`;
+            // a version/alias-qualified ARN (an extra `:`) is not a finder target.
+            ResourceKind::StateMachine => tail
+                .strip_prefix("stateMachine:")
+                .filter(|name| !name.contains(':'))?,
             ResourceKind::LogGroup => tail.strip_prefix("log-group:")?.trim_end_matches(":*"),
             ResourceKind::Api => tail.trim_start_matches('/').split('/').nth(1)?,
             ResourceKind::Stack => tail.strip_prefix("stack/")?.split('/').next()?,
@@ -215,8 +226,10 @@ impl Resource {
             return None;
         }
         // ID contract: a secret's id is its FULL ARN (the suffix disambiguates
-        // same-named secrets); the stripped tail is only the display name.
-        let row_id = if kind == ResourceKind::Secret {
+        // same-named secrets); the stripped tail is only the display name. A
+        // state machine's id is likewise its full ARN so the row opens exactly
+        // the machine the index returned.
+        let row_id = if matches!(kind, ResourceKind::Secret | ResourceKind::StateMachine) {
             arn
         } else {
             id

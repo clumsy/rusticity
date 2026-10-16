@@ -137,6 +137,9 @@ pub struct View {
     private: bool,
 }
 impl View {
+    pub(crate) fn source_tag(&self) -> Option<&str> {
+        self.source_tag.as_deref()
+    }
     pub(crate) fn selecting_source(&self) -> bool {
         self.source_picker.is_some()
     }

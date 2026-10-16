@@ -1,6 +1,8 @@
 //! Copy a scoped, read-only AWS CLI command from already-loaded UI state.
 //! No AWS requests, subprocesses, credential reads, or automatic execution.
+mod nested_tables;
 mod render;
+mod tables;
 use crate::{
     app::{App, Service},
     finder::{self, Focus},
@@ -58,6 +60,27 @@ fn selected(app: &App) -> Result<Target, String> {
             .cloned()
             .map(Target::Resource)
             .ok_or_else(|| "No resource selected in the finder".into());
+    }
+    // Collection scope takes precedence over the highlighted resource. Finder
+    // results above deliberately retain their resource-specific behavior.
+    if let Some(target) = tables::target(app)? {
+        return Ok(target);
+    }
+    if let Some(target) = nested_tables::target(app)? {
+        return Ok(target);
+    }
+    if app.current_service == Service::StepFunctionsStateMachines {
+        let rows = ui::stepfunctions::filtered_machines(app);
+        let machine = app
+            .stepfunctions_state
+            .executions
+            .machine
+            .as_ref()
+            .or_else(|| rows.get(app.stepfunctions_state.machines.selected).copied())
+            .ok_or_else(|| "Select a state machine first".to_string())?;
+        if machine.machine_type != "STANDARD" {
+            return Err("Execution listing is supported only for Standard workflows; Express execution input/output is not retrieved".into());
+        }
     }
     if app.current_service == Service::SnsTopics {
         if let Some(topic) = &app.sns_state.subscriptions.topic {

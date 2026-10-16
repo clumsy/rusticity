@@ -244,7 +244,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("⎋", "back / cancel"));
         hints.extend(last_hint("q", "quit"));
         hints
-    } else if app.mode == Mode::Normal && crate::sns::subscriptions::active(app) {
+    } else if app.mode == Mode::Normal
+        && (crate::sns::subscriptions::active(app) || crate::stepfunctions::executions::active(app))
+    {
         let mut hints = first_hint("↑↓", "select");
         hints.extend(hint("⏎/←→", "expand"));
         hints.extend(hint("i", "filter"));
@@ -265,6 +267,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::VpcVpcs
                 | Service::SnsTopics
                 | Service::SecretsManagerSecrets
+                | Service::StepFunctionsStateMachines
                 | Service::KmsKeys
         )
     {
@@ -272,6 +275,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         if app.current_service == Service::KmsKeys {
             hints.extend(hint("⏎", "key details"));
             hints.extend(hint("⇤⇥", "tabs"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::StepFunctionsStateMachines {
+            hints.extend(hint("⏎", "executions"));
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::SnsTopics {
             hints.extend(hint("⏎", "subscriptions"));
@@ -524,6 +530,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.sns_state.topics.loading
         || app.kms_state.detail.busy()
         || app.sns_state.subscriptions.busy()
+        || app.stepfunctions_state.machines.loading
+        || app.stepfunctions_state.executions.busy()
         || app.secretsmanager_state.secrets.loading
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading

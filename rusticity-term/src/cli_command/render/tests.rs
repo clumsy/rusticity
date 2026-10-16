@@ -422,3 +422,71 @@ fn secrets_manager_command_always_describes_metadata_by_full_arn() {
     secret.arn.clear();
     assert!(command(&Target::Resource(secret), context()).is_err());
 }
+
+#[test]
+fn stepfunctions_command_is_scoped_list_only_never_execution_payload_reads() {
+    let arn = "arn:aws:states:us-east-1:123456789012:stateMachine:orders";
+    let mut machine = resource(ResourceKind::StateMachine);
+    machine.id = arn.into();
+    machine.arn = arn.into();
+    let command = command(&Target::Resource(machine.clone()), context()).unwrap();
+    assert!(command.starts_with("aws stepfunctions list-executions "));
+    assert_eq!(input(&command), json!({"stateMachineArn":arn}));
+    assert!(!command.contains("describe-execution") && !command.contains("get-execution-history"));
+    machine.arn.clear();
+    assert!(super::command(&Target::Resource(machine), context()).is_err());
+}
+
+#[test]
+fn collection_formatter_refuses_writes_controls_and_foreign_parent_scope() {
+    let view = |operation, input| Target::View {
+        operation,
+        input,
+        region: None,
+        scope: None,
+    };
+    for operation in [
+        "stepfunctions start-execution",
+        "secretsmanager get-secret-value",
+        "kms decrypt",
+        "s3api delete-object",
+    ] {
+        assert!(command(&view(operation, json!({})), context()).is_err());
+    }
+    assert!(command(
+        &view("sns list-topics", json!({"bad":"line\nbreak"})),
+        context()
+    )
+    .is_err());
+    assert!(command(&view("sns list-topics", json!([])), context()).is_err());
+    let foreign = "arn:aws:states:us-east-1:999999999999:stateMachine:orders";
+    assert!(command(
+        &view(
+            "stepfunctions list-executions",
+            json!({"stateMachineArn":foreign})
+        ),
+        context()
+    )
+    .unwrap_err()
+    .contains("another account"));
+    let foreign = "arn:aws:states:eu-west-1:123456789012:stateMachine:orders";
+    assert!(command(
+        &view(
+            "stepfunctions list-executions",
+            json!({"stateMachineArn":foreign})
+        ),
+        context()
+    )
+    .unwrap_err()
+    .contains("another Region"));
+    let cmd = command(
+        &view(
+            "s3api list-objects-v2",
+            json!({"Bucket":"test","Prefix":"file://literal's $(text)/","Delimiter":"/"}),
+        ),
+        context(),
+    )
+    .unwrap();
+    assert_eq!(input(&cmd)["Prefix"], "file://literal's $(text)/");
+    assert!(cmd.contains("'\\''"));
+}

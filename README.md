@@ -45,6 +45,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
 - 🪣 **S3**: Buckets and objects with navigation
 - 🔐 **Secrets Manager**: Secret metadata inventory (no secret values)
+- 🔀 **Step Functions**: State machines and Standard-workflow execution metadata (no execution input/output)
 - 📣 **SNS**: Topics
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
 - 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns
@@ -117,14 +118,19 @@ AWS_PROFILE=your-profile AWS_DEFAULT_REGION=your-region rusticity
 Use the status bar for shortcuts available in the current view, and press `?`
 for keyboard help. Press `Space`, then `f` to find resources across services,
 or `Ctrl+L` on a resource to explore related resources where supported.
-Press `Ctrl+Y` on a resource or focused finder result to copy a read-only AWS CLI
+Press `Ctrl+Y` in a service view or on a focused finder result to copy a read-only AWS CLI
 command for your active profile and Region; it is never executed automatically.
 Commands are quoted for POSIX shells (sh/bash/zsh). They contain no credentials;
 the selected profile must be available wherever you paste them.
 Press `Ctrl+E` from any service view or focused finder result to open a separate
-**CLI output** tab for the supported read-only command. The command is shown at
-the top; it describes the selected resource rather than reconstructing all tab
-data. `[`/`]` switches tabs, arrows scroll, `Ctrl+U/Ctrl+D` page, `y` copies output,
+**CLI output** tab for the current view's supported read-only command. Tables use
+collection commands scoped to their entered parent, not the highlighted row.
+Detail views and finder results use resource-specific commands. Local text filters,
+column selection and page position are not reproduced; server-side query keys,
+indexes, parent scope and supported time ranges are preserved. Views requiring
+multiple APIs or an unavailable report ID show an explicit unsupported message.
+The command is shown at the top. `[`/`]` switches tabs, arrows scroll, `Ctrl+U/Ctrl+D` page,
+`y` copies output,
 `Ctrl+Y` copies the command, `Ctrl+R` reruns it, and `Ctrl+W`/Esc closes/cancels.
 Reads can finish in the background while you use other tabs. AWS CLI v2 must be on
 PATH with credentials for the active profile. Execution is limited to 30 seconds

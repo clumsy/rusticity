@@ -50,6 +50,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        if rusticity_term::stepfunctions::executions::poll(&mut app).await {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
         if rusticity_term::kms::detail::poll(&mut app).await {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
@@ -95,6 +98,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.sns_state.topics.loading
             || app.kms_state.detail.busy()
             || app.sns_state.subscriptions.busy()
+            || app.stepfunctions_state.machines.loading
+            || app.stepfunctions_state.executions.busy()
             || app.secretsmanager_state.secrets.loading
             || app.rds_state.instances.loading
             || app.fsx_state.file_systems.loading
@@ -150,7 +155,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Async detail reads/transfers must not fall through to
                         // generic refresh/select loaders after consuming these keys.
                         if let Some(action) = handle_key(key, app.mode) {
-                            if rusticity_term::kms::detail::handle_action(&mut app, &action)
+                            if rusticity_term::stepfunctions::executions::handle_action(&mut app, &action)
+                                || rusticity_term::kms::detail::handle_action(&mut app, &action)
                                 || rusticity_term::sns::subscriptions::handle_action(&mut app, &action)
                                 || rusticity_term::cli_command::handle_action(&mut app, &action)
                                 || rusticity_term::ecr::scan::handle_action(&mut app, &action)
@@ -196,7 +202,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines);
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
                             && !((items_view || inventory_view) && app.mode == rusticity_term::keymap::Mode::Normal);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
@@ -756,6 +762,20 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_sns_topics().await {
                                 app.error_message = Some(format!("Failed to load SNS topics: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        if app.service_selected && app.current_service == Service::StepFunctionsStateMachines
+                            && app.stepfunctions_state.executions.machine.is_none()
+                            && ((!prev_service_selected || prev_service != Service::StepFunctionsStateMachines)
+                                || app.stepfunctions_state.machines.loading) {
+                            app.stepfunctions_state.machines.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_stepfunctions().await {
+                                app.error_message = Some(format!("Failed to load state machines: {:#}", e));
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
@@ -1432,6 +1452,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                             }
                                             Service::SnsTopics => {
                                                 new_app.sns_state.topics.loading = true;
+                                            }
+                                            Service::StepFunctionsStateMachines => {
+                                                new_app.stepfunctions_state.machines.loading = true;
                                             }
                                             Service::SecretsManagerSecrets => {
                                                 new_app.secretsmanager_state.secrets.loading = true;

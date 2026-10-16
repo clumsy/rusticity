@@ -72,6 +72,49 @@ pub(super) async fn fetch(config: &AwsConfig, kind: ResourceKind) -> Result<(Vec
                 arn: topic.arn,
             }
         }),
+        ResourceKind::StateMachine => {
+            // Full ARN is the row id (so it opens exactly this machine); the
+            // display name is the ARN's trailing `stateMachine:<name>` segment.
+            // Request the max page size and stop at the bounded cache cap,
+            // before fetching a further page.
+            let mut pages = config
+                .sfn_client()
+                .list_state_machines()
+                .max_results(1000)
+                .into_paginator()
+                .send();
+            while let Some(page) = pages.next().await {
+                let page = page?;
+                for machine in page.state_machines() {
+                    let arn = machine.state_machine_arn();
+                    if arn.is_empty() {
+                        anyhow::bail!("ListStateMachines returned a state machine without an ARN");
+                    }
+                    let (arn_region, arn_account, arn_name) =
+                        crate::stepfunctions::parse_state_machine_arn(arn)?;
+                    crate::stepfunctions::validate_scope(config, arn_region, arn_account)?;
+                    let name = machine.name();
+                    if name != arn_name {
+                        anyhow::bail!(
+                            "ListStateMachines returned a name inconsistent with its ARN"
+                        );
+                    }
+                    if name.is_empty() {
+                        anyhow::bail!("ListStateMachines returned a state machine without a name");
+                    }
+                    rows.push(Resource {
+                        kind,
+                        id: arn.into(),
+                        name: name.into(),
+                        arn: arn.into(),
+                        region: arn.split(':').nth(3).unwrap_or(region).into(),
+                    });
+                    if rows.len() >= INVENTORY_LIMIT {
+                        return Ok((rows, true));
+                    }
+                }
+            }
+        }
         ResourceKind::Secret => {
             // This SDK exposes a page paginator, not an item paginator. Stop
             // reading as soon as the finder's bounded cache is full.

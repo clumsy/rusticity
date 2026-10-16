@@ -336,3 +336,116 @@ async fn secret_finder_stops_at_inventory_cap_and_never_fetches_values() {
     assert_eq!(rows[0].id, rows[0].arn);
     assert_eq!(rows[0].name, "secret-0-0");
 }
+
+#[test]
+fn finder_has_exactly_twenty_two_inventory_kinds_including_state_machine() {
+    assert_eq!(ResourceKind::ALL.len(), 22);
+    assert!(ResourceKind::ALL.contains(&ResourceKind::StateMachine));
+    assert!(!ResourceKind::ALL.contains(&ResourceKind::Reference));
+    assert_eq!(ResourceKind::StateMachine.service(), "states");
+    assert_eq!(ResourceKind::StateMachine.label(), "State machine");
+}
+
+#[test]
+fn finder_state_machine_qualifiers_and_resource_type_are_supported() {
+    for q in ["@stepfunctions", "@sfn", "@states"] {
+        let query = SearchQuery::parse(&format!("{q} orders")).unwrap();
+        assert_eq!(query.kinds, [ResourceKind::StateMachine], "{q}");
+        assert!(query
+            .index_query("us-east-2")
+            .contains("resourcetype:states:stateMachine"));
+    }
+}
+
+#[test]
+fn finder_state_machine_index_id_is_full_arn_and_name_strips_prefix() {
+    let arn = "arn:aws:states:us-east-2:123456789012:stateMachine:orders";
+    let resource = Resource::from_index("states:stateMachine", arn, "us-east-2").unwrap();
+    assert_eq!(resource.kind, ResourceKind::StateMachine);
+    assert_eq!(resource.kind.service(), "states");
+    assert_eq!(resource.id, arn); // full ARN is the row id
+    assert_eq!(resource.name, "orders"); // display name strips `stateMachine:`
+    assert_eq!(resource.arn, arn);
+    // A version/alias-qualified ARN is not a finder target.
+    assert!(Resource::from_index(
+        "states:stateMachine",
+        "arn:aws:states:us-east-2:123456789012:stateMachine:orders:1",
+        "us-east-2"
+    )
+    .is_none());
+}
+
+#[test]
+fn finder_state_machine_arns_are_openable_but_execution_arns_remain_references() {
+    let arn = "arn:aws:states:us-east-1:123456789012:stateMachine:orders";
+    let sm = Resource::from_arn(arn).unwrap();
+    assert_eq!(sm.kind, ResourceKind::StateMachine);
+    assert_eq!(sm.id, arn);
+    assert_eq!(sm.name, "orders");
+    assert_eq!(sm.arn, arn);
+
+    // Execution ARNs are not a supported openable kind -> generic reference.
+    let execution =
+        Resource::from_arn("arn:aws:states:us-east-1:123456789012:execution:orders:run-1").unwrap();
+    assert_eq!(execution.kind, ResourceKind::Reference);
+}
+
+#[tokio::test]
+async fn state_machine_finder_caps_at_inventory_limit_and_lists_only() {
+    use aws_smithy_http_client::test_util::infallible_client_fn;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let requests = count.clone();
+    let sdk = aws_config::SdkConfig::builder()
+        .behavior_version(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_sfn::config::SharedCredentialsProvider::new(
+            aws_sdk_sfn::config::Credentials::new("test", "test", None, None, "test"),
+        ))
+        .retry_config(aws_config::retry::RetryConfig::disabled())
+        .http_client(infallible_client_fn(move |request| {
+            // Inventory issues ONLY ListStateMachines (never a Describe*).
+            assert!(request.headers()["x-amz-target"]
+                .to_str()
+                .unwrap()
+                .ends_with(".ListStateMachines"));
+            let body: serde_json::Value =
+                serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
+            assert_eq!(body["maxResults"], 1000);
+            let page = requests.fetch_add(1, Ordering::SeqCst);
+            if page > 0 {
+                assert_eq!(body["nextToken"], format!("page-{page}"));
+            }
+            let rows: Vec<_> = (0..1000)
+                .map(|i| {
+                    serde_json::json!({
+                        "name": format!("sm-{page}-{i}"),
+                        "stateMachineArn": format!("arn:aws:states:us-east-1:123456789012:stateMachine:sm-{page}-{i}"),
+                        "type": "STANDARD",
+                        "creationDate": 1_700_000_000
+                    })
+                })
+                .collect();
+            http::Response::builder()
+                .status(200)
+                .body(
+                    serde_json::json!({"stateMachines": rows, "nextToken": format!("page-{}", page + 1)})
+                        .to_string()
+                        .into_bytes(),
+                )
+                .unwrap()
+        }))
+        .build();
+    let config = AwsConfig::from_sdk_config(sdk, "us-east-1", "123456789012");
+    let (rows, limited) = inventory::fetch(&config, ResourceKind::StateMachine)
+        .await
+        .unwrap();
+    assert!(limited);
+    assert_eq!(rows.len(), 2000); // INVENTORY_LIMIT, stops before an extra fetch
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(rows[0].id, rows[0].arn); // id is the full ARN
+    assert_eq!(rows[0].name, "sm-0-0"); // display name
+}

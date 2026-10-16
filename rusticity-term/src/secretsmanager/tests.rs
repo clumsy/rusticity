@@ -289,12 +289,12 @@ fn refresh_retry_and_sessions_remain_metadata_inventory() {
     }
 }
 #[test]
-fn finder_and_cli_use_full_arn_with_describe_secret_only() {
+fn inventory_cli_lists_secrets_and_finder_keeps_full_arn_identity() {
     let mut app = app();
     app.secretsmanager_state.secrets.filter = "024".into();
     let invocation = crate::cli_command::invocation(&app).unwrap();
-    assert_eq!(&invocation.args[..2], ["secretsmanager", "describe-secret"]);
-    assert!(invocation.args.iter().any(|s| s.contains(&secret(24).arn)));
+    assert_eq!(&invocation.args[..2], ["secretsmanager", "list-secrets"]);
+    assert!(!invocation.args.iter().any(|s| s.contains(&secret(24).arn)));
     assert!(!invocation.display.contains("get-secret-value"));
     assert!(!invocation.display.contains("batch-get"));
     press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);

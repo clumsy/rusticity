@@ -123,6 +123,7 @@ pub struct App {
     pub sqs_client: SqsClient,
     pub sns_client: SnsClient,
     pub secretsmanager_client: SecretsManagerClient,
+    pub stepfunctions_client: rusticity_core::StepFunctionsClient,
     pub alarms_client: AlarmsClient,
     pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
@@ -150,6 +151,7 @@ pub struct App {
     pub sqs_state: SqsState,
     pub sns_state: SnsState,
     pub secretsmanager_state: SecretsManagerState,
+    pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub kms_state: KmsState,
@@ -353,6 +355,7 @@ pub enum Service {
     S3Buckets,
     SnsTopics,
     SecretsManagerSecrets,
+    StepFunctionsStateMachines,
     SqsQueues,
     VpcVpcs,
     Ec2Instances,
@@ -382,6 +385,7 @@ impl Service {
             Service::S3Buckets => "S3 › Buckets",
             Service::SnsTopics => "SNS › Topics",
             Service::SecretsManagerSecrets => "Secrets Manager › Secrets",
+            Service::StepFunctionsStateMachines => "Step Functions › State machines",
             Service::SqsQueues => "SQS › Queues",
             Service::VpcVpcs => "VPC › VPCs",
             Service::Ec2Instances => "EC2 › Instances",
@@ -420,6 +424,12 @@ impl App {
         }
         if self.current_service == Service::RdsInstances {
             return Some(&mut self.rds_state.instances.filter);
+        }
+        if self.current_service == Service::StepFunctionsStateMachines {
+            if self.stepfunctions_state.executions.machine.is_some() {
+                return Some(&mut self.stepfunctions_state.executions.table.filter);
+            }
+            return Some(&mut self.stepfunctions_state.machines.filter);
         }
         if self.current_service == Service::SecretsManagerSecrets {
             return Some(&mut self.secretsmanager_state.secrets.filter);
@@ -533,6 +543,12 @@ impl App {
                 self.vpc_state.vpcs.reset();
             } else if self.current_service == Service::SnsTopics {
                 self.sns_state.topics.reset();
+            } else if self.current_service == Service::StepFunctionsStateMachines {
+                if self.stepfunctions_state.executions.machine.is_some() {
+                    self.stepfunctions_state.executions.table.reset();
+                } else {
+                    self.stepfunctions_state.machines.reset();
+                }
             } else if self.current_service == Service::SecretsManagerSecrets {
                 self.secretsmanager_state.secrets.reset();
             }
@@ -594,6 +610,7 @@ impl App {
         let sqs_client = SqsClient::new(config.clone());
         let sns_client = SnsClient::new(config.clone());
         let secretsmanager_client = SecretsManagerClient::new(config.clone());
+        let stepfunctions_client = rusticity_core::StepFunctionsClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
         let ec2_client = Ec2Client::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
@@ -619,6 +636,7 @@ impl App {
             sqs_client,
             sns_client,
             secretsmanager_client,
+            stepfunctions_client,
             alarms_client,
             ec2_client,
             ecr_client,
@@ -654,6 +672,7 @@ impl App {
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
+            stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -858,6 +877,7 @@ impl App {
             sqs_client: SqsClient::new(config.clone()),
             sns_client: SnsClient::new(config.clone()),
             secretsmanager_client: SecretsManagerClient::new(config.clone()),
+            stepfunctions_client: rusticity_core::StepFunctionsClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
             ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
@@ -893,6 +913,7 @@ impl App {
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
+            stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -1113,6 +1134,9 @@ impl App {
         if crate::sns::actions::handle_action(self, &action) {
             return;
         }
+        if crate::stepfunctions::actions::handle_action(self, &action) {
+            return;
+        }
         if crate::secretsmanager::actions::handle_action(self, &action) {
             return;
         }
@@ -1308,6 +1332,9 @@ impl App {
                     Service::VpcVpcs => self.vpc_state.vpcs.reset(),
                     Service::SnsTopics => self.sns_state.topics.reset(),
                     Service::SecretsManagerSecrets => self.secretsmanager_state.secrets.reset(),
+                    Service::StepFunctionsStateMachines => {
+                        self.stepfunctions_state.machines.reset()
+                    }
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
                     }
@@ -1396,6 +1423,7 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
+                            "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "KmsKeys" => Service::KmsKeys,
@@ -3029,6 +3057,12 @@ impl App {
                     parts.extend([topic.name.clone(), "Subscriptions".into()]);
                 }
             }
+            Service::StepFunctionsStateMachines => {
+                parts.extend(["Step Functions".into(), "State machines".into()]);
+                if let Some(machine) = &self.stepfunctions_state.executions.machine {
+                    parts.push(machine.name.clone());
+                }
+            }
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()])
             }
@@ -3120,6 +3154,7 @@ impl App {
             Service::RdsInstances => rds_actions::console_url(self),
             Service::VpcVpcs => vpc_actions::console_url(self),
             Service::SnsTopics => crate::sns::actions::console_url(self),
+            Service::StepFunctionsStateMachines => crate::stepfunctions::actions::console_url(self),
             Service::SecretsManagerSecrets => crate::secretsmanager::actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
@@ -3830,6 +3865,10 @@ impl App {
             crate::sns::actions::go_to_page(self, page);
             return;
         }
+        if self.current_service == Service::StepFunctionsStateMachines {
+            crate::stepfunctions::actions::go_to_page(self, page);
+            return;
+        }
         if self.current_service == Service::SecretsManagerSecrets {
             crate::secretsmanager::actions::go_to_page(self, page);
             return;
@@ -4126,6 +4165,7 @@ impl App {
                     "Lambda › Applications" => Service::LambdaApplications,
                     "S3 › Buckets" => Service::S3Buckets,
                     "SNS › Topics" => Service::SnsTopics,
+                    "Step Functions › State machines" => Service::StepFunctionsStateMachines,
                     "Secrets Manager › Secrets" => Service::SecretsManagerSecrets,
                     "SQS › Queues" => Service::SqsQueues,
                     _ => return,
@@ -4154,6 +4194,11 @@ impl App {
                     self.sns_state.subscriptions.close();
                     self.sns_state.topics.reset();
                     self.sns_state.topics.loading = true;
+                }
+                if new_service == Service::StepFunctionsStateMachines {
+                    self.stepfunctions_state.executions.close();
+                    self.stepfunctions_state.machines.reset();
+                    self.stepfunctions_state.machines.loading = true;
                 }
                 if new_service == Service::SecretsManagerSecrets {
                     self.secretsmanager_state.secrets.reset();
@@ -4200,6 +4245,7 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
+                            "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             _ => Service::CloudWatchLogGroups,
                         },
                         title: if st.service == "RdsInstances" {
@@ -4961,6 +5007,15 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_stepfunctions(&mut self) -> anyhow::Result<()> {
+        self.stepfunctions_state.machines.loading = true;
+        let result = self.stepfunctions_client.list_state_machines().await;
+        self.stepfunctions_state.machines.loading = false;
+        self.stepfunctions_state.machines.items = result?;
+        self.stepfunctions_state.machines.reset();
+        Ok(())
+    }
+
     pub async fn load_secrets(&mut self) -> anyhow::Result<()> {
         self.secretsmanager_state.secrets.loading = true;
         let result = self.secretsmanager_client.list_secrets().await;
@@ -5628,6 +5683,7 @@ impl ServicePickerState {
                 "RDS › Databases",
                 "S3 › Buckets",
                 "Secrets Manager › Secrets",
+                "Step Functions › State machines",
                 "SNS › Topics",
                 "SQS › Queues",
                 "VPC › VPCs",

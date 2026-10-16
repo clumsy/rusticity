@@ -121,6 +121,7 @@ fn expected_list_url(service: Service, region: &str) -> String {
         Service::SnsTopics => format!(
             "https://{region}.console.aws.amazon.com/sns/v3/home?region={region}#/topics"
         ),
+        Service::StepFunctionsStateMachines => format!("https://{region}.console.aws.amazon.com/states/home?region={region}#/statemachines"),
         Service::SecretsManagerSecrets => format!(
             "https://{region}.console.aws.amazon.com/secretsmanager/listsecrets?region={region}"
         ),
@@ -639,6 +640,7 @@ fn list_route_matrix_covers_every_service_picker_entry() {
         Service::S3Buckets,
         Service::SnsTopics,
         Service::SecretsManagerSecrets,
+        Service::StepFunctionsStateMachines,
         Service::SqsQueues,
         Service::VpcVpcs,
         Service::Ec2Instances,

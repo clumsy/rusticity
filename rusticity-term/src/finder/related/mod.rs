@@ -290,6 +290,26 @@ pub fn selected(app: &App) -> Option<Resource> {
             })
         }
 
+        Service::StepFunctionsStateMachines => {
+            let filtered = crate::ui::stepfunctions::filtered_machines(app);
+            let machine = app
+                .stepfunctions_state
+                .executions
+                .machine
+                .as_ref()
+                .or_else(|| {
+                    filtered
+                        .get(app.stepfunctions_state.machines.selected)
+                        .copied()
+                })?;
+            Some(Resource {
+                kind: ResourceKind::StateMachine,
+                id: machine.arn.clone(),
+                name: machine.name.clone(),
+                arn: machine.arn.clone(),
+                region: region.to_string(),
+            })
+        }
         Service::SecretsManagerSecrets => {
             // The id is the full ARN (its suffix disambiguates same-named
             // secrets); the SDK name is the display name.

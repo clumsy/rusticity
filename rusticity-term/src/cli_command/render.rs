@@ -2,7 +2,15 @@
 use rusticity_core::finder::{Resource, ResourceKind};
 use serde_json::{json, Value};
 
+#[derive(Debug)]
 pub(super) enum Target {
+    /// A fixed read-only API for the current collection, never a selected row.
+    View {
+        operation: &'static str,
+        input: Value,
+        region: Option<String>,
+        scope: Option<Resource>,
+    },
     Resource(Resource),
     TopicSubscriptions(Resource),
     EcrImage {
@@ -38,6 +46,51 @@ pub(super) fn invocation(
     validate("Region", context.region, false)?;
     validate("Account", context.account_id, false)?;
     let (operation, input, region) = match target {
+        Target::View {
+            operation,
+            input,
+            region,
+            scope,
+        } => {
+            if !VIEW_OPERATIONS.contains(operation) {
+                return Err("This view has no allowlisted read-only CLI operation".into());
+            }
+            if !input.is_object() {
+                return Err("View command input must be a JSON object".into());
+            }
+            validate_json(input)?;
+            if let Some(parent) = scope {
+                resource_command(parent, context)?;
+            }
+            let selected_region = if operation.starts_with("iam ") {
+                None
+            } else if operation.starts_with("ecr-public ") {
+                Some("us-east-1".into())
+            } else {
+                Some(regional(region.as_deref().unwrap_or(context.region))?)
+            };
+            for key in [
+                "stateMachineArn",
+                "TopicArn",
+                "ResourceArn",
+                "resourceArn",
+                "resourceARN",
+                "KeyId",
+                "StackName",
+                "FunctionName",
+                "ResourceARN",
+                "SourceArn",
+                "EventSourceArn",
+            ] {
+                if let Some(value) = input.get(key).and_then(Value::as_str) {
+                    validate(key, value, true)?;
+                    if value.starts_with("arn:") {
+                        validate_parent_arn(value, context, selected_region.as_deref())?;
+                    }
+                }
+            }
+            (*operation, input.clone(), selected_region)
+        }
         Target::Resource(resource) => resource_command(resource, context)?,
         Target::TopicSubscriptions(resource) => {
             if resource.kind != ResourceKind::Topic {
@@ -111,6 +164,103 @@ pub(super) fn invocation(
         args,
         display: text,
     })
+}
+
+// Only these fixed collection reads may pass the view-command boundary.
+const VIEW_OPERATIONS: &[&str] = &[
+    "sqs list-queues",
+    "sqs list-queue-tags",
+    "sqs list-message-move-tasks",
+    "lambda list-event-source-mappings",
+    "stepfunctions list-state-machines",
+    "stepfunctions list-executions",
+    "sns list-topics",
+    "sns list-subscriptions-by-topic",
+    "secretsmanager list-secrets",
+    "rds describe-db-instances",
+    "ec2 describe-vpcs",
+    "ec2 describe-instances",
+    "ec2 describe-tags",
+    "kms list-keys",
+    "kms list-aliases",
+    "kms list-resource-tags",
+    "efs describe-file-systems",
+    "efs describe-access-points",
+    "efs describe-mount-targets",
+    "efs list-tags-for-resource",
+    "fsx describe-file-systems",
+    "fsx describe-backups",
+    "fsx list-tags-for-resource",
+    "s3api list-buckets",
+    "s3api list-objects-v2",
+    "ecr describe-repositories",
+    "ecr-public describe-repositories",
+    "ecr describe-images",
+    "ecr-public describe-images",
+    "ecr describe-image-scan-findings",
+    "ecr list-image-referrers",
+    "ecr describe-image-replication-status",
+    "ecr describe-image-signing-status",
+    "logs describe-log-groups",
+    "logs describe-log-streams",
+    "logs get-log-events",
+    "logs list-tags-for-resource",
+    "cloudwatch describe-alarms",
+    "cloudwatch describe-alarm-history",
+    "cloudwatch list-tags-for-resource",
+    "cloudtrail lookup-events",
+    "dynamodb list-tables",
+    "dynamodb describe-table",
+    "dynamodb scan",
+    "dynamodb query",
+    "dynamodb list-backups",
+    "dynamodb list-tags-of-resource",
+    "lambda list-functions",
+    "lambda list-versions-by-function",
+    "lambda list-aliases",
+    "cloudformation describe-stacks",
+    "cloudformation describe-stack-resources",
+    "cloudformation describe-stack-events",
+    "cloudformation list-change-sets",
+    "iam list-users",
+    "iam list-roles",
+    "iam list-groups",
+    "iam list-groups-for-user",
+    "iam list-user-tags",
+    "iam list-role-tags",
+    "iam get-group",
+    "apigateway get-resources",
+    "apigatewayv2 get-routes",
+];
+
+fn validate_json(value: &Value) -> Result<(), String> {
+    match value {
+        Value::String(text) => validate("View parameter", text, false),
+        Value::Array(values) => values.iter().try_for_each(validate_json),
+        Value::Object(values) => values.iter().try_for_each(|(key, value)| {
+            validate("View parameter name", key, false)?;
+            validate_json(value)
+        }),
+        _ => Ok(()),
+    }
+}
+
+fn validate_parent_arn(
+    arn: &str,
+    context: Context<'_>,
+    region: Option<&str>,
+) -> Result<(), String> {
+    let parts: Vec<_> = arn.splitn(6, ':').collect();
+    if parts.len() != 6 || parts[1].is_empty() || parts[2].is_empty() || parts[5].is_empty() {
+        return Err("Parent ARN is malformed".into());
+    }
+    if !parts[4].is_empty() && !context.account_id.is_empty() && parts[4] != context.account_id {
+        return Err("Parent belongs to another account; switch profiles first".into());
+    }
+    if !parts[3].is_empty() && region.is_some_and(|region| region != parts[3]) {
+        return Err("Parent is in another Region; switch regions first".into());
+    }
+    Ok(())
 }
 
 fn resource_command(
@@ -221,6 +371,17 @@ fn resource_command(
             json!({"DBInstanceIdentifier":id}),
         ),
         Bucket => ("s3api get-bucket-location", json!({"Bucket":id})),
+        StateMachine => {
+            if resource.arn.is_empty()
+                || !Resource::from_arn(&resource.arn).is_some_and(|r| r.kind == StateMachine)
+            {
+                return Err("A full Step Functions state machine ARN is required".into());
+            }
+            (
+                "stepfunctions list-executions",
+                json!({"stateMachineArn":resource.arn}),
+            )
+        }
         Secret => {
             if resource.arn.is_empty()
                 || !Resource::from_arn(&resource.arn).is_some_and(|r| r.kind == Secret)

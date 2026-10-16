@@ -82,14 +82,14 @@ fn ctrl_y_has_its_own_action_and_does_not_type_into_filters() {
 }
 
 #[test]
-fn filtered_sns_row_copies_command_with_current_profile_and_region_without_loading() {
+fn sns_table_copies_list_command_independent_of_highlighted_row() {
     let mut app = app(Service::SnsTopics);
     app.sns_state.topics.items = vec![topic("other"), topic("chosen")];
     app.sns_state.topics.filter = "CHOSEN".into();
     let before = app.sns_state.topics.items.clone();
     let text = copy(&mut app);
-    assert!(text.starts_with("aws sns get-topic-attributes "));
-    assert!(text.contains("123456789012:chosen"));
+    assert!(text.starts_with("aws sns list-topics "));
+    assert!(!text.contains("123456789012:chosen"));
     assert!(!text.contains(":other"));
     assert!(text.contains("--profile='beta'"));
     assert!(text.contains("--region='us-east-1'"));
@@ -136,8 +136,8 @@ fn finder_copy_targets_focused_result_not_underlying_service() {
 }
 
 #[test]
-fn unsupported_and_empty_selections_report_errors_without_copying_stale_text() {
-    let mut app = app(Service::CloudTrailEvents);
+fn unsupported_views_refuse_stale_commands_but_empty_tables_can_be_listed() {
+    let mut app = app(Service::ApiGatewayApis);
     app.clipboard.request_text("stale request");
     press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
     assert!(app.clipboard.notice().unwrap().failed);
@@ -147,13 +147,7 @@ fn unsupported_and_empty_selections_report_errors_without_copying_stale_text() {
             "must not touch clipboard"
         )));
     app.current_service = Service::SnsTopics;
-    press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
-    assert!(app
-        .clipboard
-        .notice()
-        .unwrap()
-        .message
-        .contains("No supported resource"));
+    assert!(copy(&mut app).starts_with("aws sns list-topics "));
     assert!(!app.sns_state.topics.loading);
 }
 
@@ -168,13 +162,23 @@ fn ecr_image_list_and_open_detail_use_immutable_digest_and_intercept_service_act
     app.ecr_state.images.filter = "chosen".into();
     let list = copy(&mut app);
     assert!(list.starts_with("aws ecr describe-images "));
-    assert!(list.contains("sha256:correct"));
+    assert!(!list.contains("sha256:correct"));
     assert!(list.contains("team/repo"));
+    assert!(!list.contains("imageIds"));
     assert!(!app.ecr_state.repositories.loading);
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     app.ecr_state.images.items[1].digest = "sha256:changed".into();
-    for _ in 0..5 {
-        assert_eq!(copy(&mut app), list);
+    for op in [
+        "describe-images",
+        "describe-image-scan-findings",
+        "list-image-referrers",
+        "describe-image-replication-status",
+        "describe-image-signing-status",
+    ] {
+        let text = copy(&mut app);
+        assert!(text.starts_with(&format!("aws ecr {op} ")));
+        assert!(text.contains("sha256:correct"));
+        assert!(!text.contains("sha256:changed"));
         app.clipboard = Default::default(); // Dismiss the transient copy notice to inspect hints.
         assert!(screen(&app, 100).contains("^y copy CLI"));
         press(&mut app, KeyCode::Tab, KeyModifiers::NONE);
@@ -182,7 +186,7 @@ fn ecr_image_list_and_open_detail_use_immutable_digest_and_intercept_service_act
 }
 
 #[test]
-fn s3_object_uses_visible_key_and_bucket_region_while_folder_refuses() {
+fn s3_objects_table_lists_prefix_independent_of_file_or_folder_selection() {
     let mut app = app(Service::S3Buckets);
     app.s3_state.current_bucket = Some("bucket".into());
     app.s3_state.object_tab = ui::s3::ObjectTab::Objects;
@@ -199,20 +203,14 @@ fn s3_object_uses_visible_key_and_bucket_region_while_folder_refuses() {
         storage_class: String::new(),
     }];
     let text = copy(&mut app);
-    assert!(text.starts_with("aws s3api head-object "));
+    assert!(text.starts_with("aws s3api list-objects-v2 "));
     assert!(text.contains("--region='eu-west-1'"));
-    assert!(text.contains("file://literal"));
+    assert!(!text.contains("file://literal"));
     assert!(!app.s3_state.object_view.busy());
     app.clipboard = Default::default(); // Dismiss the transient copy notice to inspect hints.
     assert!(screen(&app, 100).contains("^y copy CLI"));
     app.s3_state.objects[0].is_prefix = true;
-    press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
-    assert!(app
-        .clipboard
-        .notice()
-        .unwrap()
-        .message
-        .contains("folder prefix"));
+    assert_eq!(copy(&mut app), text);
 }
 
 #[test]
@@ -229,12 +227,13 @@ fn api_protocol_comes_from_selected_or_open_api() {
         disable_execute_api_endpoint: false,
         status: String::new(),
     }];
-    assert!(copy(&mut app).starts_with("aws apigatewayv2 get-api "));
+    assert!(invocation(&app).err().unwrap().contains("combines REST"));
     app.apig_state.current_api = Some(app.apig_state.apis.items[0].clone());
+    assert!(copy(&mut app).starts_with("aws apigatewayv2 get-routes "));
     app.apig_state.current_api.as_mut().unwrap().protocol_type = "REST".into();
     app.apig_state.current_api.as_mut().unwrap().id = "rest-api".into();
     let text = copy(&mut app);
-    assert!(text.starts_with("aws apigateway get-rest-api "));
+    assert!(text.starts_with("aws apigateway get-resources "));
     assert!(text.contains("rest-api"));
 }
 
@@ -245,6 +244,9 @@ fn current_profile_changes_are_reflected_and_foreign_finder_accounts_are_refused
     assert!(copy(&mut app).contains("--profile='beta'"));
     app.profile = "different".into();
     assert!(copy(&mut app).contains("--profile='different'"));
+    app.mode = Mode::ResourceFinder;
+    app.resource_finder.focus = Focus::Table;
+    app.resource_finder.rows = vec![Resource::from_arn(&topic("chosen").arn).unwrap()];
     app.config.account_id = "999999999999".into();
     press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
     assert!(app
@@ -253,4 +255,137 @@ fn current_profile_changes_are_reflected_and_foreign_finder_accounts_are_refused
         .unwrap()
         .message
         .contains("switch profiles"));
+}
+
+#[test]
+fn table_commands_exist_without_a_selected_row_and_copy_matches_execution() {
+    let cases = [
+        (
+            Service::StepFunctionsStateMachines,
+            "stepfunctions",
+            "list-state-machines",
+        ),
+        (Service::SnsTopics, "sns", "list-topics"),
+        (
+            Service::SecretsManagerSecrets,
+            "secretsmanager",
+            "list-secrets",
+        ),
+        (Service::SqsQueues, "sqs", "list-queues"),
+        (Service::RdsInstances, "rds", "describe-db-instances"),
+        (Service::VpcVpcs, "ec2", "describe-vpcs"),
+        (Service::Ec2Instances, "ec2", "describe-instances"),
+        (Service::KmsKeys, "kms", "list-keys"),
+        (Service::EfsFileSystems, "efs", "describe-file-systems"),
+        (Service::FsxFileSystems, "fsx", "describe-file-systems"),
+        (Service::S3Buckets, "s3api", "list-buckets"),
+        (Service::EcrRepositories, "ecr", "describe-repositories"),
+        (Service::CloudWatchLogGroups, "logs", "describe-log-groups"),
+        (Service::CloudWatchAlarms, "cloudwatch", "describe-alarms"),
+        (Service::CloudTrailEvents, "cloudtrail", "lookup-events"),
+        (Service::DynamoDbTables, "dynamodb", "list-tables"),
+        (Service::LambdaFunctions, "lambda", "list-functions"),
+        (
+            Service::CloudFormationStacks,
+            "cloudformation",
+            "describe-stacks",
+        ),
+        (Service::IamUsers, "iam", "list-users"),
+        (Service::IamRoles, "iam", "list-roles"),
+        (Service::IamUserGroups, "iam", "list-groups"),
+    ];
+    for (service, cli_service, operation) in cases {
+        let mut app = app(service);
+        let invocation = invocation(&app).unwrap();
+        assert_eq!(
+            &invocation.args[..2],
+            [cli_service, operation],
+            "{service:?}"
+        );
+        assert_eq!(copy(&mut app), invocation.display);
+        press(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
+        assert!(matches!(app.current_service, Service::CliOutput(_)));
+        // Opening a tab only queues the operation; this test never polls AWS.
+    }
+    for service in [
+        Service::ApiGatewayApis,
+        Service::LambdaApplications,
+        Service::CloudWatchInsights,
+    ] {
+        assert!(
+            invocation(&app(service)).is_err(),
+            "mixed/report view must not choose a row: {service:?}"
+        );
+    }
+}
+
+#[test]
+fn sfn_inventory_cli_ignores_selection_and_express_type_until_entered() {
+    let mut app = app(Service::StepFunctionsStateMachines);
+    app.stepfunctions_state.machines.items = vec![rusticity_core::StateMachineMetadata {
+        name: "fast".into(),
+        arn: "arn:aws:states:us-east-1:123456789012:stateMachine:fast".into(),
+        machine_type: "EXPRESS".into(),
+        creation_date: String::new(),
+    }];
+    let base = copy(&mut app);
+    assert!(base.starts_with("aws stepfunctions list-state-machines "));
+    app.stepfunctions_state.machines.selected = usize::MAX;
+    app.stepfunctions_state.machines.filter = "no rows".into();
+    assert_eq!(copy(&mut app), base);
+    app.stepfunctions_state.machines.filter.clear();
+    app.stepfunctions_state.machines.selected = 0;
+    app.handle_action(Action::Select);
+    assert!(invocation(&app).err().unwrap().contains("EXPRESS"));
+}
+
+#[test]
+fn sqs_nested_table_commands_use_entered_url_not_highlighted_row() {
+    use crate::sqs::queue::Queue;
+    use crate::ui::sqs::QueueDetailTab;
+    let mut app = app(Service::SqsQueues);
+    let queue = Queue {
+        name: "orders".into(),
+        url: "https://sqs.us-east-1.amazonaws.com/123456789012/orders".into(),
+        queue_type: String::new(),
+        created_timestamp: String::new(),
+        messages_available: String::new(),
+        messages_in_flight: String::new(),
+        encryption: String::new(),
+        content_based_deduplication: String::new(),
+        last_modified_timestamp: String::new(),
+        visibility_timeout: String::new(),
+        message_retention_period: String::new(),
+        maximum_message_size: String::new(),
+        delivery_delay: String::new(),
+        receive_message_wait_time: String::new(),
+        high_throughput_fifo: String::new(),
+        deduplication_scope: String::new(),
+        fifo_throughput_limit: String::new(),
+        dead_letter_queue: String::new(),
+        messages_delayed: String::new(),
+        redrive_allow_policy: String::new(),
+        redrive_policy: String::new(),
+        redrive_task_id: String::new(),
+        redrive_task_start_time: String::new(),
+        redrive_task_status: String::new(),
+        redrive_task_percent: String::new(),
+        redrive_task_destination: String::new(),
+    };
+    app.sqs_state.current_queue = Some(queue.url.clone());
+    app.sqs_state.queues.items = vec![queue];
+    app.sqs_state.queues.selected = usize::MAX;
+    app.sqs_state.detail_tab = QueueDetailTab::Tagging;
+    let invocation = invocation(&app).unwrap();
+    assert_eq!(&invocation.args[..2], ["sqs", "list-queue-tags"]);
+    assert!(invocation.args[3].contains("https://sqs.us-east-1.amazonaws.com/123456789012/orders"));
+    app.sqs_state.detail_tab = QueueDetailTab::LambdaTriggers;
+    let invocation = super::invocation(&app).unwrap();
+    assert_eq!(
+        &invocation.args[..2],
+        ["lambda", "list-event-source-mappings"]
+    );
+    assert!(invocation.args[3].contains("arn:aws:sqs:us-east-1:123456789012:orders"));
+    app.config.account_id = "999999999999".into();
+    assert!(super::invocation(&app).is_err());
 }

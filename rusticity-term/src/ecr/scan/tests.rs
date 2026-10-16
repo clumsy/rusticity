@@ -663,3 +663,29 @@ async fn general_pane_omits_informational_footer_but_keeps_loading_and_error_not
 }
 
 mod preferences;
+
+#[test]
+fn replication_table_cli_preserves_explicit_tag_source() {
+    let mut app = app();
+    enter(&mut app);
+    let view = app.ecr_state.scan.view.as_mut().unwrap();
+    view.tab = DetailTab::Replication;
+    view.source_tag = Some("mutable/tag".into());
+    let command = crate::cli_command::invocation(&app).unwrap();
+    assert_eq!(
+        &command.args[..2],
+        ["ecr", "describe-image-replication-status"]
+    );
+    let input: serde_json::Value = serde_json::from_str(&command.args[3]).unwrap();
+    assert_eq!(
+        input["imageId"],
+        serde_json::json!({"imageTag":"mutable/tag"})
+    );
+    app.ecr_state.scan.view.as_mut().unwrap().source_tag = None;
+    let command = crate::cli_command::invocation(&app).unwrap();
+    let input: serde_json::Value = serde_json::from_str(&command.args[3]).unwrap();
+    assert_eq!(
+        input["imageId"],
+        serde_json::json!({"imageDigest":"sha256:0"})
+    );
+}

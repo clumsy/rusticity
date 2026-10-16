@@ -26,6 +26,7 @@ pub mod secretsmanager;
 pub mod sns;
 pub mod sqs;
 mod status;
+pub mod stepfunctions;
 pub mod styles;
 mod summary;
 pub use summary::{render_summary, Summary};
@@ -764,6 +765,9 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
+        Service::StepFunctionsStateMachines => {
+            stepfunctions::render_state_machines(frame, app, area)
+        }
         Service::SnsTopics => sns::render_topics(frame, app, area),
         Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),
@@ -1223,6 +1227,9 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
+        Service::StepFunctionsStateMachines => {
+            stepfunctions::render_state_machines(frame, app, area)
+        }
         Service::SnsTopics => sns::render_topics(frame, app, area),
         Service::SqsQueues => sqs::render_queues(frame, app, area),
         Service::CloudFormationStacks => cfn::render_stacks(frame, app, area),

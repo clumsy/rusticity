@@ -21,6 +21,7 @@ pub mod s3;
 pub mod secretsmanager;
 pub mod sns;
 pub mod sqs;
+pub mod stepfunctions;
 pub mod types;
 pub mod vpc;
 
@@ -43,5 +44,6 @@ pub use s3::S3Client;
 pub use secretsmanager::{SecretMetadata, SecretsManagerClient};
 pub use sns::{SnsClient, SnsTopic};
 pub use sqs::SqsClient;
+pub use stepfunctions::{ExecutionMetadata, StateMachineMetadata, StepFunctionsClient};
 pub use types::*;
 pub use vpc::VpcClient;

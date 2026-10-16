@@ -922,7 +922,7 @@ fn from_arn_iam_role_with_path() {
 #[test]
 fn resource_kind_reference_excluded_from_all() {
     assert!(!ResourceKind::ALL.contains(&ResourceKind::Reference));
-    assert_eq!(ResourceKind::ALL.len(), 21);
+    assert_eq!(ResourceKind::ALL.len(), 22);
 }
 
 #[test]

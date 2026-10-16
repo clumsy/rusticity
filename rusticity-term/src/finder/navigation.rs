@@ -29,6 +29,7 @@ pub fn service(kind: ResourceKind) -> Service {
         ResourceKind::Queue => Service::SqsQueues,
         ResourceKind::Topic => Service::SnsTopics,
         ResourceKind::Secret => Service::SecretsManagerSecrets,
+        ResourceKind::StateMachine => Service::StepFunctionsStateMachines,
     }
 }
 
@@ -274,6 +275,15 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
             app.sns_state.topics.selected = ui::sns::filtered_topics(app)
                 .iter()
                 .position(|row| row.name == resource.id)
+                .unwrap_or(0);
+        }
+        ResourceKind::StateMachine => {
+            app.stepfunctions_state.executions.close();
+            app.load_stepfunctions().await?;
+            focus!(app.stepfunctions_state.machines, arn);
+            app.stepfunctions_state.machines.selected = ui::stepfunctions::filtered_machines(app)
+                .iter()
+                .position(|row| row.arn == resource.id)
                 .unwrap_or(0);
         }
         ResourceKind::Secret => {

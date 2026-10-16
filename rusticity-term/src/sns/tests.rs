@@ -138,7 +138,7 @@ fn sns_uses_shared_inventory_input_even_with_stale_legacy_view_modes() {
         app.view_mode = view_mode;
         app.sns_state.topics.page_size = PageSize::Ten;
         app.handle_action(Action::NextItem);
-        app.handle_action(Action::Select);
+        app.handle_action(Action::ExpandRow);
         assert_eq!(app.sns_state.topics.expanded_item, Some(1));
         app.handle_action(Action::PageDown);
         assert_eq!(app.sns_state.topics.selected, 11);

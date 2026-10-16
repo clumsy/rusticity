@@ -33,6 +33,7 @@ enum Source {
     RdsInstances,
     VpcVpcs,
     SnsTopics,
+    SnsSubscriptions,
 }
 
 fn columns(
@@ -136,6 +137,9 @@ impl Source {
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances => Self::RdsInstances,
             Service::VpcVpcs => Self::VpcVpcs,
+            Service::SnsTopics if app.sns_state.subscriptions.topic.is_some() => {
+                Self::SnsSubscriptions
+            }
             Service::SnsTopics => Self::SnsTopics,
             _ => return None,
         })
@@ -257,6 +261,12 @@ impl Source {
                 |id| crate::kms::key::Column::from_id(id).map(|c| c.name()),
                 Some(crate::kms::key::Column::Alias.id()),
             ),
+            Self::SnsSubscriptions => columns(
+                &app.sns_state.subscriptions.column_ids,
+                &app.sns_state.subscriptions.visible_column_ids,
+                |id| crate::sns::subscription::Column::from_id(id).map(|c| c.name()),
+                None,
+            ),
             Self::SnsTopics => columns(
                 &app.sns_state.column_ids,
                 &app.sns_state.visible_column_ids,
@@ -322,6 +332,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.page_size,
             Self::RdsInstances => app.rds_state.instances.page_size,
             Self::VpcVpcs => app.vpc_state.vpcs.page_size,
+            Self::SnsSubscriptions => app.sns_state.subscriptions.table.page_size,
             Self::SnsTopics => app.sns_state.topics.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
@@ -359,6 +370,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.keys.set_page_size(size),
             Self::RdsInstances => app.rds_state.instances.set_page_size(size),
             Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
+            Self::SnsSubscriptions => app.sns_state.subscriptions.table.set_page_size(size),
             Self::SnsTopics => app.sns_state.topics.set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
@@ -388,6 +400,7 @@ impl Source {
             Self::KmsKeys => app.kms_state.visible_column_ids_mut(),
             Self::RdsInstances => &mut app.rds_state.visible_column_ids,
             Self::VpcVpcs => &mut app.vpc_state.visible_column_ids,
+            Self::SnsSubscriptions => &mut app.sns_state.subscriptions.visible_column_ids,
             Self::SnsTopics => &mut app.sns_state.visible_column_ids,
             _ => return None,
         })

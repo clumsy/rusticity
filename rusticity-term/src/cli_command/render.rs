@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 pub(super) enum Target {
     Resource(Resource),
+    TopicSubscriptions(Resource),
     EcrImage {
         repository: String,
         digest: String,
@@ -38,6 +39,13 @@ pub(super) fn invocation(
     validate("Account", context.account_id, false)?;
     let (operation, input, region) = match target {
         Target::Resource(resource) => resource_command(resource, context)?,
+        Target::TopicSubscriptions(resource) => {
+            if resource.kind != ResourceKind::Topic {
+                return Err("Expected an SNS topic".into());
+            }
+            let (_, input, region) = resource_command(resource, context)?;
+            ("sns list-subscriptions-by-topic", input, region)
+        }
         Target::EcrImage { repository, digest } => {
             validate("Repository", repository, true)?;
             validate("Image digest", digest, true)?;

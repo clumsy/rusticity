@@ -417,7 +417,11 @@ impl App {
             return Some(&mut self.rds_state.instances.filter);
         }
         if self.current_service == Service::SnsTopics {
-            return Some(&mut self.sns_state.topics.filter);
+            return Some(if self.sns_state.subscriptions.topic.is_some() {
+                &mut self.sns_state.subscriptions.table.filter
+            } else {
+                &mut self.sns_state.topics.filter
+            });
         }
         if self.current_service == Service::ApiGatewayApis {
             crate::apig::actions::get_active_filter_mut(self)
@@ -2996,7 +3000,12 @@ impl App {
             }
             Service::RdsInstances => parts.extend(["RDS".into(), "Databases".into()]),
             Service::VpcVpcs => parts.extend(["VPC".into(), "VPCs".into()]),
-            Service::SnsTopics => parts.extend(["SNS".into(), "Topics".into()]),
+            Service::SnsTopics => {
+                parts.extend(["SNS".into(), "Topics".into()]);
+                if let Some(topic) = &self.sns_state.subscriptions.topic {
+                    parts.extend([topic.name.clone(), "Subscriptions".into()]);
+                }
+            }
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
@@ -4118,6 +4127,7 @@ impl App {
                     self.rds_state.instances.loading = true;
                 }
                 if new_service == Service::SnsTopics {
+                    self.sns_state.subscriptions.close();
                     self.sns_state.topics.reset();
                     self.sns_state.topics.loading = true;
                 }

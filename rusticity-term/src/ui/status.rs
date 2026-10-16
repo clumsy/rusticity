@@ -231,6 +231,19 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     {
         // Service-specific Items hints must precede the legacy ViewMode branches.
         dynamodb_items_hotkeys(app)
+    } else if app.mode == Mode::Normal && crate::sns::subscriptions::active(app) {
+        let mut hints = first_hint("↑↓", "select");
+        hints.extend(hint("⏎/←→", "expand"));
+        hints.extend(hint("i", "filter"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^u/^d", "page"));
+        hints.extend(hint("y", "copy ARN"));
+        hints.extend(hint("^o", "console"));
+        hints.extend(hint("^p", "print"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(hint("⎋", "back / cancel"));
+        hints.extend(last_hint("q", "quit"));
+        hints
     } else if app.mode == Mode::Normal
         && app.service_selected
         && matches!(
@@ -239,7 +252,12 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
-        hints.extend(hint("⏎ / ←→", "toggle"));
+        if app.current_service == Service::SnsTopics {
+            hints.extend(hint("⏎", "subscriptions"));
+            hints.extend(hint("←→", "toggle"));
+        } else {
+            hints.extend(hint("⏎ / ←→", "toggle"));
+        }
         hints.extend(hint("i", "filter"));
         hints.extend(hint("p", "preferences"));
         hints.extend(hint("^p", "print"));
@@ -483,6 +501,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
         || app.sns_state.topics.loading
+        || app.sns_state.subscriptions.busy()
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading

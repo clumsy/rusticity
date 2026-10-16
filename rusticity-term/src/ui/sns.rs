@@ -16,6 +16,7 @@ use rusticity_core::SnsTopic;
 
 pub struct State {
     pub topics: TableState<SnsTopic>,
+    pub subscriptions: crate::sns::subscriptions::State,
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
@@ -24,6 +25,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             topics: TableState::new(),
+            subscriptions: crate::sns::subscriptions::State::default(),
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
@@ -40,6 +42,10 @@ pub fn filtered_topics(app: &App) -> Vec<&SnsTopic> {
     rows
 }
 pub fn render_topics(frame: &mut Frame, app: &App, area: Rect) {
+    if app.sns_state.subscriptions.topic.is_some() {
+        crate::sns::subscriptions::render(frame, app, area);
+        return;
+    }
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.sns_state;
     let view = state

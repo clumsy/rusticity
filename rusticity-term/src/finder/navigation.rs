@@ -266,6 +266,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
                     .unwrap_or(0);
         }
         ResourceKind::Topic => {
+            app.sns_state.subscriptions.close();
             app.load_sns_topics().await?;
             focus!(app.sns_state.topics, name);
             app.sns_state.topics.selected = ui::sns::filtered_topics(app)

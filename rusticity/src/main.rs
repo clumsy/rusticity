@@ -50,6 +50,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
+        if rusticity_term::sns::subscriptions::poll(&mut app).await {
+            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+        }
         if rusticity_term::cli_output::poll(&mut app).await {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
@@ -87,6 +90,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.efs_state.file_systems.loading
             || app.vpc_state.vpcs.loading
             || app.sns_state.topics.loading
+            || app.sns_state.subscriptions.busy()
             || app.rds_state.instances.loading
             || app.fsx_state.file_systems.loading
             || app.fsx_state.backups_loading
@@ -141,7 +145,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Async detail reads/transfers must not fall through to
                         // generic refresh/select loaders after consuming these keys.
                         if let Some(action) = handle_key(key, app.mode) {
-                            if rusticity_term::cli_command::handle_action(&mut app, &action)
+                            if rusticity_term::sns::subscriptions::handle_action(&mut app, &action)
+                                || rusticity_term::cli_command::handle_action(&mut app, &action)
                                 || rusticity_term::ecr::scan::handle_action(&mut app, &action)
                                 || rusticity_term::s3::object::handle_action(&mut app, &action) {
                                 let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -738,6 +743,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         }
 
                         if app.service_selected && app.current_service == Service::SnsTopics
+                            && app.sns_state.subscriptions.topic.is_none()
                             && ((!prev_service_selected || prev_service != Service::SnsTopics)
                                 || app.sns_state.topics.loading) {
                             app.sns_state.topics.loading = true;

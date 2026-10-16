@@ -30,6 +30,9 @@ fn targets() -> Vec<Target> {
         }
         targets.push(Target::Resource(resource));
     }
+    let mut topic = resource(ResourceKind::Topic);
+    topic.arn = "arn:aws:sns:us-east-1:123456789012:selected-resource".into();
+    targets.push(Target::TopicSubscriptions(topic));
     targets.push(Target::EcrImage {
         repository: "team/image".into(),
         digest: format!("sha256:{}", "a".repeat(64)),

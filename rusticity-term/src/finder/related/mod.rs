@@ -265,6 +265,15 @@ pub fn selected(app: &App) -> Option<Resource> {
         }
 
         Service::SnsTopics => {
+            if let Some(topic) = &app.sns_state.subscriptions.topic {
+                return Some(Resource {
+                    kind: ResourceKind::Topic,
+                    id: topic.name.clone(),
+                    name: topic.name.clone(),
+                    arn: topic.arn.clone(),
+                    region: region.to_string(),
+                });
+            }
             let filtered = crate::ui::sns::filtered_topics(app);
             let topic = filtered.get(app.sns_state.topics.selected)?;
             Some(Resource {

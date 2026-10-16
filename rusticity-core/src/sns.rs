@@ -95,5 +95,8 @@ impl SnsClient {
         bail!("SNS ListTopics exceeded {max_pages} pages; inventory is incomplete")
     }
 }
+pub mod subscriptions;
+pub use subscriptions::SnsSubscription;
+
 #[cfg(test)]
 mod tests;

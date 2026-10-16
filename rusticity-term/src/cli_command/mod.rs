@@ -59,6 +59,19 @@ fn selected(app: &App) -> Result<Target, String> {
             .map(Target::Resource)
             .ok_or_else(|| "No resource selected in the finder".into());
     }
+    if app.current_service == Service::SnsTopics {
+        if let Some(topic) = &app.sns_state.subscriptions.topic {
+            return Ok(Target::TopicSubscriptions(
+                rusticity_core::finder::Resource {
+                    kind: rusticity_core::finder::ResourceKind::Topic,
+                    id: topic.name.clone(),
+                    name: topic.name.clone(),
+                    arn: topic.arn.clone(),
+                    region: app.config.region.clone(),
+                },
+            ));
+        }
+    }
     if app.current_service == Service::EcrRepositories {
         if let Some(repository) = &app.ecr_state.current_repository {
             if app.ecr_state.tab != ui::ecr::Tab::Private {

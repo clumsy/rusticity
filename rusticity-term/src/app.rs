@@ -82,6 +82,7 @@ pub use crate::ui::s3::{
     calculate_total_bucket_rows, calculate_total_object_rows, BucketType as S3BucketType,
     ObjectTab as S3ObjectTab, State as S3State,
 };
+pub use crate::ui::secretsmanager::State as SecretsManagerState;
 pub use crate::ui::sns::State as SnsState;
 pub use crate::ui::sqs::{
     extract_account_id, extract_region, filtered_eventbridge_pipes, filtered_lambda_triggers,
@@ -103,7 +104,7 @@ use rusticity_core::{
     CloudWatchClient, DynamoDbClient, Ec2Client, EcrClient, EfsClient, FsxClient, IamClient,
     KmsClient, LambdaClient, S3Client, SnsClient, SqsClient,
 };
-use rusticity_core::{RdsClient, VpcClient};
+use rusticity_core::{RdsClient, SecretsManagerClient, VpcClient};
 
 #[derive(Clone)]
 pub struct Tab {
@@ -121,6 +122,7 @@ pub struct App {
     pub s3_client: S3Client,
     pub sqs_client: SqsClient,
     pub sns_client: SnsClient,
+    pub secretsmanager_client: SecretsManagerClient,
     pub alarms_client: AlarmsClient,
     pub ec2_client: Ec2Client,
     pub ecr_client: EcrClient,
@@ -147,6 +149,7 @@ pub struct App {
     pub s3_state: S3State,
     pub sqs_state: SqsState,
     pub sns_state: SnsState,
+    pub secretsmanager_state: SecretsManagerState,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
     pub kms_state: KmsState,
@@ -349,6 +352,7 @@ pub enum Service {
     RdsInstances,
     S3Buckets,
     SnsTopics,
+    SecretsManagerSecrets,
     SqsQueues,
     VpcVpcs,
     Ec2Instances,
@@ -377,6 +381,7 @@ impl Service {
             Service::RdsInstances => "RDS › Databases",
             Service::S3Buckets => "S3 › Buckets",
             Service::SnsTopics => "SNS › Topics",
+            Service::SecretsManagerSecrets => "Secrets Manager › Secrets",
             Service::SqsQueues => "SQS › Queues",
             Service::VpcVpcs => "VPC › VPCs",
             Service::Ec2Instances => "EC2 › Instances",
@@ -415,6 +420,9 @@ impl App {
         }
         if self.current_service == Service::RdsInstances {
             return Some(&mut self.rds_state.instances.filter);
+        }
+        if self.current_service == Service::SecretsManagerSecrets {
+            return Some(&mut self.secretsmanager_state.secrets.filter);
         }
         if self.current_service == Service::SnsTopics {
             return Some(if self.sns_state.subscriptions.topic.is_some() {
@@ -525,6 +533,8 @@ impl App {
                 self.vpc_state.vpcs.reset();
             } else if self.current_service == Service::SnsTopics {
                 self.sns_state.topics.reset();
+            } else if self.current_service == Service::SecretsManagerSecrets {
+                self.secretsmanager_state.secrets.reset();
             }
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
@@ -583,6 +593,7 @@ impl App {
         let s3_client = S3Client::new(config.clone());
         let sqs_client = SqsClient::new(config.clone());
         let sns_client = SnsClient::new(config.clone());
+        let secretsmanager_client = SecretsManagerClient::new(config.clone());
         let alarms_client = AlarmsClient::new(config.clone());
         let ec2_client = Ec2Client::new(config.clone());
         let ecr_client = EcrClient::new(config.clone());
@@ -607,6 +618,7 @@ impl App {
             s3_client,
             sqs_client,
             sns_client,
+            secretsmanager_client,
             alarms_client,
             ec2_client,
             ecr_client,
@@ -641,6 +653,7 @@ impl App {
             s3_state: S3State::new(),
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
+            secretsmanager_state: SecretsManagerState::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -844,6 +857,7 @@ impl App {
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),
             sns_client: SnsClient::new(config.clone()),
+            secretsmanager_client: SecretsManagerClient::new(config.clone()),
             alarms_client: AlarmsClient::new(config.clone()),
             ec2_client: Ec2Client::new(config.clone()),
             ecr_client: EcrClient::new(config.clone()),
@@ -878,6 +892,7 @@ impl App {
             },
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
+            secretsmanager_state: SecretsManagerState::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
             kms_state: KmsState::new(),
@@ -1095,6 +1110,9 @@ impl App {
         if crate::sns::actions::handle_action(self, &action) {
             return;
         }
+        if crate::secretsmanager::actions::handle_action(self, &action) {
+            return;
+        }
         match action {
             Action::Noop
             | Action::OpenResourceFinder
@@ -1286,6 +1304,7 @@ impl App {
                     Service::RdsInstances => self.rds_state.instances.reset(),
                     Service::VpcVpcs => self.vpc_state.vpcs.reset(),
                     Service::SnsTopics => self.sns_state.topics.reset(),
+                    Service::SecretsManagerSecrets => self.secretsmanager_state.secrets.reset(),
                     Service::FsxFileSystems => {
                         crate::fsx::actions::apply_filter_reset(self);
                     }
@@ -1373,6 +1392,7 @@ impl App {
                             "S3Buckets" => Service::S3Buckets,
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
+                            "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
                             "KmsKeys" => Service::KmsKeys,
@@ -3006,6 +3026,9 @@ impl App {
                     parts.extend([topic.name.clone(), "Subscriptions".into()]);
                 }
             }
+            Service::SecretsManagerSecrets => {
+                parts.extend(["Secrets Manager".into(), "Secrets".into()])
+            }
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
             }
@@ -3105,6 +3128,7 @@ impl App {
             Service::RdsInstances => rds_actions::console_url(self),
             Service::VpcVpcs => vpc_actions::console_url(self),
             Service::SnsTopics => crate::sns::actions::console_url(self),
+            Service::SecretsManagerSecrets => crate::secretsmanager::actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -3814,6 +3838,10 @@ impl App {
             crate::sns::actions::go_to_page(self, page);
             return;
         }
+        if self.current_service == Service::SecretsManagerSecrets {
+            crate::secretsmanager::actions::go_to_page(self, page);
+            return;
+        }
         if page == 0 {
             return;
         }
@@ -4106,6 +4134,7 @@ impl App {
                     "Lambda › Applications" => Service::LambdaApplications,
                     "S3 › Buckets" => Service::S3Buckets,
                     "SNS › Topics" => Service::SnsTopics,
+                    "Secrets Manager › Secrets" => Service::SecretsManagerSecrets,
                     "SQS › Queues" => Service::SqsQueues,
                     _ => return,
                 };
@@ -4130,6 +4159,10 @@ impl App {
                     self.sns_state.subscriptions.close();
                     self.sns_state.topics.reset();
                     self.sns_state.topics.loading = true;
+                }
+                if new_service == Service::SecretsManagerSecrets {
+                    self.secretsmanager_state.secrets.reset();
+                    self.secretsmanager_state.secrets.loading = true;
                 }
                 self.view_mode = ViewMode::List;
                 self.service_selected = true;
@@ -4171,6 +4204,7 @@ impl App {
                             "CloudTrailEvents" => Service::CloudTrailEvents,
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
+                            "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
                             _ => Service::CloudWatchLogGroups,
                         },
                         title: if st.service == "RdsInstances" {
@@ -4932,6 +4966,16 @@ impl App {
         Ok(())
     }
 
+    pub async fn load_secrets(&mut self) -> anyhow::Result<()> {
+        self.secretsmanager_state.secrets.loading = true;
+        let result = self.secretsmanager_client.list_secrets().await;
+        self.secretsmanager_state.secrets.loading = false;
+        // Complete-or-fail: a failed read must not discard the prior inventory.
+        self.secretsmanager_state.secrets.items = result?;
+        self.secretsmanager_state.secrets.reset();
+        Ok(())
+    }
+
     pub async fn load_fsx_file_systems(&mut self) -> anyhow::Result<()> {
         let file_systems = self.fsx_client.list_file_systems().await?;
         self.fsx_state.file_systems.items = file_systems;
@@ -5588,6 +5632,7 @@ impl ServicePickerState {
                 "Lambda › Applications",
                 "RDS › Databases",
                 "S3 › Buckets",
+                "Secrets Manager › Secrets",
                 "SNS › Topics",
                 "SQS › Queues",
                 "VPC › VPCs",

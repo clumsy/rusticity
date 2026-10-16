@@ -285,6 +285,20 @@ pub fn selected(app: &App) -> Option<Resource> {
             })
         }
 
+        Service::SecretsManagerSecrets => {
+            // The id is the full ARN (its suffix disambiguates same-named
+            // secrets); the SDK name is the display name.
+            let filtered = crate::ui::secretsmanager::filtered_secrets(app);
+            let secret = filtered.get(app.secretsmanager_state.secrets.selected)?;
+            Some(Resource {
+                kind: ResourceKind::Secret,
+                id: secret.arn.clone(),
+                name: secret.name.clone(),
+                arn: secret.arn.clone(),
+                region: region.to_string(),
+            })
+        }
+
         Service::CloudWatchLogGroups => {
             // When viewing streams/events (Detail/Events mode) the
             // `log_groups.selected` index was reset to the unfiltered items

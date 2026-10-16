@@ -407,3 +407,18 @@ fn sns_command_supplies_json_as_separate_argument_for_required_topic_arn() {
     assert_eq!(command(&Target::Resource(r), context()).unwrap(),
         "aws sns get-topic-attributes --cli-input-json '{\"TopicArn\":\"arn:aws:sns:us-east-1:123456789012:test\"}' --region='us-east-1' --profile='beta'");
 }
+
+#[test]
+fn secrets_manager_command_always_describes_metadata_by_full_arn() {
+    let arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf";
+    let mut secret = resource(ResourceKind::Secret);
+    secret.id = arn.into();
+    secret.arn = arn.into();
+    let cmd = command(&Target::Resource(secret.clone()), context()).unwrap();
+    assert!(cmd.starts_with("aws secretsmanager describe-secret "));
+    assert_eq!(input(&cmd), json!({"SecretId":arn}));
+    assert!(!cmd.contains("get-secret-value"));
+    assert!(!cmd.contains("batch-get"));
+    secret.arn.clear();
+    assert!(command(&Target::Resource(secret), context()).is_err());
+}

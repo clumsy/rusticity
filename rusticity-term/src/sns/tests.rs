@@ -56,8 +56,9 @@ fn sns_registration_and_picker_selection_are_complete() {
     assert_eq!(Service::SnsTopics.name(), "SNS › Topics");
     let services = &app.service_picker.services;
     let sns = services.iter().position(|s| *s == "SNS › Topics").unwrap();
-    assert_eq!(services[sns - 1], "S3 › Buckets");
-    assert_eq!(services[sns + 1], "SQS › Queues");
+    let s3 = services.iter().position(|s| *s == "S3 › Buckets").unwrap();
+    let sqs = services.iter().position(|s| *s == "SQS › Queues").unwrap();
+    assert!(s3 < sns && sns < sqs);
     app.mode = Mode::ServicePicker;
     app.service_picker.filter = "sns".into();
     app.service_picker.filter_active = false;

@@ -29,6 +29,7 @@ aws-sdk-pipes = { workspace = true }
 aws-sdk-rds = { workspace = true }
 aws-sdk-resourceexplorer2 = { workspace = true }
 aws-sdk-s3 = { workspace = true }
+aws-sdk-secretsmanager = { workspace = true }
 aws-sdk-sns = { workspace = true }
 aws-sdk-sqs = { workspace = true }
 aws-sdk-sts = { workspace = true }

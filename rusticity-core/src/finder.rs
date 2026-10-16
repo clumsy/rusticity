@@ -36,15 +36,16 @@ pub enum ResourceKind {
     Bucket,
     Queue,
     Topic,
+    Secret,
     /// Generic linked target unsupported as an inventory-search kind.
     /// Related-resource discovery uses this for ARNs that don't map to a
     /// supported top-level inventory kind (e.g. subnets, volumes, layers).
-    /// Excluded from `ALL` so inventory search stays at 20 kinds.
+    /// Excluded from `ALL` so inventory search stays at 21 kinds.
     Reference,
 }
 
 impl ResourceKind {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Api,
         Self::Stack,
         Self::Alarm,
@@ -65,6 +66,7 @@ impl ResourceKind {
         Self::Bucket,
         Self::Queue,
         Self::Topic,
+        Self::Secret,
     ];
     pub fn service(self) -> &'static str {
         match self {
@@ -86,6 +88,7 @@ impl ResourceKind {
             Self::Bucket => "s3",
             Self::Queue => "sqs",
             Self::Topic => "sns",
+            Self::Secret => "secretsmanager",
             Self::Reference => "",
         }
     }
@@ -109,6 +112,7 @@ impl ResourceKind {
             Self::Bucket => "Bucket",
             Self::Queue => "Queue",
             Self::Topic => "Topic",
+            Self::Secret => "Secret",
             Self::Reference => "Reference",
         }
     }
@@ -134,6 +138,7 @@ impl ResourceKind {
             Self::Bucket => "s3:bucket",
             Self::Queue => "sqs:queue",
             Self::Topic => "sns:topic",
+            Self::Secret => "secretsmanager:secret",
             Self::Reference => "",
         }
     }
@@ -150,6 +155,7 @@ impl ResourceKind {
                 "apig" => self == Self::Api,
                 "elasticfilesystem" => self == Self::Efs,
                 "ecr" => matches!(self, Self::Repository | Self::PublicRepository),
+                "secrets" | "sm" => self == Self::Secret,
                 _ => false,
             }
     }
@@ -190,6 +196,9 @@ impl Resource {
             ResourceKind::Database | ResourceKind::Function | ResourceKind::Alarm => {
                 tail.split_once(':')?.1
             }
+            // The random suffix makes same-named secrets distinct, so display the
+            // full `Name-AbCdEf` (strip only the `secret:` prefix, never the suffix).
+            ResourceKind::Secret => tail.strip_prefix("secret:")?,
             ResourceKind::LogGroup => tail.strip_prefix("log-group:")?.trim_end_matches(":*"),
             ResourceKind::Api => tail.trim_start_matches('/').split('/').nth(1)?,
             ResourceKind::Stack => tail.strip_prefix("stack/")?.split('/').next()?,
@@ -205,9 +214,16 @@ impl Resource {
         if kind == ResourceKind::Function && id.contains(':') {
             return None;
         }
+        // ID contract: a secret's id is its FULL ARN (the suffix disambiguates
+        // same-named secrets); the stripped tail is only the display name.
+        let row_id = if kind == ResourceKind::Secret {
+            arn
+        } else {
+            id
+        };
         Some(Self {
             kind,
-            id: id.into(),
+            id: row_id.into(),
             name: id.into(),
             arn: arn.into(),
             region: region.into(),

@@ -221,6 +221,20 @@ fn resource_command(
             json!({"DBInstanceIdentifier":id}),
         ),
         Bucket => ("s3api get-bucket-location", json!({"Bucket":id})),
+        Secret => {
+            if resource.arn.is_empty()
+                || !Resource::from_arn(&resource.arn).is_some_and(|r| r.kind == Secret)
+            {
+                return Err(
+                    "Secret metadata requires the full Secrets Manager ARN; refresh the inventory"
+                        .into(),
+                );
+            }
+            (
+                "secretsmanager describe-secret",
+                json!({"SecretId":resource.arn}),
+            )
+        }
         Topic => {
             if resource.arn.is_empty() || rusticity_core::SnsTopic::from_arn(&resource.arn).is_err()
             {

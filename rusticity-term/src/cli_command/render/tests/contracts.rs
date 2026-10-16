@@ -28,6 +28,12 @@ fn targets() -> Vec<Target> {
         if kind == ResourceKind::Topic {
             resource.arn = "arn:aws:sns:us-east-1:123456789012:selected-resource".into();
         }
+        if kind == ResourceKind::Secret {
+            resource.arn =
+                "arn:aws:secretsmanager:us-east-1:123456789012:secret:selected-resource-AbCdEf"
+                    .into();
+            resource.id = resource.arn.clone();
+        }
         targets.push(Target::Resource(resource));
     }
     let mut topic = resource(ResourceKind::Topic);

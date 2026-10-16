@@ -91,6 +91,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.vpc_state.vpcs.loading
             || app.sns_state.topics.loading
             || app.sns_state.subscriptions.busy()
+            || app.secretsmanager_state.secrets.loading
             || app.rds_state.instances.loading
             || app.fsx_state.file_systems.loading
             || app.fsx_state.backups_loading
@@ -190,7 +191,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets);
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
                             && !((items_view || inventory_view) && app.mode == rusticity_term::keymap::Mode::Normal);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
@@ -750,6 +751,19 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_sns_topics().await {
                                 app.error_message = Some(format!("Failed to load SNS topics: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
+
+                        if app.service_selected && app.current_service == Service::SecretsManagerSecrets
+                            && ((!prev_service_selected || prev_service != Service::SecretsManagerSecrets)
+                                || app.secretsmanager_state.secrets.loading) {
+                            app.secretsmanager_state.secrets.loading = true;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_secrets().await {
+                                app.error_message = Some(format!("Failed to load secret metadata: {:#}", e));
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
@@ -1413,6 +1427,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                             }
                                             Service::SnsTopics => {
                                                 new_app.sns_state.topics.loading = true;
+                                            }
+                                            Service::SecretsManagerSecrets => {
+                                                new_app.secretsmanager_state.secrets.loading = true;
                                             }
                                             rusticity_term::app::Service::FsxFileSystems => {
                                                 new_app.fsx_state.file_systems.loading = true;

@@ -248,7 +248,10 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         && app.service_selected
         && matches!(
             app.current_service,
-            Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics
+            Service::RdsInstances
+                | Service::VpcVpcs
+                | Service::SnsTopics
+                | Service::SecretsManagerSecrets
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
@@ -502,6 +505,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.vpc_state.vpcs.loading
         || app.sns_state.topics.loading
         || app.sns_state.subscriptions.busy()
+        || app.secretsmanager_state.secrets.loading
         || app.rds_state.instances.loading
         || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading

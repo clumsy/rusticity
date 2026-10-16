@@ -268,3 +268,71 @@ fn finder_sns_topic_arns_are_openable_but_subscription_arns_remain_references() 
     let subscription = Resource::from_arn(&format!("{arn}:subscription-id")).unwrap();
     assert_eq!(subscription.kind, ResourceKind::Reference);
 }
+
+#[test]
+fn finder_secret_qualifiers_and_resource_type_are_supported() {
+    for q in ["@secretsmanager", "@secrets", "@sm"] {
+        let query = SearchQuery::parse(&format!("{q} db")).unwrap();
+        assert_eq!(query.kinds, [ResourceKind::Secret], "{q}");
+        assert!(query
+            .index_query("us-east-2")
+            .contains("resourcetype:secretsmanager:secret"));
+    }
+}
+
+#[test]
+fn finder_secret_index_id_is_full_arn_and_name_strips_only_secret_prefix() {
+    // Same-named secrets differ only by the random suffix, so the id must be
+    // the full ARN; the display name keeps the suffix (never a last-6 strip).
+    let arn = "arn:aws:secretsmanager:us-east-2:123456789012:secret:prod/db-AbCdEf";
+    let resource = Resource::from_index("secretsmanager:secret", arn, "us-east-2").unwrap();
+    assert_eq!(resource.kind, ResourceKind::Secret);
+    assert_eq!(resource.kind.service(), "secretsmanager");
+    assert_eq!(resource.id, arn);
+    assert_eq!(resource.name, "prod/db-AbCdEf");
+    assert_eq!(resource.arn, arn);
+}
+
+#[test]
+fn finder_secret_arns_are_openable_with_arn_as_id() {
+    let arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf";
+    let secret = Resource::from_arn(arn).unwrap();
+    assert_eq!(secret.kind, ResourceKind::Secret);
+    assert_eq!(secret.id, arn);
+    assert_eq!(secret.name, "prod/db-AbCdEf");
+    assert_eq!(secret.arn, arn);
+}
+
+#[tokio::test]
+async fn secret_finder_stops_at_inventory_cap_and_never_fetches_values() {
+    use aws_smithy_http_client::test_util::infallible_client_fn;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let requests = count.clone();
+    let sdk=aws_config::SdkConfig::builder()
+        .behavior_version(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_secretsmanager::config::SharedCredentialsProvider::new(aws_sdk_secretsmanager::config::Credentials::new("test","test",None,None,"test")))
+        .retry_config(aws_config::retry::RetryConfig::disabled())
+        .http_client(infallible_client_fn(move|request|{
+            assert!(request.headers()["x-amz-target"].to_str().unwrap().ends_with(".ListSecrets"));
+            let body:serde_json::Value=serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
+            assert_eq!(body["MaxResults"],100);
+            let page=requests.fetch_add(1,Ordering::SeqCst);
+            if page>0{assert_eq!(body["NextToken"],format!("page-{page}"));}
+            let rows:Vec<_>=(0..100).map(|i|serde_json::json!({"Name":format!("secret-{page}-{i}"),"ARN":format!("arn:aws:secretsmanager:us-east-1:123456789012:secret:secret-{page}-{i}-AbCdEf")})).collect();
+            http::Response::builder().status(200).body(serde_json::json!({"SecretList":rows,"NextToken":format!("page-{}",page+1)}).to_string().into_bytes()).unwrap()
+        })).build();
+    let config = AwsConfig::from_sdk_config(sdk, "us-east-1", "123456789012");
+    let (rows, limited) = inventory::fetch(&config, ResourceKind::Secret)
+        .await
+        .unwrap();
+    assert!(limited);
+    assert_eq!(rows.len(), 2000);
+    assert_eq!(count.load(Ordering::SeqCst), 20);
+    assert_eq!(rows[0].id, rows[0].arn);
+    assert_eq!(rows[0].name, "secret-0-0");
+}

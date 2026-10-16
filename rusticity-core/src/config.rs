@@ -303,6 +303,10 @@ impl AwsConfig {
         aws_sdk_sns::Client::new(&self.sdk_config)
     }
 
+    pub fn secretsmanager_client(&self) -> aws_sdk_secretsmanager::Client {
+        aws_sdk_secretsmanager::Client::new(&self.sdk_config)
+    }
+
     pub fn cloudwatch_logs_client(&self) -> aws_sdk_cloudwatchlogs::Client {
         aws_sdk_cloudwatchlogs::Client::new(&self.sdk_config)
     }

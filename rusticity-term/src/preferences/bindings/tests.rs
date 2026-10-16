@@ -24,6 +24,7 @@ const SOURCES: &[Source] = &[
     Source::KmsKeys,
     Source::RdsInstances,
     Source::VpcVpcs,
+    Source::SecretsManagerSecrets,
 ];
 
 fn app_for(source: Source) -> App {
@@ -43,6 +44,7 @@ fn app_for(source: Source) -> App {
         Source::KmsKeys => Service::KmsKeys,
         Source::RdsInstances => Service::RdsInstances,
         Source::VpcVpcs => Service::VpcVpcs,
+        Source::SecretsManagerSecrets => Service::SecretsManagerSecrets,
         _ => Service::DynamoDbTables,
     };
     if matches!(source, Source::EcrImages) {

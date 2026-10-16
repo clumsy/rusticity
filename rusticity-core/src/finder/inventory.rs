@@ -72,6 +72,41 @@ pub(super) async fn fetch(config: &AwsConfig, kind: ResourceKind) -> Result<(Vec
                 arn: topic.arn,
             }
         }),
+        ResourceKind::Secret => {
+            // This SDK exposes a page paginator, not an item paginator. Stop
+            // reading as soon as the finder's bounded cache is full.
+            let mut pages = config
+                .secretsmanager_client()
+                .list_secrets()
+                .max_results(100)
+                .into_paginator()
+                .send();
+            while let Some(page) = pages.next().await {
+                let page = page?;
+                for secret in page.secret_list() {
+                    let arn = secret.arn().filter(|arn| !arn.is_empty()).ok_or_else(|| {
+                        anyhow::anyhow!("ListSecrets returned a secret without an ARN")
+                    })?;
+                    crate::secretsmanager::validate_secret_arn(arn)?;
+                    let name = secret
+                        .name()
+                        .filter(|name| !name.is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("ListSecrets returned a secret without a name")
+                        })?;
+                    rows.push(Resource {
+                        kind,
+                        id: arn.into(),
+                        name: name.into(),
+                        arn: arn.into(),
+                        region: arn.split(':').nth(3).unwrap_or(region).into(),
+                    });
+                    if rows.len() >= INVENTORY_LIMIT {
+                        return Ok((rows, true));
+                    }
+                }
+            }
+        }
         ResourceKind::Database => collect!(
             config.rds_client().describe_db_instances(),
             db,

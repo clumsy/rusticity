@@ -876,9 +876,12 @@ fn from_arn_efs_access_point_stays_reference() {
 
 #[test]
 fn from_arn_unsupported_service_returns_reference() {
-    let r = Resource::from_arn("arn:aws:secretsmanager:us-east-1:123456789012:my-topic").unwrap();
+    // secretsmanager is now a supported inventory kind, so use CodeBuild —
+    // a genuinely unsupported service — to exercise the Reference fallback.
+    let r =
+        Resource::from_arn("arn:aws:codebuild:us-east-1:123456789012:project/my-project").unwrap();
     assert_eq!(r.kind, ResourceKind::Reference);
-    assert_eq!(r.id, "my-topic");
+    assert_eq!(r.id, "project/my-project");
 }
 
 #[test]
@@ -919,7 +922,7 @@ fn from_arn_iam_role_with_path() {
 #[test]
 fn resource_kind_reference_excluded_from_all() {
     assert!(!ResourceKind::ALL.contains(&ResourceKind::Reference));
-    assert_eq!(ResourceKind::ALL.len(), 20);
+    assert_eq!(ResourceKind::ALL.len(), 21);
 }
 
 #[test]
@@ -930,7 +933,7 @@ fn search_query_matches_reference_on_unqualified() {
         kind: ResourceKind::Reference,
         id: "myfn".into(),
         name: "myfn".into(),
-        arn: "arn:aws:secretsmanager:us-east-1:123456789012:myfn".into(),
+        arn: "arn:aws:codebuild:us-east-1:123456789012:project/myfn".into(),
         region: "us-east-1".into(),
     };
     assert!(query.matches(&resource));
@@ -944,7 +947,7 @@ fn search_query_matches_references_only_for_their_service() {
         kind: ResourceKind::Reference,
         id: "myfn".into(),
         name: "myfn".into(),
-        arn: "arn:aws:secretsmanager:us-east-1:123456789012:myfn".into(),
+        arn: "arn:aws:codebuild:us-east-1:123456789012:project/myfn".into(),
         region: "us-east-1".into(),
     };
     assert!(!query.matches(&resource));

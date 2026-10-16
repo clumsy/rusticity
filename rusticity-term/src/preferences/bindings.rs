@@ -34,6 +34,7 @@ enum Source {
     VpcVpcs,
     SnsTopics,
     SnsSubscriptions,
+    SecretsManagerSecrets,
 }
 
 fn columns(
@@ -141,6 +142,7 @@ impl Source {
                 Self::SnsSubscriptions
             }
             Service::SnsTopics => Self::SnsTopics,
+            Service::SecretsManagerSecrets => Self::SecretsManagerSecrets,
             _ => return None,
         })
     }
@@ -273,6 +275,12 @@ impl Source {
                 |id| crate::sns::columns::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
+            Self::SecretsManagerSecrets => columns(
+                &app.secretsmanager_state.column_ids,
+                &app.secretsmanager_state.visible_column_ids,
+                |id| crate::secretsmanager::columns::Column::from_id(id).map(|c| c.name()),
+                None,
+            ),
         };
         let prefs = match self {
             Self::EfsTags
@@ -334,6 +342,7 @@ impl Source {
             Self::VpcVpcs => app.vpc_state.vpcs.page_size,
             Self::SnsSubscriptions => app.sns_state.subscriptions.table.page_size,
             Self::SnsTopics => app.sns_state.topics.page_size,
+            Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -372,6 +381,7 @@ impl Source {
             Self::VpcVpcs => app.vpc_state.vpcs.set_page_size(size),
             Self::SnsSubscriptions => app.sns_state.subscriptions.table.set_page_size(size),
             Self::SnsTopics => app.sns_state.topics.set_page_size(size),
+            Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -402,6 +412,7 @@ impl Source {
             Self::VpcVpcs => &mut app.vpc_state.visible_column_ids,
             Self::SnsSubscriptions => &mut app.sns_state.subscriptions.visible_column_ids,
             Self::SnsTopics => &mut app.sns_state.visible_column_ids,
+            Self::SecretsManagerSecrets => &mut app.secretsmanager_state.visible_column_ids,
             _ => return None,
         })
     }

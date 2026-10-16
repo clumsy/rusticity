@@ -28,6 +28,7 @@ pub fn service(kind: ResourceKind) -> Service {
         ResourceKind::Bucket => Service::S3Buckets,
         ResourceKind::Queue => Service::SqsQueues,
         ResourceKind::Topic => Service::SnsTopics,
+        ResourceKind::Secret => Service::SecretsManagerSecrets,
     }
 }
 
@@ -272,6 +273,16 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
             app.sns_state.topics.selected = ui::sns::filtered_topics(app)
                 .iter()
                 .position(|row| row.name == resource.id)
+                .unwrap_or(0);
+        }
+        ResourceKind::Secret => {
+            // The id is the full ARN; focus on it and select the exact row via
+            // the filtered helper so same-named secrets stay distinct.
+            app.load_secrets().await?;
+            focus!(app.secretsmanager_state.secrets, arn);
+            app.secretsmanager_state.secrets.selected = ui::secretsmanager::filtered_secrets(app)
+                .iter()
+                .position(|row| row.arn == resource.id)
                 .unwrap_or(0);
         }
         ResourceKind::User => {

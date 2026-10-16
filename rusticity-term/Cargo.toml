@@ -11,7 +11,7 @@ description = "Terminal UI components for Rusticity"
 unused_imports = "deny"
 
 [dependencies]
-rusticity-core = { version = "0.1.10", path = "../rusticity-core" }
+rusticity-core = { version = "0.1.11", path = "../rusticity-core" }
 tokio = { workspace = true, features = ["process"] }
 ratatui = { workspace = true }
 crossterm = { workspace = true }

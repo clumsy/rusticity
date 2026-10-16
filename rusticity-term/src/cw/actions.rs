@@ -140,9 +140,22 @@ pub fn alarms_select_expand(app: &mut App) {
 /// Enter in list view when no alarm is open: open alarm detail.
 pub fn alarms_select_item(app: &mut App) {
     if app.alarms_state.current_alarm.is_none() {
-        let filtered_alarms: Vec<_> = app.alarms_state.table.items.iter().collect();
-        if let Some(alarm) = app.alarms_state.table.get_selected(&filtered_alarms) {
-            app.alarms_state.current_alarm = Some(alarm.name.clone());
+        // Index into the canonical filtered list (tab + name filter), matching
+        // the renderer and `finder::related::selected`. Previously this used the
+        // raw unfiltered items, so pressing Enter under an active tab/name
+        // filter could open a different alarm than the highlighted row.
+        let filtered_alarms = crate::ui::cw::alarms::filtered_alarms(
+            &app.alarms_state.table.items,
+            app.alarms_state.alarm_tab,
+            &app.alarms_state.table.filter,
+        );
+        let selected_name = app
+            .alarms_state
+            .table
+            .get_selected(&filtered_alarms)
+            .map(|alarm| alarm.name.clone());
+        if let Some(name) = selected_name {
+            app.alarms_state.current_alarm = Some(name);
             app.alarms_state.metrics_loading = true;
             app.alarms_state.detail_tab = crate::app::AlarmDetailTab::Details;
             app.view_mode = ViewMode::Detail;

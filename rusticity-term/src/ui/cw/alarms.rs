@@ -76,6 +76,25 @@ impl AlarmTab {
     }
 }
 
+/// Canonical alarm-list filter shared by the alarm renderer, the alarm
+/// keyboard-action handler, and `finder::related::selected`.
+///
+/// Applies the current tab predicate first (AllAlarms = every row, InAlarm =
+/// rows whose uppercased state is exactly "ALARM"), then a case-insensitive
+/// `contains` on the alarm name. Preserve source order so rendering and actions
+/// interpret `table.selected` against the same filtered rows.
+pub fn filtered_alarms<'a>(items: &'a [Alarm], tab: AlarmTab, filter: &str) -> Vec<&'a Alarm> {
+    let name_filter = crate::common::TextFilter::new(filter);
+    items
+        .iter()
+        .filter(|a| match tab {
+            AlarmTab::AllAlarms => true,
+            AlarmTab::InAlarm => a.state.to_uppercase() == "ALARM",
+        })
+        .filter(|a| name_filter.matches(&a.name))
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AlarmViewMode {
     Table,
@@ -626,21 +645,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     crate::ui::render_tabs(frame, chunks[1], &tabs, &app.alarms_state.alarm_tab);
 
     // Filter alarms
-    let mut filtered_alarms: Vec<&Alarm> = match app.alarms_state.alarm_tab {
-        crate::app::AlarmTab::AllAlarms => app.alarms_state.table.items.iter().collect(),
-        crate::app::AlarmTab::InAlarm => app
-            .alarms_state
-            .table
-            .items
-            .iter()
-            .filter(|a| a.state.to_uppercase() == "ALARM")
-            .collect(),
-    };
-
-    if !app.alarms_state.table.filter.is_empty() {
-        let filter_lower = app.alarms_state.table.filter.to_lowercase();
-        filtered_alarms.retain(|a| a.name.to_lowercase().contains(&filter_lower));
-    }
+    let filtered_alarms: Vec<&Alarm> = filtered_alarms(
+        &app.alarms_state.table.items,
+        app.alarms_state.alarm_tab,
+        &app.alarms_state.table.filter,
+    );
 
     let count = filtered_alarms.len();
     let title = format_title(&format!("Alarms ({})", count));

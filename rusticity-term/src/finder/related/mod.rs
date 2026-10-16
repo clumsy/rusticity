@@ -59,21 +59,15 @@ pub fn selected(app: &App) -> Option<Resource> {
             if let Some(name) = &app.s3_state.current_bucket {
                 return Some(resource(ResourceKind::Bucket, name, name, region));
             }
-            // S3 has no standalone filtered-buckets helper; the render code
-            // filters inline by name (case-insensitive contains) restricted to
-            // GeneralPurpose buckets. Child rows resolve to their owning bucket.
-            let filtered: Vec<_> = app
-                .s3_state
-                .buckets
-                .items
-                .iter()
-                .filter(|b| {
-                    app.s3_state.buckets.filter.is_empty()
-                        || b.name
-                            .to_lowercase()
-                            .contains(&app.s3_state.buckets.filter.to_lowercase())
-                })
-                .collect();
+            // Route through the canonical `ui::s3::filtered_buckets` helper so
+            // the name filter (case-insensitive contains) matches the renderer
+            // exactly. The GeneralPurpose-tab gate and the visual-row walk that
+            // maps `selected_row` to its owning bucket stay here. Child rows
+            // resolve to their owning bucket.
+            let filtered = crate::ui::s3::filtered_buckets(
+                &app.s3_state.buckets.items,
+                &app.s3_state.buckets.filter,
+            );
             if app.s3_state.bucket_type != crate::ui::s3::BucketType::GeneralPurpose {
                 return None;
             }
@@ -231,20 +225,10 @@ pub fn selected(app: &App) -> Option<Resource> {
             if let Some(name) = &app.iam_state.current_group {
                 return Some(resource(ResourceKind::Group, name, name, "global"));
             }
-            // Mirror the render code's inline filter: case-insensitive
-            // contains on group_name.
-            let filtered: Vec<_> = app
-                .iam_state
-                .groups
-                .items
-                .iter()
-                .filter(|g| {
-                    app.iam_state.groups.filter.is_empty()
-                        || g.group_name
-                            .to_lowercase()
-                            .contains(&app.iam_state.groups.filter.to_lowercase())
-                })
-                .collect();
+            // Route through the canonical `ui::iam::filtered_iam_groups` helper
+            // so the name filter (case-insensitive contains on group_name)
+            // matches the renderer exactly.
+            let filtered = crate::ui::iam::filtered_iam_groups(app);
             let group = filtered.get(app.iam_state.groups.selected)?;
             Some(resource(
                 ResourceKind::Group,
@@ -323,25 +307,15 @@ pub fn selected(app: &App) -> Option<Resource> {
                     region: region.to_string(),
                 });
             }
-            // Mirror the render code's inline filter: tab filter (AllAlarms
-            // vs InAlarm state == "ALARM"), then case-insensitive contains on
-            // name.
-            let filtered: Vec<_> = app
-                .alarms_state
-                .table
-                .items
-                .iter()
-                .filter(|a| match app.alarms_state.alarm_tab {
-                    crate::app::AlarmTab::AllAlarms => true,
-                    crate::app::AlarmTab::InAlarm => a.state.to_uppercase() == "ALARM",
-                })
-                .filter(|a| {
-                    app.alarms_state.table.filter.is_empty()
-                        || a.name
-                            .to_lowercase()
-                            .contains(&app.alarms_state.table.filter.to_lowercase())
-                })
-                .collect();
+            // Route through the canonical `ui::cw::alarms::filtered_alarms`
+            // helper so the tab predicate (AllAlarms vs InAlarm state ==
+            // "ALARM") and the case-insensitive name `contains` filter match
+            // the renderer exactly.
+            let filtered = crate::ui::cw::alarms::filtered_alarms(
+                &app.alarms_state.table.items,
+                app.alarms_state.alarm_tab,
+                &app.alarms_state.table.filter,
+            );
             let alarm = filtered.get(app.alarms_state.table.selected)?;
             Some(Resource {
                 kind: ResourceKind::Alarm,

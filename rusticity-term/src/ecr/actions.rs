@@ -102,33 +102,10 @@ pub fn collapse_row(app: &mut App) {
 
 pub fn go_to_page(app: &mut App, page: usize) {
     if app.ecr_state.current_repository.is_some() {
-        let filtered_count = app
-            .ecr_state
-            .images
-            .filtered(|img| {
-                app.ecr_state.images.filter.is_empty()
-                    || img
-                        .tag
-                        .to_lowercase()
-                        .contains(&app.ecr_state.images.filter.to_lowercase())
-                    || img
-                        .digest
-                        .to_lowercase()
-                        .contains(&app.ecr_state.images.filter.to_lowercase())
-            })
-            .len();
+        let filtered_count = filtered_ecr_images(app).len();
         app.ecr_state.images.goto_page(page, filtered_count);
     } else {
-        let filtered_count = app
-            .ecr_state
-            .repositories
-            .filtered(|r| {
-                app.ecr_state.repositories.filter.is_empty()
-                    || r.name
-                        .to_lowercase()
-                        .contains(&app.ecr_state.repositories.filter.to_lowercase())
-            })
-            .len();
+        let filtered_count = filtered_ecr_repositories(app).len();
         app.ecr_state.repositories.goto_page(page, filtered_count);
     }
 }

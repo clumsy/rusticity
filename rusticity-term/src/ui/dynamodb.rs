@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::common::{
-    format_bytes, format_iso_timestamp, render_pagination_text, render_partial_pagination,
-    CyclicEnum, InputFocus, SortDirection, UTC_TIMESTAMP_WIDTH,
+    filter_by_fields, format_bytes, format_iso_timestamp, render_pagination_text,
+    render_partial_pagination, CyclicEnum, InputFocus, SortDirection, UTC_TIMESTAMP_WIDTH,
 };
 use crate::dynamodb::items::{self, ItemRequestContext};
 use crate::dynamodb::table;
@@ -289,18 +289,11 @@ impl State {
 }
 
 pub fn filtered_dynamodb_tables(app: &App) -> Vec<&DdbTable> {
-    let filter = app.dynamodb_state.tables.filter.to_lowercase();
-    app.dynamodb_state
-        .tables
-        .items
-        .iter()
-        .filter(|t| {
-            filter.is_empty()
-                || t.name.to_lowercase().contains(&filter)
-                || t.status.to_lowercase().contains(&filter)
-                || t.partition_key.to_lowercase().contains(&filter)
-        })
-        .collect()
+    filter_by_fields(
+        &app.dynamodb_state.tables.items,
+        &app.dynamodb_state.tables.filter,
+        |t| [&t.name, &t.status, &t.partition_key],
+    )
 }
 
 /// The table currently open in the detail view.
@@ -1041,20 +1034,21 @@ pub fn selected_key_attributes(t: &DdbTable, idx: usize) -> Vec<String> {
 /// Items matching the tab's text filter. For Query the text is the partition-key
 /// value (applied server side), so only Scan filters client side.
 pub fn filtered_items(app: &App) -> Vec<&DdbItem> {
-    let filter = app.dynamodb_state.item_filter.to_lowercase();
-    if app.dynamodb_state.item_operation == ItemOperation::Query || filter.is_empty() {
+    // Query applies the partition-key value server side; only Scan filters here.
+    // Short-circuit Query to preserve "no client-side filtering" semantics even
+    // when the shared filter text is non-empty.
+    if app.dynamodb_state.item_operation == ItemOperation::Query {
         return app.dynamodb_state.items.items.iter().collect();
     }
-    app.dynamodb_state
-        .items
-        .items
-        .iter()
-        .filter(|i| {
-            i.attributes.iter().any(|(k, v)| {
-                k.to_lowercase().contains(&filter) || v.to_lowercase().contains(&filter)
-            })
-        })
-        .collect()
+    filter_by_fields(
+        &app.dynamodb_state.items.items,
+        &app.dynamodb_state.item_filter,
+        |i| {
+            i.attributes
+                .iter()
+                .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+        },
+    )
 }
 
 /// One column per attribute, keys first then the remaining names alphabetically.
@@ -2375,5 +2369,91 @@ mod tests {
             crate::dynamodb::actions::breadcrumb(&app),
             vec!["DynamoDB".to_string(), "orders".to_string()]
         );
+    }
+
+    #[test]
+    fn tables_filter_searches_name_status_partition_key_in_source_order() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.dynamodb_state.tables.items = vec![
+            make_table("zeta", "pk_z (S)"),
+            make_table("alpha", "pk_a (S)"),
+        ];
+        app.dynamodb_state.tables.items[1].status = "CREATING".to_string();
+
+        // Partition-key match.
+        app.dynamodb_state.tables.filter = "pk_z".to_string();
+        let f = filtered_dynamodb_tables(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].name, "zeta");
+
+        // Status match (case-insensitive).
+        app.dynamodb_state.tables.filter = "creating".to_string();
+        let f = filtered_dynamodb_tables(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].name, "alpha");
+
+        // Empty filter keeps every row in source order (so the renderer's own
+        // column sort still decides display order).
+        app.dynamodb_state.tables.filter = String::new();
+        let f = filtered_dynamodb_tables(&app);
+        assert_eq!(
+            f.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["zeta", "alpha"]
+        );
+    }
+
+    #[test]
+    fn tables_filter_is_unicode_case_insensitive_and_does_not_trim() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.dynamodb_state.tables.items = vec![make_table("café-orders", "id (S)")];
+        app.dynamodb_state.tables.filter = "CAFÉ".to_string();
+        assert_eq!(filtered_dynamodb_tables(&app).len(), 1);
+        // Whitespace is significant.
+        app.dynamodb_state.tables.filter = " café-orders ".to_string();
+        assert!(filtered_dynamodb_tables(&app).is_empty());
+    }
+
+    #[test]
+    fn items_filter_matches_dynamic_attribute_keys_and_values() {
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.item_operation = ItemOperation::Scan;
+        app.dynamodb_state.items.items = vec![
+            item_with(&[("order_id", "A-1"), ("status", "SHIPPED")]),
+            item_with(&[("order_id", "B-2"), ("region", "us-east-1")]),
+        ];
+
+        // Value match (case-insensitive).
+        app.dynamodb_state.item_filter = "shipped".into();
+        let f = filtered_items(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].get("order_id"), "A-1");
+
+        // Attribute-key match — a key present on only one row.
+        app.dynamodb_state.item_filter = "region".into();
+        let f = filtered_items(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].get("order_id"), "B-2");
+    }
+
+    #[test]
+    fn items_filter_empty_returns_all_and_query_never_filters_client_side() {
+        let mut app = app_with_table();
+        app.dynamodb_state.current_table = Some("orders".into());
+        app.dynamodb_state.items.items = vec![
+            item_with(&[("order_id", "A-1")]),
+            item_with(&[("order_id", "B-2")]),
+        ];
+
+        // Scan + empty filter → every row.
+        app.dynamodb_state.item_operation = ItemOperation::Scan;
+        app.dynamodb_state.item_filter = String::new();
+        assert_eq!(filtered_items(&app).len(), 2);
+
+        // Query ignores the client-side text filter entirely (filter applied
+        // server side as the partition-key value).
+        app.dynamodb_state.item_operation = ItemOperation::Query;
+        app.dynamodb_state.item_filter = "no-such-value".into();
+        assert_eq!(filtered_items(&app).len(), 2);
     }
 }

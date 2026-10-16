@@ -496,21 +496,7 @@ pub fn render_group_list(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     let page_size = app.iam_state.groups.page_size.value();
-    let filtered_groups: Vec<_> = app
-        .iam_state
-        .groups
-        .items
-        .iter()
-        .filter(|g| {
-            if app.iam_state.groups.filter.is_empty() {
-                true
-            } else {
-                g.group_name
-                    .to_lowercase()
-                    .contains(&app.iam_state.groups.filter.to_lowercase())
-            }
-        })
-        .collect();
+    let filtered_groups = filtered_iam_groups(app);
 
     let filtered_count = filtered_groups.len();
     let total_pages = filtered_count.div_ceil(page_size);
@@ -1316,6 +1302,17 @@ pub fn filtered_iam_roles(app: &App) -> Vec<&IamRole> {
         &app.iam_state.roles.items,
         &app.iam_state.roles.filter,
         |r| &r.role_name,
+    )
+}
+
+/// Canonical group-list filter: case-insensitive `contains` on `group_name`,
+/// shared by the group-list renderer, the group keyboard-action handlers, and
+/// `finder::related::selected` so all three index the same ordered list.
+pub fn filtered_iam_groups(app: &App) -> Vec<&IamGroup> {
+    filter_by_field(
+        &app.iam_state.groups.items,
+        &app.iam_state.groups.filter,
+        |g| &g.group_name,
     )
 }
 

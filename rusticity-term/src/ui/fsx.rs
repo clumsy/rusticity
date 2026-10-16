@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_fields, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+};
 use crate::fsx::fs;
 use crate::table::{TableState, TableWindow};
 use crate::tags::{self, TagSort, TagsConfig};
@@ -124,18 +126,11 @@ impl State {
 }
 
 pub fn filtered_fsx_file_systems(app: &App) -> Vec<&FsxFileSystem> {
-    let filter = app.fsx_state.file_systems.filter.to_lowercase();
-    app.fsx_state
-        .file_systems
-        .items
-        .iter()
-        .filter(|fs| {
-            filter.is_empty()
-                || fs.name.to_lowercase().contains(&filter)
-                || fs.file_system_id.to_lowercase().contains(&filter)
-                || fs.file_system_type.to_lowercase().contains(&filter)
-        })
-        .collect()
+    filter_by_fields(
+        &app.fsx_state.file_systems.items,
+        &app.fsx_state.file_systems.filter,
+        |fs| [&fs.name, &fs.file_system_id, &fs.file_system_type],
+    )
 }
 
 pub fn render_file_systems(frame: &mut Frame, app: &App, area: Rect) {
@@ -710,6 +705,19 @@ mod tests {
 
         app.fsx_state.file_systems.filter = String::new();
         assert_eq!(filtered_fsx_file_systems(&app).len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_fsx_unicode_case_insensitive_and_no_trim() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.fsx_state.file_systems.items = vec![make_fs("fs-001", "café-fsx", "LUSTRE")];
+
+        app.fsx_state.file_systems.filter = "CAFÉ".to_string();
+        assert_eq!(filtered_fsx_file_systems(&app).len(), 1);
+
+        // Whitespace is significant — no trimming.
+        app.fsx_state.file_systems.filter = " café-fsx ".to_string();
+        assert!(filtered_fsx_file_systems(&app).is_empty());
     }
 
     #[test]

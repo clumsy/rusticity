@@ -329,7 +329,7 @@ pub fn filtered_events(app: &App) -> Vec<&StackEvent> {
         &app.cfn_state.events.items,
         &app.cfn_state.events.filter,
         |e| {
-            vec![
+            [
                 &e.logical_id,
                 &e.status,
                 &e.status_reason,
@@ -361,23 +361,17 @@ pub fn filtered_change_sets(app: &App) -> Vec<&StackChangeSet> {
     filter_by_fields(
         &app.cfn_state.change_sets.items,
         &app.cfn_state.change_sets.filter,
-        |cs| vec![&cs.name, &cs.status, &cs.description],
+        |cs| [&cs.name, &cs.status, &cs.description],
     )
 }
 
 pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
     let items = &app.cfn_state.table.items;
-    let filter = &app.cfn_state.table.filter;
+    let filter = crate::common::TextFilter::new(&app.cfn_state.table.filter);
     let status_filter = &app.cfn_state.status_filter;
 
     let passes_filter = |s: &&CfnStack| -> bool {
-        let text_ok = if filter.is_empty() {
-            true
-        } else {
-            let q = filter.to_lowercase();
-            s.name.to_lowercase().contains(&q) || s.description.to_lowercase().contains(&q)
-        };
-        text_ok && status_filter.matches(&s.status)
+        filter.matches_any([&s.name, &s.description]) && status_filter.matches(&s.status)
     };
 
     if !app.cfn_state.view_nested {
@@ -422,7 +416,7 @@ pub fn filtered_parameters(app: &App) -> Vec<&StackParameter> {
     filter_by_fields(
         &app.cfn_state.parameters.items,
         &app.cfn_state.parameters.filter,
-        |p| vec![&p.key, &p.value, &p.resolved_value],
+        |p| [&p.key, &p.value, &p.resolved_value],
     )
 }
 
@@ -430,7 +424,7 @@ pub fn filtered_outputs(app: &App) -> Vec<&StackOutput> {
     filter_by_fields(
         &app.cfn_state.outputs.items,
         &app.cfn_state.outputs.filter,
-        |o| vec![&o.key, &o.value, &o.description, &o.export_name],
+        |o| [&o.key, &o.value, &o.description, &o.export_name],
     )
 }
 
@@ -439,7 +433,7 @@ pub fn filtered_resources(app: &App) -> Vec<&StackResource> {
         &app.cfn_state.resources.items,
         &app.cfn_state.resources.filter,
         |r| {
-            vec![
+            [
                 &r.logical_id,
                 &r.physical_id,
                 &r.resource_type,

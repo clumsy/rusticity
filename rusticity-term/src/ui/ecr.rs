@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::common::{
-    filter_by_field, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+    filter_by_field, filter_by_fields, render_pagination_text, CyclicEnum, InputFocus,
+    SortDirection,
 };
 use crate::ecr::image::{self, Image as EcrImage};
 use crate::ecr::repo::{self, Repository as EcrRepository};
@@ -71,24 +72,11 @@ pub fn filtered_ecr_repositories(app: &App) -> Vec<&EcrRepository> {
 }
 
 pub fn filtered_ecr_images(app: &App) -> Vec<&EcrImage> {
-    if app.ecr_state.images.filter.is_empty() {
-        app.ecr_state.images.items.iter().collect()
-    } else {
-        app.ecr_state
-            .images
-            .items
-            .iter()
-            .filter(|img| {
-                img.tag
-                    .to_lowercase()
-                    .contains(&app.ecr_state.images.filter.to_lowercase())
-                    || img
-                        .digest
-                        .to_lowercase()
-                        .contains(&app.ecr_state.images.filter.to_lowercase())
-            })
-            .collect()
-    }
+    filter_by_fields(
+        &app.ecr_state.images.items,
+        &app.ecr_state.images.filter,
+        |img| [&img.tag, &img.digest],
+    )
 }
 
 pub fn render_repositories(frame: &mut Frame, app: &App, area: Rect) {
@@ -254,5 +242,66 @@ mod prepared_image_tests {
         assert!(!text.contains("tag20"));
         app.ecr_state.images.filter = "no match".into();
         terminal.draw(|f| render_images(f, &app, f.area())).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod image_filter_tests {
+    use super::*;
+
+    fn image(tag: &str, digest: &str) -> EcrImage {
+        EcrImage {
+            tag: tag.to_string(),
+            digest: digest.to_string(),
+            artifact_type: "Image".into(),
+            pushed_at: String::new(),
+            size_bytes: 0,
+            uri: String::new(),
+            last_pull_time: String::new(),
+        }
+    }
+
+    fn app_with(images: Vec<EcrImage>, filter: &str) -> App {
+        let mut app = App::new_without_client("test".into(), None);
+        app.ecr_state.images.items = images;
+        app.ecr_state.images.filter = filter.to_string();
+        app
+    }
+
+    #[test]
+    fn matches_tag_or_digest_case_insensitively_and_preserves_order() {
+        let app = app_with(
+            vec![
+                image("Latest", "sha256:AAA"),
+                image("stable", "sha256:bbb"),
+                image("dev", "sha256:ccc"),
+            ],
+            "SHA256:BBB",
+        );
+        let filtered = filtered_ecr_images(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].tag, "stable");
+
+        // Only tag/digest are searched — no new fields leaked in.
+        let app = app_with(vec![image("v1", "sha256:ddd")], "LATEST");
+        assert!(filtered_ecr_images(&app).is_empty());
+    }
+
+    #[test]
+    fn empty_filter_returns_all_in_source_order() {
+        let app = app_with(vec![image("b", "d2"), image("a", "d1")], "");
+        let filtered = filtered_ecr_images(&app);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].tag, "b");
+        assert_eq!(filtered[1].tag, "a");
+    }
+
+    #[test]
+    fn unicode_case_insensitive_and_whitespace_is_significant() {
+        let app = app_with(vec![image("café-build", "sha256:x")], "CAFÉ");
+        assert_eq!(filtered_ecr_images(&app).len(), 1);
+        // Whitespace is not trimmed — a padded query must not match a tight tag.
+        let app = app_with(vec![image("cafe", "sha256:x")], " cafe ");
+        assert!(filtered_ecr_images(&app).is_empty());
     }
 }

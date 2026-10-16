@@ -1153,3 +1153,340 @@ fn log_group_with_arn(name: &str, arn: &str) -> rusticity_core::LogGroup {
     lg.log_group_arn = Some(arn.to_string());
     lg
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// Step 4: render / selection parity for the canonical filtered helpers.
+//
+// These tests drive the PRODUCTION functions — `ui::s3::filtered_buckets`,
+// `ui::iam::filtered_iam_groups`, `ui::cw::alarms::filtered_alarms`,
+// `finder::related::selected`, and the owned action handlers — never a
+// re-derived copy of the filter formula. The contract they lock down is that
+// the renderer, the selected-resource adapter, and the keyboard actions all
+// index the SAME ordered filtered list, so the highlighted row and the
+// resolved resource can never disagree.
+// ════════════════════════════════════════════════════════════════════════
+
+fn s3_bucket(name: &str, region: &str) -> crate::s3::Bucket {
+    crate::s3::Bucket {
+        name: name.to_string(),
+        region: region.to_string(),
+        creation_date: String::new(),
+    }
+}
+
+fn s3_object(key: &str, is_prefix: bool) -> crate::app::S3Object {
+    crate::s3::Object {
+        key: key.to_string(),
+        size: 0,
+        last_modified: String::new(),
+        is_prefix,
+        storage_class: String::new(),
+    }
+}
+
+fn alarm_named(name: &str, state: &str) -> crate::cw::alarms::Alarm {
+    crate::cw::alarms::Alarm {
+        name: name.to_string(),
+        state: state.to_string(),
+        ..Default::default()
+    }
+}
+
+// ── S3: filtered_buckets helper directly ─────────────────────────────────
+
+#[test]
+fn s3_filtered_buckets_empty_filter_is_identity_order() {
+    let items = vec![
+        s3_bucket("gamma", "r"),
+        s3_bucket("Alpha", "r"),
+        s3_bucket("beta", "r"),
+    ];
+    let out = crate::ui::s3::filtered_buckets(&items, "");
+    let names: Vec<&str> = out.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["gamma", "Alpha", "beta"]);
+}
+
+#[test]
+fn s3_filtered_buckets_mixed_case_contains() {
+    let items = vec![s3_bucket("Prod-Logs", "r"), s3_bucket("dev-data", "r")];
+    // Query case differs from the stored name on both sides.
+    let out = crate::ui::s3::filtered_buckets(&items, "PROD");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].name, "Prod-Logs");
+}
+
+#[test]
+fn s3_filtered_buckets_unicode_contains() {
+    let items = vec![s3_bucket("数据-bucket", "r"), s3_bucket("plain", "r")];
+    let out = crate::ui::s3::filtered_buckets(&items, "数据");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].name, "数据-bucket");
+}
+
+/// The renderer walks `filtered_buckets` in order; `selected` must resolve the
+/// same bucket for the same `selected_row`, under a mixed-case filter.
+#[test]
+fn s3_render_and_selected_agree_mixed_case_filter() {
+    let mut app = app_for(Service::S3Buckets);
+    app.s3_state.buckets.items = vec![
+        s3_bucket("alpha-One", "us-east-1"),
+        s3_bucket("Beta-Two", "us-east-1"),
+        s3_bucket("alpha-Three", "us-east-1"),
+    ];
+    app.s3_state.buckets.filter = "ALPHA".into();
+
+    let filtered =
+        crate::ui::s3::filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter);
+    assert_eq!(
+        filtered.len(),
+        2,
+        "mixed-case contains keeps both alpha rows"
+    );
+
+    // Row 0 → first filtered bucket.
+    app.s3_state.selected_row = 0;
+    assert_eq!(selected(&app).unwrap().id, filtered[0].name);
+    // Row 1 (no expansion) → second filtered bucket.
+    app.s3_state.selected_row = 1;
+    assert_eq!(selected(&app).unwrap().id, filtered[1].name);
+}
+
+/// A child (object) row under an expanded bucket resolves to its OWNING bucket,
+/// not the next bucket — the alias-row behaviour the renderer relies on.
+#[test]
+fn s3_expanded_child_row_resolves_to_owning_bucket() {
+    let mut app = app_for(Service::S3Buckets);
+    app.s3_state.buckets.items = vec![
+        s3_bucket("first", "us-east-1"),
+        s3_bucket("second", "us-east-1"),
+    ];
+    // Expand "first" with two visual child rows.
+    app.s3_state.expanded_prefixes.insert("first".into());
+    app.s3_state.bucket_preview.insert(
+        "first".into(),
+        vec![s3_object("a.txt", false), s3_object("b.txt", false)],
+    );
+
+    // Visual layout: row0=first, row1=a.txt, row2=b.txt, row3=second.
+    for child_row in [0usize, 1, 2] {
+        app.s3_state.selected_row = child_row;
+        assert_eq!(
+            selected(&app).unwrap().id,
+            "first",
+            "row {child_row} is within the expanded 'first' bucket"
+        );
+    }
+    app.s3_state.selected_row = 3;
+    assert_eq!(selected(&app).unwrap().id, "second");
+}
+
+/// Directory-bucket tab shows no buckets, so `selected` yields None even with a
+/// populated GeneralPurpose list.
+#[test]
+fn s3_directory_tab_returns_none() {
+    let mut app = app_for(Service::S3Buckets);
+    app.s3_state.buckets.items = vec![s3_bucket("only", "us-east-1")];
+    app.s3_state.selected_row = 0;
+    app.s3_state.bucket_type = crate::ui::s3::BucketType::Directory;
+    assert_eq!(selected(&app), None);
+}
+
+// ── IAM groups: filtered_iam_groups helper + render/selected parity ──────
+
+#[test]
+fn iam_filtered_groups_mixed_case_and_unicode() {
+    let mut app = app_for(Service::IamUserGroups);
+    app.iam_state.groups.items = vec![iam_group("Admins"), iam_group("réaders"), iam_group("devs")];
+
+    app.iam_state.groups.filter = "ADMIN".into();
+    assert_eq!(crate::ui::iam::filtered_iam_groups(&app).len(), 1);
+
+    app.iam_state.groups.filter = "réa".into();
+    let out = crate::ui::iam::filtered_iam_groups(&app);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].group_name, "réaders");
+
+    app.iam_state.groups.filter = "".into();
+    assert_eq!(crate::ui::iam::filtered_iam_groups(&app).len(), 3);
+}
+
+/// `selected` must return the SAME group the renderer would highlight at
+/// `groups.selected`, i.e. index into the canonical filtered list.
+#[test]
+fn iam_groups_selected_matches_rendered_filtered_index() {
+    let mut app = app_for(Service::IamUserGroups);
+    app.iam_state.groups.items = vec![
+        iam_group("alpha-grp"),
+        iam_group("beta-grp"),
+        iam_group("alpha-two"),
+    ];
+    app.iam_state.groups.filter = "alpha".into();
+
+    app.iam_state.groups.selected = 1;
+    let filtered = crate::ui::iam::filtered_iam_groups(&app);
+    assert_eq!(filtered.len(), 2);
+    let r = selected(&app).unwrap();
+    assert_eq!(r.id, filtered[1].group_name);
+    assert_eq!(r.id, "alpha-two");
+}
+
+// ── CW alarms: filtered_alarms helper + tab/selection parity ─────────────
+
+#[test]
+fn alarms_filtered_helper_tab_then_name() {
+    let items = vec![
+        alarm_named("CPU-High", "ALARM"),
+        alarm_named("CPU-Low", "OK"),
+        alarm_named("Mem-High", "alarm"), // lowercase state still counts (to_uppercase)
+    ];
+    use crate::app::AlarmTab;
+
+    // AllAlarms + empty → identity.
+    assert_eq!(
+        crate::ui::cw::alarms::filtered_alarms(&items, AlarmTab::AllAlarms, "").len(),
+        3
+    );
+    // InAlarm → only the two ALARM-state rows, order preserved.
+    let in_alarm = crate::ui::cw::alarms::filtered_alarms(&items, AlarmTab::InAlarm, "");
+    let names: Vec<&str> = in_alarm.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["CPU-High", "Mem-High"]);
+    // InAlarm + mixed-case name filter.
+    let narrowed = crate::ui::cw::alarms::filtered_alarms(&items, AlarmTab::InAlarm, "mem");
+    assert_eq!(narrowed.len(), 1);
+    assert_eq!(narrowed[0].name, "Mem-High");
+    // Unicode name filter.
+    let uni = vec![alarm_named("温度-alarm", "ALARM")];
+    assert_eq!(
+        crate::ui::cw::alarms::filtered_alarms(&uni, AlarmTab::AllAlarms, "温度").len(),
+        1
+    );
+}
+
+/// Under InAlarm tab + name filter, the keyboard action (`alarms_select_item`)
+/// and `finder::related::selected` must open the SAME alarm — the mismatch this
+/// step eliminates.
+#[test]
+fn alarms_action_and_selected_agree_under_tab_and_filter() {
+    let mut app = app_for(Service::CloudWatchAlarms);
+    app.alarms_state.table.items = vec![
+        alarm_named("web-ok", "OK"),
+        alarm_named("web-firing", "ALARM"),
+        alarm_named("db-firing", "ALARM"),
+    ];
+    app.alarms_state.alarm_tab = crate::app::AlarmTab::InAlarm;
+    app.alarms_state.table.filter = "db".into();
+    // Filtered list is [db-firing]; selected index 0.
+    app.alarms_state.table.selected = 0;
+
+    // finder adapter:
+    let via_finder = selected(&app).unwrap();
+    assert_eq!(via_finder.id, "db-firing");
+
+    // keyboard action opens the detail parent for the same alarm:
+    crate::cw::actions::alarms_select_item(&mut app);
+    assert_eq!(app.alarms_state.current_alarm.as_deref(), Some("db-firing"));
+}
+
+/// Regression for the pre-step4 bug: with a non-AllAlarms tab active, indexing
+/// the RAW item list would select a different alarm than the rendered row.
+/// The canonical helper makes the action index the filtered list instead.
+#[test]
+fn alarms_action_uses_filtered_not_raw_index() {
+    let mut app = app_for(Service::CloudWatchAlarms);
+    app.alarms_state.table.items = vec![
+        alarm_named("ok-first", "OK"), // raw index 0 — filtered OUT by InAlarm
+        alarm_named("firing-second", "ALARM"), // filtered index 0
+    ];
+    app.alarms_state.alarm_tab = crate::app::AlarmTab::InAlarm;
+    app.alarms_state.table.selected = 0;
+
+    crate::cw::actions::alarms_select_item(&mut app);
+    // Must be the filtered row, NOT the raw index-0 "ok-first".
+    assert_eq!(
+        app.alarms_state.current_alarm.as_deref(),
+        Some("firing-second")
+    );
+}
+
+/// Render the actual list rather than inferring its rows from a test-side filter.
+fn rendered_list(app: &App) -> String {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut terminal = Terminal::new(TestBackend::new(220, 40)).unwrap();
+    terminal
+        .draw(|frame| crate::ui::render(frame, app))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn filtered_s3_frame_and_related_selection_agree_with_expanded_child_rows() {
+    let mut app = app_for(Service::S3Buckets);
+    app.mode = crate::keymap::Mode::Normal;
+    app.s3_state.buckets.items = vec![
+        s3_bucket("hidden-bucket", "us-east-2"),
+        s3_bucket("match-first", "us-east-2"),
+        s3_bucket("match-second", "us-east-2"),
+    ];
+    app.s3_state.buckets.filter = "MATCH".into();
+    app.s3_state.expanded_prefixes.insert("match-first".into());
+    app.s3_state
+        .bucket_preview
+        .insert("match-first".into(), vec![s3_object("child.txt", false)]);
+    app.s3_state.selected_row = 1;
+    let text = rendered_list(&app);
+    assert!(text.contains("match-first"));
+    assert!(text.contains("child.txt"));
+    assert!(!text.contains("hidden-bucket"));
+    assert_eq!(selected(&app).unwrap().id, "match-first");
+    app.s3_state.selected_row = 2;
+    assert!(rendered_list(&app).contains("match-second"));
+    assert_eq!(selected(&app).unwrap().id, "match-second");
+}
+
+#[test]
+fn filtered_iam_frame_related_selection_and_enter_agree() {
+    let mut app = app_for(Service::IamUserGroups);
+    app.mode = crate::keymap::Mode::Normal;
+    app.iam_state.groups.items = vec![
+        iam_group("hidden-group"),
+        iam_group("match-one"),
+        iam_group("match-two"),
+    ];
+    app.iam_state.groups.filter = "MATCH".into();
+    app.iam_state.groups.selected = 1;
+    let text = rendered_list(&app);
+    assert!(text.contains("match-two"));
+    assert!(!text.contains("hidden-group"));
+    assert_eq!(selected(&app).unwrap().id, "match-two");
+    app.handle_action(crate::keymap::Action::Select);
+    assert_eq!(app.iam_state.current_group.as_deref(), Some("match-two"));
+}
+
+#[test]
+fn filtered_alarm_frame_related_selection_and_enter_agree() {
+    let mut app = app_for(Service::CloudWatchAlarms);
+    app.mode = crate::keymap::Mode::Normal;
+    app.alarms_state.table.items = vec![
+        alarm_named("hidden-ok", "OK"),
+        alarm_named("other-firing", "ALARM"),
+        alarm_named("match-firing", "ALARM"),
+    ];
+    app.alarms_state.alarm_tab = crate::app::AlarmTab::InAlarm;
+    app.alarms_state.table.filter = "MATCH".into();
+    let text = rendered_list(&app);
+    assert!(text.contains("match-firing"));
+    assert!(!text.contains("hidden-ok"));
+    assert!(!text.contains("other-firing"));
+    assert_eq!(selected(&app).unwrap().id, "match-firing");
+    app.handle_action(crate::keymap::Action::Select);
+    assert_eq!(
+        app.alarms_state.current_alarm.as_deref(),
+        Some("match-firing")
+    );
+}

@@ -1,10 +1,11 @@
 use crate::app::App;
 use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::iam::{
-    filtered_iam_policies, filtered_iam_roles, filtered_iam_users, filtered_last_accessed,
-    filtered_tags as filtered_iam_tags, filtered_user_tags, GroupTab, RoleTab, UserTab,
-    GROUP_FILTER_CONTROLS, HISTORY_FILTER, POLICY_FILTER_CONTROLS, POLICY_TYPE_DROPDOWN,
-    ROLE_FILTER_CONTROLS, USER_LAST_ACCESSED_FILTER_CONTROLS, USER_SIMPLE_FILTER_CONTROLS,
+    filtered_iam_groups, filtered_iam_policies, filtered_iam_roles, filtered_iam_users,
+    filtered_last_accessed, filtered_tags as filtered_iam_tags, filtered_user_tags, GroupTab,
+    RoleTab, UserTab, GROUP_FILTER_CONTROLS, HISTORY_FILTER, POLICY_FILTER_CONTROLS,
+    POLICY_TYPE_DROPDOWN, ROLE_FILTER_CONTROLS, USER_LAST_ACCESSED_FILTER_CONTROLS,
+    USER_SIMPLE_FILTER_CONTROLS,
 };
 
 // ── Filter reset ──────────────────────────────────────────────────────────────
@@ -235,18 +236,7 @@ pub fn next_item_groups(app: &mut App) {
             }
         }
     } else {
-        let filtered: Vec<_> = app
-            .iam_state
-            .groups
-            .items
-            .iter()
-            .filter(|g| {
-                app.iam_state.groups.filter.is_empty()
-                    || g.group_name
-                        .to_lowercase()
-                        .contains(&app.iam_state.groups.filter.to_lowercase())
-            })
-            .collect();
+        let filtered = filtered_iam_groups(app);
         if !filtered.is_empty() {
             app.iam_state.groups.next_item(filtered.len());
         }
@@ -364,18 +354,7 @@ pub fn page_down_normal_groups(app: &mut App) {
             }
         }
     } else {
-        let filtered: Vec<_> = app
-            .iam_state
-            .groups
-            .items
-            .iter()
-            .filter(|g| {
-                app.iam_state.groups.filter.is_empty()
-                    || g.group_name
-                        .to_lowercase()
-                        .contains(&app.iam_state.groups.filter.to_lowercase())
-            })
-            .collect();
+        let filtered = filtered_iam_groups(app);
         if !filtered.is_empty() {
             app.iam_state.groups.page_down(filtered.len());
         }
@@ -782,18 +761,7 @@ pub fn select_item_roles(app: &mut App) {
 
 pub fn select_item_groups(app: &mut App) {
     if app.iam_state.current_group.is_none() {
-        let filtered: Vec<_> = app
-            .iam_state
-            .groups
-            .items
-            .iter()
-            .filter(|g| {
-                app.iam_state.groups.filter.is_empty()
-                    || g.group_name
-                        .to_lowercase()
-                        .contains(&app.iam_state.groups.filter.to_lowercase())
-            })
-            .collect();
+        let filtered = filtered_iam_groups(app);
         if let Some(group) = app.iam_state.groups.get_selected(&filtered) {
             app.iam_state.current_group = Some(group.group_name.clone());
             app.update_current_tab_breadcrumb();
@@ -865,18 +833,7 @@ pub fn yank_groups(app: &App) {
         let arn = iam::format_arn(&app.config.account_id, "group", group_name);
         app.clipboard.request_text(&arn);
     } else {
-        let filtered: Vec<_> = app
-            .iam_state
-            .groups
-            .items
-            .iter()
-            .filter(|g| {
-                app.iam_state.groups.filter.is_empty()
-                    || g.group_name
-                        .to_lowercase()
-                        .contains(&app.iam_state.groups.filter.to_lowercase())
-            })
-            .collect();
+        let filtered = filtered_iam_groups(app);
         if let Some(group) = app.iam_state.groups.get_selected(&filtered) {
             let arn = iam::format_arn(&app.config.account_id, "group", &group.group_name);
             app.clipboard.request_text(&arn);

@@ -218,14 +218,8 @@ pub fn page_up_normal(app: &mut App) {
 /// Jump the bucket list selection forward or backward by `page_size` top-level buckets,
 /// ignoring expanded child rows. Keeps `selected_row` on a top-level bucket visual row.
 fn bucket_page_jump(app: &mut App, forward: bool) {
-    let filter = app.s3_state.buckets.filter.to_lowercase();
-    let buckets: Vec<_> = app
-        .s3_state
-        .buckets
-        .items
-        .iter()
-        .filter(|b| filter.is_empty() || b.name.to_lowercase().contains(&filter))
-        .collect();
+    let buckets =
+        crate::ui::s3::filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter);
 
     if buckets.is_empty() {
         return;
@@ -517,19 +511,13 @@ pub fn expand_row(app: &mut App) {
 pub fn select_item(app: &mut App) {
     if app.s3_state.current_bucket.is_none() {
         // Bucket list — find the row and drill in
-        let filtered_buckets: Vec<_> = app
-            .s3_state
-            .buckets
-            .items
-            .iter()
-            .filter(|b| {
-                app.s3_state.buckets.filter.is_empty()
-                    || b.name
-                        .to_lowercase()
-                        .contains(&app.s3_state.buckets.filter.to_lowercase())
-            })
-            .cloned()
-            .collect();
+        let filtered_buckets: Vec<_> = crate::ui::s3::filtered_buckets(
+            &app.s3_state.buckets.items,
+            &app.s3_state.buckets.filter,
+        )
+        .into_iter()
+        .cloned()
+        .collect();
 
         let mut row_idx = 0;
         for bucket in &filtered_buckets {
@@ -696,15 +684,11 @@ pub fn collapse_row(app: &mut App) {
         return; // objects view handled by prev_pane
     }
 
-    let filter = app.s3_state.buckets.filter.to_lowercase();
-    let filtered: Vec<_> = app
-        .s3_state
-        .buckets
-        .items
-        .iter()
-        .filter(|b| filter.is_empty() || b.name.to_lowercase().contains(&filter))
-        .cloned()
-        .collect();
+    let filtered: Vec<_> =
+        crate::ui::s3::filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter)
+            .into_iter()
+            .cloned()
+            .collect();
 
     let mut row_idx = 0;
     for bucket in &filtered {
@@ -753,15 +737,11 @@ pub fn expand_row_left(app: &mut App) {
 }
 
 fn expand_buckets(app: &mut App) {
-    let filter = app.s3_state.buckets.filter.to_lowercase();
-    let filtered: Vec<_> = app
-        .s3_state
-        .buckets
-        .items
-        .iter()
-        .filter(|b| filter.is_empty() || b.name.to_lowercase().contains(&filter))
-        .cloned()
-        .collect();
+    let filtered: Vec<_> =
+        crate::ui::s3::filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter)
+            .into_iter()
+            .cloned()
+            .collect();
 
     let mut row_idx = 0;
     for bucket in &filtered {

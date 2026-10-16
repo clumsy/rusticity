@@ -237,7 +237,7 @@ pub fn filtered_lambda_triggers(app: &App) -> Vec<&LambdaTrigger> {
     let mut filtered = filter_by_fields(
         &app.sqs_state.triggers.items,
         &app.sqs_state.triggers.filter,
-        |t| vec![&t.uuid, &t.arn],
+        |t| [&t.uuid, &t.arn],
     );
 
     filtered.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
@@ -247,7 +247,7 @@ pub fn filtered_lambda_triggers(app: &App) -> Vec<&LambdaTrigger> {
 pub fn filtered_tags(app: &App) -> Vec<&QueueTag> {
     let mut filtered =
         filter_by_fields(&app.sqs_state.tags.items, &app.sqs_state.tags.filter, |t| {
-            vec![&t.key, &t.value]
+            [&t.key, &t.value]
         });
 
     filtered.sort_by(|a, b| a.value.cmp(&b.value));
@@ -264,7 +264,7 @@ pub fn filtered_subscriptions(app: &App) -> Vec<&SnsSubscription> {
     let mut filtered: Vec<_> = filter_by_fields(
         &app.sqs_state.subscriptions.items,
         &app.sqs_state.subscriptions.filter,
-        |s| vec![&s.subscription_arn, &s.topic_arn],
+        |s| [&s.subscription_arn, &s.topic_arn],
     )
     .into_iter()
     .filter(|s| s.subscription_arn.contains(region_filter))
@@ -278,7 +278,7 @@ pub fn filtered_eventbridge_pipes(app: &App) -> Vec<&EventBridgePipe> {
     let mut filtered = filter_by_fields(
         &app.sqs_state.pipes.items,
         &app.sqs_state.pipes.filter,
-        |p| vec![&p.name, &p.target],
+        |p| [&p.name, &p.target],
     );
 
     filtered.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));

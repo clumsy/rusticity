@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, ColumnId, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    render_pagination_text, ColumnId, CyclicEnum, InputFocus, SortDirection, TextFilter,
+};
 use crate::kms::key::{self, Key as KmsKey};
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
@@ -94,22 +96,13 @@ pub fn filtered_kms_keys(app: &App) -> Vec<&KmsKey> {
         Tab::CustomerManaged => Box::new(|k: &&KmsKey| k.key_manager == "Customer"),
     };
 
-    let text_filter = &app.kms_state.keys.filter;
+    let text_filter = TextFilter::new(&app.kms_state.keys.filter);
     app.kms_state
         .keys
         .items
         .iter()
         .filter(|k| tab_filter(k))
-        .filter(|k| {
-            text_filter.is_empty()
-                || k.alias.to_lowercase().contains(&text_filter.to_lowercase())
-                || k.key_id
-                    .to_lowercase()
-                    .contains(&text_filter.to_lowercase())
-                || k.description
-                    .to_lowercase()
-                    .contains(&text_filter.to_lowercase())
-        })
+        .filter(|k| text_filter.matches_any([&k.alias, &k.key_id, &k.description]))
         .collect()
 }
 
@@ -343,5 +336,60 @@ mod tests {
         let filtered = filtered_kms_keys(&app);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].alias, "prod-key");
+    }
+
+    fn key(key_id: &str, alias: &str, manager: &str) -> KmsKey {
+        KmsKey {
+            key_id: key_id.to_string(),
+            key_arn: String::new(),
+            alias: alias.to_string(),
+            description: String::new(),
+            key_state: "Enabled".to_string(),
+            key_usage: String::new(),
+            key_spec: String::new(),
+            key_manager: manager.to_string(),
+            creation_date: String::new(),
+            expiration_date: String::new(),
+            deletion_date: String::new(),
+            custom_key_store_id: String::new(),
+            origin: String::new(),
+            multi_region: false,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn test_text_filter_combined_with_tab_predicate() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.kms_state.tab = Tab::CustomerManaged;
+        app.kms_state.keys.filter = "prod".to_string();
+        app.kms_state.keys.items = vec![
+            key("k1", "prod-aws", "Aws"),       // text matches but wrong tab
+            key("k2", "prod-cust", "Customer"), // text + tab both match
+            key("k3", "dev-cust", "Customer"),  // tab matches, text does not
+        ];
+        let filtered = filtered_kms_keys(&app);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key_id, "k2");
+    }
+
+    #[test]
+    fn test_text_filter_unicode_case_insensitive_and_no_trim() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.kms_state.tab = Tab::CustomerManaged;
+        app.kms_state.keys.items = vec![key("k1", "café-key", "Customer")];
+
+        app.kms_state.keys.filter = "CAFÉ".to_string();
+        assert_eq!(filtered_kms_keys(&app).len(), 1);
+
+        // Whitespace is significant — padded query must not match.
+        app.kms_state.keys.filter = " café-key ".to_string();
+        assert!(filtered_kms_keys(&app).is_empty());
+
+        // Empty filter keeps every row on the tab.
+        app.kms_state.keys.filter = String::new();
+        assert_eq!(filtered_kms_keys(&app).len(), 1);
     }
 }

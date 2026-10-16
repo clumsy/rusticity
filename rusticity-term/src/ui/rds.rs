@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, ColumnId, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_fields, render_pagination_text, ColumnId, InputFocus, SortDirection,
+};
 use crate::keymap::Mode;
 use crate::rds::instance::Column;
 use crate::table::{TableState, TableWindow};
@@ -30,25 +32,26 @@ impl Default for State {
 }
 
 pub fn filtered_instances(app: &App) -> Vec<&RdsInstance> {
-    let filter = app.rds_state.instances.filter.to_lowercase();
-    let mut instances = app.rds_state.instances.filtered(|instance| {
-        [
-            &instance.identifier,
-            &instance.engine,
-            &instance.engine_version,
-            &instance.status,
-            &instance.instance_class,
-            &instance.region,
-            &instance.availability_zone,
-            &instance.endpoint,
-            &instance.arn,
-            &instance.cluster_identifier,
-            &instance.vpc,
-            &instance.subnet_group,
-        ]
-        .iter()
-        .any(|value| value.to_lowercase().contains(&filter))
-    });
+    let mut instances = filter_by_fields(
+        &app.rds_state.instances.items,
+        &app.rds_state.instances.filter,
+        |instance| {
+            [
+                &instance.identifier,
+                &instance.engine,
+                &instance.engine_version,
+                &instance.status,
+                &instance.instance_class,
+                &instance.region,
+                &instance.availability_zone,
+                &instance.endpoint,
+                &instance.arn,
+                &instance.cluster_identifier,
+                &instance.vpc,
+                &instance.subnet_group,
+            ]
+        },
+    );
     instances.sort_by(|a, b| a.identifier.cmp(&b.identifier));
     instances
 }
@@ -104,4 +107,62 @@ pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
             is_active: app.mode == Mode::Normal,
         },
     );
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    fn instance(identifier: &str, engine: &str, status: &str) -> RdsInstance {
+        RdsInstance {
+            identifier: identifier.to_string(),
+            engine: engine.to_string(),
+            status: status.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn searches_multiple_fields_case_insensitively_and_keeps_identifier_sort() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.rds_state.instances.items = vec![
+            instance("db-zeta", "postgres", "available"),
+            instance("db-alpha", "mysql", "available"),
+        ];
+
+        // Engine match returns only the mysql row.
+        app.rds_state.instances.filter = "MYSQL".to_string();
+        let f = filtered_instances(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].identifier, "db-alpha");
+
+        // Shared "available" status match → both, sorted by identifier ascending.
+        app.rds_state.instances.filter = "available".to_string();
+        let f = filtered_instances(&app);
+        assert_eq!(
+            f.iter().map(|i| i.identifier.as_str()).collect::<Vec<_>>(),
+            ["db-alpha", "db-zeta"]
+        );
+    }
+
+    #[test]
+    fn empty_filter_returns_all_and_whitespace_is_significant() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.rds_state.instances.items = vec![instance("db-1", "postgres", "available")];
+
+        app.rds_state.instances.filter = String::new();
+        assert_eq!(filtered_instances(&app).len(), 1);
+
+        // No trimming: a padded query must not match the tight field value.
+        app.rds_state.instances.filter = " db-1 ".to_string();
+        assert!(filtered_instances(&app).is_empty());
+    }
+
+    #[test]
+    fn unicode_case_folding_matches() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.rds_state.instances.items = vec![instance("café-db", "postgres", "available")];
+        app.rds_state.instances.filter = "CAFÉ".to_string();
+        assert_eq!(filtered_instances(&app).len(), 1);
+    }
 }

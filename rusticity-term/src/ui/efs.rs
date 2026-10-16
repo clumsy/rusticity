@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, CyclicEnum, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_fields, render_pagination_text, CyclicEnum, InputFocus, SortDirection,
+};
 use crate::efs::fs::{self, FileSystem as EfsFileSystem};
 use crate::table::{TableState, TableWindow};
 use crate::tags::{self, TagSort, TagsConfig};
@@ -232,24 +234,11 @@ pub async fn load_metrics(app: &mut App, file_system_id: &str) -> anyhow::Result
 }
 
 pub fn filtered_efs_file_systems(app: &App) -> Vec<&EfsFileSystem> {
-    let filter = &app.efs_state.file_systems.filter;
-    app.efs_state
-        .file_systems
-        .items
-        .iter()
-        .filter(|fs| {
-            filter.is_empty()
-                || fs.name.to_lowercase().contains(&filter.to_lowercase())
-                || fs
-                    .file_system_id
-                    .to_lowercase()
-                    .contains(&filter.to_lowercase())
-                || fs
-                    .availability_zone
-                    .to_lowercase()
-                    .contains(&filter.to_lowercase())
-        })
-        .collect()
+    filter_by_fields(
+        &app.efs_state.file_systems.items,
+        &app.efs_state.file_systems.filter,
+        |fs| [&fs.name, &fs.file_system_id, &fs.availability_zone],
+    )
 }
 
 pub fn render_file_systems(frame: &mut Frame, app: &App, area: Rect) {
@@ -455,18 +444,11 @@ fn render_metered_size_tab(frame: &mut Frame, fs: &EfsFileSystem, area: Rect) {
 
 /// Access points filtered by the current filter (name, access point ID, or path).
 pub fn filtered_access_points(app: &App) -> Vec<&rusticity_core::efs::EfsAccessPoint> {
-    let filter = app.efs_state.access_points.filter.to_lowercase();
-    app.efs_state
-        .access_points
-        .items
-        .iter()
-        .filter(|ap| {
-            filter.is_empty()
-                || ap.name.to_lowercase().contains(&filter)
-                || ap.access_point_id.to_lowercase().contains(&filter)
-                || ap.path.to_lowercase().contains(&filter)
-        })
-        .collect()
+    filter_by_fields(
+        &app.efs_state.access_points.items,
+        &app.efs_state.access_points.filter,
+        |ap| [&ap.name, &ap.access_point_id, &ap.path],
+    )
 }
 
 fn render_access_points_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -848,6 +830,20 @@ mod tests {
         ];
         let filtered = filtered_efs_file_systems(&app);
         assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_efs_unicode_case_insensitive_and_no_trim() {
+        use crate::app::App;
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.efs_state.file_systems.items = vec![make_fs("fs-001", "café-efs", "us-east-1a")];
+
+        app.efs_state.file_systems.filter = "CAFÉ".to_string();
+        assert_eq!(filtered_efs_file_systems(&app).len(), 1);
+
+        // Whitespace is significant — no trimming.
+        app.efs_state.file_systems.filter = " café-efs ".to_string();
+        assert!(filtered_efs_file_systems(&app).is_empty());
     }
 
     fn make_fs(id: &str, name: &str, az: &str) -> EfsFileSystem {

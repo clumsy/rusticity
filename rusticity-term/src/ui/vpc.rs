@@ -1,5 +1,7 @@
 use crate::app::App;
-use crate::common::{render_pagination_text, ColumnId, InputFocus, SortDirection};
+use crate::common::{
+    filter_by_fields, render_pagination_text, ColumnId, InputFocus, SortDirection,
+};
 use crate::keymap::Mode;
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
@@ -27,28 +29,29 @@ impl Default for State {
 }
 
 pub fn filtered_vpcs(app: &App) -> Vec<&Vpc> {
-    let query = app.vpc_state.vpcs.filter.to_lowercase();
-    let mut vpcs = app.vpc_state.vpcs.filtered(|vpc| {
-        [
-            &vpc.name,
-            &vpc.vpc_id,
-            &vpc.state,
-            &vpc.ipv4_cidrs,
-            &vpc.ipv6_cidrs,
-            &vpc.owner_id,
-            &vpc.region,
-            &vpc.arn,
-            &vpc.dhcp_options_id,
-            &vpc.tenancy,
-            &vpc.encryption_control_id,
-            &vpc.encryption_control_mode,
-            &vpc.block_public_access,
-            &vpc.main_route_table,
-            &vpc.main_network_acl,
-        ]
-        .iter()
-        .any(|value| value.to_lowercase().contains(&query))
-    });
+    let mut vpcs = filter_by_fields(
+        &app.vpc_state.vpcs.items,
+        &app.vpc_state.vpcs.filter,
+        |vpc| {
+            [
+                &vpc.name,
+                &vpc.vpc_id,
+                &vpc.state,
+                &vpc.ipv4_cidrs,
+                &vpc.ipv6_cidrs,
+                &vpc.owner_id,
+                &vpc.region,
+                &vpc.arn,
+                &vpc.dhcp_options_id,
+                &vpc.tenancy,
+                &vpc.encryption_control_id,
+                &vpc.encryption_control_mode,
+                &vpc.block_public_access,
+                &vpc.main_route_table,
+                &vpc.main_network_acl,
+            ]
+        },
+    );
     vpcs.sort_by(|a, b| a.vpc_id.cmp(&b.vpc_id));
     vpcs
 }
@@ -108,4 +111,54 @@ pub fn render_vpcs(frame: &mut Frame, app: &App, area: Rect) {
             is_active: app.mode == Mode::Normal,
         },
     );
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    fn vpc(name: &str, vpc_id: &str, state: &str) -> Vpc {
+        Vpc {
+            name: name.to_string(),
+            vpc_id: vpc_id.to_string(),
+            state: state.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn searches_many_fields_case_insensitively_and_keeps_vpc_id_sort() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.vpc_state.vpcs.items = vec![
+            vpc("prod", "vpc-zzz", "available"),
+            vpc("dev", "vpc-aaa", "available"),
+        ];
+
+        // Name match (case-insensitive).
+        app.vpc_state.vpcs.filter = "PROD".to_string();
+        let f = filtered_vpcs(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].vpc_id, "vpc-zzz");
+
+        // Shared state match → both, sorted by vpc_id ascending.
+        app.vpc_state.vpcs.filter = "available".to_string();
+        let f = filtered_vpcs(&app);
+        assert_eq!(
+            f.iter().map(|v| v.vpc_id.as_str()).collect::<Vec<_>>(),
+            ["vpc-aaa", "vpc-zzz"]
+        );
+    }
+
+    #[test]
+    fn empty_filter_returns_all_and_whitespace_is_significant() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.vpc_state.vpcs.items = vec![vpc("prod", "vpc-1", "available")];
+
+        app.vpc_state.vpcs.filter = String::new();
+        assert_eq!(filtered_vpcs(&app).len(), 1);
+
+        // No trimming.
+        app.vpc_state.vpcs.filter = " vpc-1 ".to_string();
+        assert!(filtered_vpcs(&app).is_empty());
+    }
 }

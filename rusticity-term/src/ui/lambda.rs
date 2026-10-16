@@ -1317,7 +1317,7 @@ pub fn filtered_lambda_functions(app: &App) -> Vec<&LambdaFunction> {
     filter_by_fields(
         &app.lambda_state.table.items,
         &app.lambda_state.table.filter,
-        |f| vec![&f.name, &f.description, &f.runtime],
+        |f| [&f.name, &f.description, &f.runtime],
     )
 }
 
@@ -1325,7 +1325,7 @@ pub fn filtered_lambda_applications(app: &App) -> Vec<&LambdaApplication> {
     filter_by_fields(
         &app.lambda_application_state.table.items,
         &app.lambda_application_state.table.filter,
-        |a| vec![&a.name, &a.description, &a.status],
+        |a| [&a.name, &a.description, &a.status],
     )
 }
 

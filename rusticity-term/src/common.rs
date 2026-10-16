@@ -772,41 +772,66 @@ pub enum PageSize {
     OneHundred,
 }
 
-/// Generic helper to filter items by a field that matches a filter string (case-insensitive contains)
+/// Normalize a query once, then reuse the same case-insensitive substring
+/// semantics across a view's rows. Whitespace is significant; this is not a
+/// tokenizer, fuzzy matcher, or service-specific search policy.
+pub struct TextFilter {
+    query: String,
+}
+impl TextFilter {
+    pub fn new(query: &str) -> Self {
+        Self {
+            query: query.to_lowercase(),
+        }
+    }
+    pub fn matches(&self, text: &str) -> bool {
+        self.query.is_empty() || text.to_lowercase().contains(&self.query)
+    }
+    pub fn matches_any<I>(&self, fields: I) -> bool
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
+        self.query.is_empty() || fields.into_iter().any(|field| self.matches(field.as_ref()))
+    }
+}
+
+/// Filter by one field, preserving source order and the empty-query fast path.
 pub fn filter_by_field<'a, T, F>(items: &'a [T], filter: &str, get_field: F) -> Vec<&'a T>
 where
     F: Fn(&T) -> &str,
 {
     if filter.is_empty() {
-        items.iter().collect()
-    } else {
-        let filter_lower = filter.to_lowercase();
-        items
-            .iter()
-            .filter(|item| get_field(item).to_lowercase().contains(&filter_lower))
-            .collect()
+        return items.iter().collect();
     }
+    let query = TextFilter::new(filter);
+    items
+        .iter()
+        .filter(|item| query.matches(get_field(item)))
+        .collect()
 }
 
-/// Generic helper to filter items by multiple fields (case-insensitive contains on any field)
-pub fn filter_by_fields<'a, T, F>(items: &'a [T], filter: &str, get_fields: F) -> Vec<&'a T>
+/// Filter by any number of fields without requiring a per-row Vec allocation.
+/// Accepts arrays, borrowed collections, or lazy iterators over dynamic fields.
+/// Empty queries include every row without calling the field accessor.
+pub fn filter_by_fields<'a, T, F, I>(items: &'a [T], filter: &str, get_fields: F) -> Vec<&'a T>
 where
-    F: Fn(&T) -> Vec<&str>,
+    F: Fn(&'a T) -> I,
+    I: IntoIterator,
+    I::Item: AsRef<str>,
 {
     if filter.is_empty() {
-        items.iter().collect()
-    } else {
-        let filter_lower = filter.to_lowercase();
-        items
-            .iter()
-            .filter(|item| {
-                get_fields(item)
-                    .iter()
-                    .any(|field| field.to_lowercase().contains(&filter_lower))
-            })
-            .collect()
+        return items.iter().collect();
     }
+    let query = TextFilter::new(filter);
+    items
+        .iter()
+        .filter(|item| query.matches_any(get_fields(item)))
+        .collect()
 }
+
+#[cfg(test)]
+mod filtering_tests;
 
 #[cfg(test)]
 mod partial_pagination_tests {

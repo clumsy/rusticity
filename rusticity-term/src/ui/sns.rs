@@ -34,7 +34,7 @@ pub fn filtered_topics(app: &App) -> Vec<&SnsTopic> {
     let mut rows = filter_by_fields(
         &app.sns_state.topics.items,
         &app.sns_state.topics.filter,
-        |topic| vec![&topic.name, &topic.arn, &topic.topic_type],
+        |topic| [&topic.name, &topic.arn, &topic.topic_type],
     );
     rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arn.cmp(&b.arn)));
     rows
@@ -94,4 +94,52 @@ pub fn render_topics(frame: &mut Frame, app: &App, area: Rect) {
             is_active: app.mode == Mode::Normal,
         },
     );
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    fn topic(name: &str, arn: &str, topic_type: &str) -> SnsTopic {
+        SnsTopic {
+            name: name.to_string(),
+            arn: arn.to_string(),
+            topic_type: topic_type.to_string(),
+        }
+    }
+
+    #[test]
+    fn searches_name_arn_type_case_insensitively_and_sorts_by_name_then_arn() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.sns_state.topics.items = vec![
+            topic("zeta", "arn:aws:sns:us-east-1:1:zeta", "Standard"),
+            topic("alpha", "arn:aws:sns:us-east-1:1:alpha", "FIFO"),
+        ];
+
+        // Type match (case-insensitive).
+        app.sns_state.topics.filter = "fifo".to_string();
+        let f = filtered_topics(&app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].name, "alpha");
+
+        // Shared ARN substring → both, sorted by name ascending.
+        app.sns_state.topics.filter = "arn:aws:sns".to_string();
+        let f = filtered_topics(&app);
+        assert_eq!(
+            f.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["alpha", "zeta"]
+        );
+    }
+
+    #[test]
+    fn empty_filter_returns_all_and_whitespace_is_significant() {
+        let mut app = App::new_without_client("default".to_string(), None);
+        app.sns_state.topics.items = vec![topic("alpha", "arn:1", "Standard")];
+
+        app.sns_state.topics.filter = String::new();
+        assert_eq!(filtered_topics(&app).len(), 1);
+
+        app.sns_state.topics.filter = " alpha ".to_string();
+        assert!(filtered_topics(&app).is_empty());
+    }
 }

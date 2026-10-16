@@ -1,6 +1,6 @@
 use crate::app::{App, S3Bucket as AppS3Bucket, S3Object as AppS3Object};
 use crate::common::{
-    format_bytes, format_iso_timestamp, render_scrollbar, CyclicEnum, InputFocus,
+    filter_by_field, format_bytes, format_iso_timestamp, render_scrollbar, CyclicEnum, InputFocus,
     UTC_TIMESTAMP_WIDTH,
 };
 use crate::keymap::Mode;
@@ -164,6 +164,17 @@ impl ObjectTab {
     }
 }
 
+/// Canonical bucket-list filter: case-insensitive `contains` on bucket name,
+/// preserving source order and the empty-query fast path. This is the single
+/// source of truth shared by the bucket-list renderer, the keyboard-action
+/// handlers, and `finder::related::selected` so the visual row ordering they
+/// each walk stays identical. The GeneralPurpose-vs-Directory tab gate is a
+/// separate concern applied by callers, because the Directory tab currently
+/// shows no buckets at all.
+pub fn filtered_buckets<'a>(buckets: &'a [S3Bucket], filter: &str) -> Vec<&'a S3Bucket> {
+    filter_by_field(buckets, filter, |b| &b.name)
+}
+
 pub fn calculate_filtered_bucket_rows(app: &App) -> usize {
     fn count_nested(
         obj: &AppS3Object,
@@ -182,21 +193,8 @@ pub fn calculate_filtered_bucket_rows(app: &App) -> usize {
         count
     }
 
-    let filtered_buckets: Vec<_> = app
-        .s3_state
-        .buckets
-        .items
-        .iter()
-        .filter(|b| {
-            if app.s3_state.buckets.filter.is_empty() {
-                true
-            } else {
-                b.name
-                    .to_lowercase()
-                    .contains(&app.s3_state.buckets.filter.to_lowercase())
-            }
-        })
-        .collect();
+    let filtered_buckets =
+        filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter);
 
     let mut total = filtered_buckets.len();
     for bucket in filtered_buckets {
@@ -340,20 +338,11 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 
     // Filter buckets first
     let all_filtered_buckets: Vec<_> = if app.s3_state.bucket_type == BucketType::GeneralPurpose {
-        app.s3_state
-            .buckets
-            .items
-            .iter()
+        // Canonical filtered list; `.enumerate()` preserves the historical
+        // `(usize, &Bucket)` tuple shape the pagination/row-walk below expects.
+        filtered_buckets(&app.s3_state.buckets.items, &app.s3_state.buckets.filter)
+            .into_iter()
             .enumerate()
-            .filter(|(_, b)| {
-                if app.s3_state.buckets.filter.is_empty() {
-                    true
-                } else {
-                    b.name
-                        .to_lowercase()
-                        .contains(&app.s3_state.buckets.filter.to_lowercase())
-                }
-            })
             .collect()
     } else {
         // Directory buckets - not supported yet

@@ -125,6 +125,10 @@ pub fn render_state_machines(frame: &mut Frame, app: &App, area: Rect) {
         state.load_status(),
         "State machines",
         state.inventory_error.as_deref(),
+        crate::ui::loading::EmptyState {
+            no_items: "No state machines found.",
+            has_unfiltered_items: !state.machines.items.is_empty(),
+        },
     );
 }
 

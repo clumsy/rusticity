@@ -161,3 +161,65 @@ fn handle_action_ignores_non_inventory_actions_and_inactive_service() {
     assert!(!active(&app));
     assert!(!handle_action(&mut app, &Action::Refresh));
 }
+
+#[tokio::test]
+async fn classified_errors_require_manual_retry_and_empty_success_is_not_failure() {
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn screen(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+        terminal.draw(|f| crate::ui::render(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    for (error, heading) in [
+        ("AccessDenied: sns:ListTopics", "permission denied"),
+        ("ExpiredToken: expired", "credentials expired"),
+    ] {
+        let mut app = app();
+        app.tabs.push(crate::app::Tab {
+            id: crate::tab_runtime::TabId::new(),
+            service: Service::SnsTopics,
+            title: Service::SnsTopics.name().into(),
+            breadcrumb: Service::SnsTopics.name().into(),
+        });
+        assert!(finish(&mut app, Ok(vec![topic("old-row")])).await);
+        app.handle_action(Action::Refresh);
+        assert!(app.sns_state.topics.items.is_empty());
+        let loading = screen(&app);
+        assert!(loading.contains("Loading…") && !loading.contains("old-row"));
+        assert!(!loading.contains("No topics found."));
+        assert!(finish(&mut app, Err(error.into())).await);
+        let failed = screen(&app);
+        assert!(failed.contains(heading) && failed.contains(error));
+        assert!(failed.contains("Ctrl+R: retry") && !failed.contains("old-row"));
+        assert!(!failed.contains("No topics found."));
+        assert!(
+            !app.sns_state.inventory.is_busy(),
+            "Never retry automatically"
+        );
+        assert_eq!(app.mode, Mode::Normal);
+
+        app.handle_action(Action::Refresh);
+        assert!(app.sns_state.inventory.is_pending());
+        assert!(!screen(&app).contains(heading));
+        assert!(finish(&mut app, Ok(vec![])).await);
+        let empty = screen(&app);
+        assert!(empty.contains("No topics found.") && empty.contains('✓'));
+        assert!(!empty.contains("Read failed"));
+
+        assert!(finish(&mut app, Ok(vec![topic("fresh-row")])).await);
+        app.sns_state.topics.filter = "does-not-match".into();
+        let filtered = screen(&app);
+        assert!(filtered.contains("No matching results. Clear or change the filter."));
+        assert!(!filtered.contains("No topics found."));
+        app.sns_state.topics.filter.clear();
+        assert!(screen(&app).contains("fresh-row"));
+    }
+}

@@ -118,6 +118,10 @@ pub fn render_topics(frame: &mut Frame, app: &App, area: Rect) {
         state.load_status(),
         "Topics",
         state.inventory_error.as_deref(),
+        crate::ui::loading::EmptyState {
+            no_items: "No topics found.",
+            has_unfiltered_items: !state.topics.items.is_empty(),
+        },
     );
 }
 

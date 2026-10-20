@@ -16,7 +16,7 @@ use crate::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Clear, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
 };
 
 /// Strip control characters so a malformed AWS string cannot corrupt the TUI.
@@ -303,21 +303,6 @@ fn columns(view: &View) -> Vec<Box<dyn Column<Row>>> {
         .collect()
 }
 
-/// Empty-state message, reached only when the table section is Ready, so it is
-/// always a genuine empty or filtered-empty result — never a loading/failure
-/// stand-in.
-fn empty_message(view: &View) -> &'static str {
-    let data = view.data();
-    if !data.table.filter.is_empty() && !data.table.items.is_empty() {
-        return "No matching results";
-    }
-    match view.tab {
-        Tab::Aliases => "No aliases are associated with this key.",
-        Tab::Tags => "No tags are associated with this key.",
-        _ => "",
-    }
-}
-
 fn render_results(
     frame: &mut Frame,
     app: &App,
@@ -345,9 +330,8 @@ fn render_results(
             area: parts[0],
         },
     );
-    let empty = prepared.items.is_empty();
     let table_columns = columns(view);
-    if render_table(
+    render_table(
         frame,
         TableConfig {
             items: prepared.items,
@@ -374,20 +358,13 @@ fn render_results(
         data.section_status(loading),
         view.tab.name(),
         data.error.as_deref(),
-    ) {
-        return;
-    }
-    if empty && parts[1].height > 3 && parts[1].width > 2 {
-        let inner = Rect {
-            x: parts[1].x + 1,
-            y: parts[1].y + 2,
-            width: parts[1].width - 2,
-            height: parts[1].height - 3,
-        };
-        frame.render_widget(Clear, inner);
-        frame.render_widget(
-            Paragraph::new(empty_message(view)).wrap(Wrap { trim: false }),
-            inner,
-        );
-    }
+        ui::loading::EmptyState {
+            no_items: match view.tab {
+                Tab::Aliases => "No aliases are associated with this key.",
+                Tab::Tags => "No tags are associated with this key.",
+                _ => unreachable!("only alias and tag tabs render results"),
+            },
+            has_unfiltered_items: !data.table.items.is_empty(),
+        },
+    );
 }

@@ -1,5 +1,8 @@
 //! A request state replaces data in the affected pane. It never overlays stale
 //! rows or claims an empty result before a successful read.
+mod messages;
+pub(crate) use messages::{failure_text, EmptyState};
+
 use crate::async_read::ReadStatus;
 use ratatui::{
     prelude::*,
@@ -34,17 +37,7 @@ pub(crate) fn render(
         ReadStatus::Idle => (error.unwrap_or("Not loaded").into(), Style::default()),
         // The tab owns the spinner; the status bar owns elapsed time and hints.
         ReadStatus::Loading { .. } => ("Loading…".into(), Style::default()),
-        ReadStatus::Failed => {
-            let error: String = error
-                .unwrap_or("The read did not complete successfully")
-                .chars()
-                .map(|c| if c.is_control() { ' ' } else { c })
-                .collect();
-            (
-                format!("Read failed: {error}\nCtrl+R: retry  Esc: back"),
-                Style::default().fg(Color::Red),
-            )
-        }
+        ReadStatus::Failed => (failure_text(error), Style::default().fg(Color::Red)),
     };
     frame.render_widget(
         Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
@@ -61,8 +54,10 @@ pub(crate) fn render_table<T>(
     status: ReadStatus,
     label: &str,
     error: Option<&str>,
+    empty_state: EmptyState<'_>,
 ) -> bool {
     let area = config.area;
+    let is_empty = config.items.is_empty();
     if status != ReadStatus::Ready {
         config.items.clear();
         config.expanded_index = None;
@@ -70,18 +65,20 @@ pub(crate) fn render_table<T>(
     }
     super::table::render_table(frame, config);
     if area.width > 2 && area.height > 3 {
-        render(
-            frame,
-            Rect {
-                x: area.x + 1,
-                y: area.y + 2,
-                width: area.width - 2,
-                height: area.height - 3,
-            },
-            status,
-            label,
-            error,
-        );
+        let body = Rect {
+            x: area.x + 1,
+            y: area.y + 2,
+            width: area.width - 2,
+            height: area.height - 3,
+        };
+        if status == ReadStatus::Ready && is_empty {
+            frame.render_widget(
+                Paragraph::new(empty_state.text()).wrap(Wrap { trim: false }),
+                body,
+            );
+        } else {
+            render(frame, body, status, label, error);
+        }
     }
     status != ReadStatus::Ready
 }
@@ -221,6 +218,10 @@ mod tests {
                             status,
                             "Topics",
                             Some("AccessDenied"),
+                            EmptyState {
+                                no_items: "No topics found.",
+                                has_unfiltered_items: true,
+                            },
                         ));
                     })
                     .unwrap();

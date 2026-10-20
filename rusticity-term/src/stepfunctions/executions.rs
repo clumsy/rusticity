@@ -587,7 +587,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: state.input_focus == InputFocus::Pagination,
         },
     );
-    let empty = view.items.is_empty();
     let columns: Vec<_> = state
         .visible_column_ids
         .iter()
@@ -598,7 +597,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .into_iter()
         .map(Column::into_table_column)
         .collect();
-    if render_table(
+    render_table(
         frame,
         TableConfig {
             items: view.items,
@@ -615,27 +614,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         state.read_status(),
         "Executions",
         state.error.as_deref(),
-    ) {
-        return;
-    }
-    if empty && sections[1].height > 3 && sections[1].width > 2 {
-        // Reached only when the read is Ready, so this is a genuine empty or
-        // filtered-empty result, never a stand-in for loading or failure.
-        let message = if !state.table.items.is_empty() {
-            "No matching executions"
-        } else {
-            "No executions for this state machine"
-        };
-        frame.render_widget(
-            Paragraph::new(message),
-            Rect {
-                x: sections[1].x + 1,
-                y: sections[1].y + 2,
-                width: sections[1].width - 2,
-                height: sections[1].height - 3,
-            },
-        );
-    }
+        ui::loading::EmptyState {
+            no_items: "No executions for this state machine",
+            has_unfiltered_items: !state.table.items.is_empty(),
+        },
+    );
 }
 
 #[cfg(test)]

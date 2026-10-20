@@ -288,6 +288,9 @@ async fn empty_success_and_denied_reads_are_distinct_and_refresh_clears_previous
     assert!(app.sns_state.subscriptions.table.items.is_empty());
     let failed = screen(&app, 240, 40);
     assert!(failed.contains("Read failed") && failed.contains("expired"));
+    assert!(failed.contains("credentials expired") && failed.contains("Renew the credentials"));
+    assert!(failed.contains("Ctrl+R: retry"));
+    assert!(!app.sns_state.subscriptions.read.is_pending());
     assert!(!failed.contains("user000"));
     assert!(!failed.contains("previously loaded"));
 }

@@ -175,6 +175,14 @@ async fn errors_refresh_and_context_changes_never_retarget_a_captured_command() 
     finish(&mut app, id, Err("ExpiredToken\x1b".into())).await;
     assert!(view(&app).failed);
     assert!(!view(&app).text.contains('\x1b'));
+    let error_screen = screen(&app, 240, 35).0;
+    assert!(error_screen.contains("credentials expired"));
+    assert!(error_screen.contains("Renew the credentials for this profile"));
+    assert!(error_screen.contains("Ctrl+R: retry"));
+    assert!(
+        !view(&app).read.is_pending(),
+        "No automatic credential retry"
+    );
     let args = view(&app).invocation.as_ref().unwrap().args.clone();
     press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     assert!(view(&app).read.is_pending());

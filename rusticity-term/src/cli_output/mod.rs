@@ -296,7 +296,7 @@ pub async fn poll(app: &mut App) -> bool {
                     view.failed = false;
                 }
                 Err(error) => {
-                    view.text = run::clean(&error);
+                    view.text = ui::loading::failure_text(Some(&run::clean(&error)));
                     view.failed = true;
                 }
             }

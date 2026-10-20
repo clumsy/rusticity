@@ -106,6 +106,13 @@ impl CyclicEnum for Tab {
 }
 
 impl Tab {
+    fn includes_key(self, key: &KmsKey) -> bool {
+        match self {
+            Self::AwsManaged => key.key_manager == "Aws",
+            Self::CustomerManaged => key.key_manager == "Customer",
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Tab::AwsManaged => "AWS managed keys",
@@ -115,17 +122,12 @@ impl Tab {
 }
 
 pub fn filtered_kms_keys(app: &App) -> Vec<&KmsKey> {
-    let tab_filter: Box<dyn Fn(&&KmsKey) -> bool> = match app.kms_state.tab {
-        Tab::AwsManaged => Box::new(|k: &&KmsKey| k.key_manager == "Aws"),
-        Tab::CustomerManaged => Box::new(|k: &&KmsKey| k.key_manager == "Customer"),
-    };
-
     let text_filter = TextFilter::new(&app.kms_state.keys.filter);
     app.kms_state
         .keys
         .items
         .iter()
-        .filter(|k| tab_filter(k))
+        .filter(|k| app.kms_state.tab.includes_key(k))
         .filter(|k| text_filter.matches_any([&k.alias, &k.key_id, &k.description]))
         .collect()
 }
@@ -203,6 +205,18 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
         app.kms_state.load_status(),
         app.kms_state.tab.name(),
         app.kms_state.inventory_error.as_deref(),
+        crate::ui::loading::EmptyState {
+            no_items: match app.kms_state.tab {
+                Tab::AwsManaged => "No AWS managed keys found.",
+                Tab::CustomerManaged => "No customer managed keys found.",
+            },
+            has_unfiltered_items: app
+                .kms_state
+                .keys
+                .items
+                .iter()
+                .any(|key| app.kms_state.tab.includes_key(key)),
+        },
     );
 }
 

@@ -150,8 +150,11 @@ the status bar's message area. Switching or opening another tab does not cancel 
 originating tab's read. Closing its tab,
 explicit cancellation, a superseding refresh, or an AWS-context change does.
 Refresh immediately removes old results; a failed read shows an error, not cached
-data. The checkmark means the latest request completed, not that AWS is continuously
-live. Other service readers have not yet been migrated to this loading lifecycle.
+data. Successful empty collections and filters hiding all rows have distinct
+messages. Recognized permission and expired-credential errors include recovery
+guidance; retries remain manual with `Ctrl+R`. The checkmark means the latest
+request completed, not that AWS is continuously live. Other service readers have
+not yet been migrated to this loading lifecycle.
 
 ## Development
 

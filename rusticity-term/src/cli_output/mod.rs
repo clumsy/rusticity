@@ -2,8 +2,10 @@
 mod run;
 use crate::{
     app::{App, Service, Tab},
+    async_read::{AsyncRead, ReadScope, ReadStatus},
     cli_command::{self, Invocation},
     keymap::{Action, Mode},
+    tab_runtime::TabId,
     ui,
 };
 use crossterm::event::KeyEvent;
@@ -12,36 +14,64 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 use std::collections::BTreeMap;
-use tokio::task::JoinHandle;
 
-struct Running(JoinHandle<Result<String, String>>);
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
 #[derive(Default)]
 pub struct State {
     views: BTreeMap<u64, View>,
     next_id: u64,
 }
 struct View {
+    /// The stable identity of the TAB this output belongs to, allocated before
+    /// the tab is built. A background completion is accepted only against this
+    /// owner, never against whichever tab currently has focus.
+    owner: TabId,
     invocation: Option<Invocation>,
     text: String,
     failed: bool,
     scroll: usize,
     lines: usize,
-    scope: String,
-    pending: bool,
-    running: Option<Running>,
+    read: AsyncRead<String>,
 }
 impl State {
+    pub(crate) fn retain_tabs(&mut self, tabs: &[Tab]) {
+        self.views.retain(|id, view| {
+            tabs.iter()
+                .any(|tab| tab.id == view.owner && tab.service == Service::CliOutput(*id))
+        });
+    }
     pub fn busy(&self) -> bool {
-        self.views
-            .values()
-            .any(|v| v.pending || v.running.is_some())
+        self.views.values().any(|v| v.read.is_busy())
+    }
+    /// View-facing read state for one output tab, so the parent's status worker
+    /// can report a CLI tab without reaching into its private fields. A failed
+    /// capture reports Failed; otherwise the shared read's status drives it.
+    pub(crate) fn status_for(&self, output_id: u64) -> ReadStatus {
+        match self.views.get(&output_id) {
+            Some(view) if view.failed => ReadStatus::Failed,
+            Some(view) => view.read.status(),
+            None => ReadStatus::Idle,
+        }
     }
 }
+/// Invalidate before drawing a frame with a changed AWS identity.
+pub(crate) fn invalidate_context(app: &mut App) {
+    let context = ReadScope::from_app(app, "").with_owner(None);
+    for view in app.cli_output.views.values_mut() {
+        let scope = context.clone().with_owner(Some(view.owner));
+        if !view.read.matches_scope(&scope) {
+            view.read.request(scope);
+            view.read.cancel();
+            view.invocation = None;
+            view.text =
+                "AWS context changed. Close this tab and open CLI output from the current service."
+                    .into();
+            view.failed = true;
+            view.scroll = 0;
+            view.lines = 1;
+        }
+    }
+}
+
 pub fn active(app: &App) -> bool {
     matches!(app.current_service, Service::CliOutput(_))
 }
@@ -51,16 +81,13 @@ fn active_id(app: &App) -> Option<u64> {
         _ => None,
     }
 }
-fn scope(app: &App) -> String {
-    format!(
-        "{:?}",
-        (
-            &app.profile,
-            &app.config.region,
-            &app.config.account_id,
-            &app.config.role_arn
-        )
-    )
+/// AWS-identity fingerprint for a CLI output tab, pinned to the tab that OWNS
+/// it rather than the currently-focused tab. A CLI tab is scoped to the
+/// invocation it captured on open (empty resource), so AWS identity plus this
+/// owner decide whether the captured command is still valid — switching focus
+/// to another tab never invalidates it.
+fn scope_for(app: &App, owner: TabId) -> ReadScope {
+    ReadScope::from_app(app, "").with_owner(Some(owner))
 }
 fn open(app: &mut App) {
     let result = cli_command::invocation(app);
@@ -75,18 +102,30 @@ fn open(app: &mut App) {
     };
     app.cli_output.next_id += 1;
     let id = app.cli_output.next_id;
+    // Allocate the owning tab's stable identity BEFORE building the view, so the
+    // view can be scoped to its own tab and a later focus change to a sibling
+    // tab never invalidates this one. The same id goes onto the Tab literal.
+    let owner = TabId::new();
+    // Every view records its open-time scope (pinned to its owner) so a later
+    // AWS-identity change is detected. A supported command queues a read; an
+    // unsupported one stays idle but keeps the scope (so it is not spuriously
+    // flagged "context changed").
+    let mut read = AsyncRead::requested(scope_for(app, owner));
+    if invocation.is_none() {
+        read.cancel();
+    }
     let view = View {
-        pending: invocation.is_some(),
+        owner,
         invocation,
         text,
         failed,
         scroll: 0,
         lines: 1,
-        scope: scope(app),
-        running: None,
+        read,
     };
     app.cli_output.views.insert(id, view);
     app.tabs.push(Tab {
+        id: owner,
         service: Service::CliOutput(id),
         title: format!("CLI · {source_name}"),
         breadcrumb: format!("CLI output · {source_name}"),
@@ -154,15 +193,24 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
         | Action::ShowHelp => return false,
         _ => {}
     }
-    let context_matches = app
+    // Compare against the ACTIVE view's own owner, not the focused tab, so only
+    // an AWS-identity change (not a focus change) counts as "context changed".
+    let current_scope = app
         .cli_output
         .views
         .get(&id)
-        .is_some_and(|view| view.scope == scope(app));
+        .map(|view| scope_for(app, view.owner));
+    let context_matches = current_scope
+        .as_ref()
+        .zip(app.cli_output.views.get(&id))
+        .is_some_and(|(scope, view)| view.read.matches_scope(scope));
+    let Some(current_scope) = current_scope else {
+        return true;
+    };
     let Some(view) = app.cli_output.views.get_mut(&id) else {
         return true;
     };
-    let busy = view.pending || view.running.is_some();
+    let busy = view.read.is_busy();
     let max = view.lines.saturating_sub(1);
     match action {
         Action::NextItem | Action::ScrollDown => {
@@ -182,8 +230,10 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             if !context_matches {
                 return true;
             }
-            view.running = None;
-            view.pending = true;
+            // Supersede any in-flight/finished read and re-queue the captured
+            // invocation; the view clears its old text/loading state exactly as
+            // before, and poll() starts the subprocess next cycle.
+            view.read.request(current_scope);
             view.text = "Loading CLI JSON… Ctrl+W closes/cancels".into();
             view.failed = false;
             view.scroll = 0;
@@ -195,7 +245,10 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
 }
 
 pub async fn poll(app: &mut App) -> bool {
-    let current_scope = scope(app);
+    // One AWS-identity snapshot (owner unset); each view re-owns it with its own
+    // tab id below, so a background completion is matched to the tab that opened
+    // it and a focus change to a sibling tab never invalidates anything.
+    let base_scope = ReadScope::from_app(app, "").with_owner(None);
     let ids: Vec<u64> = app
         .tabs
         .iter()
@@ -209,9 +262,14 @@ pub async fn poll(app: &mut App) -> bool {
     state.views.retain(|id, _| ids.contains(id));
     let mut changed = state.views.len() != before;
     for view in state.views.values_mut() {
-        if view.scope != current_scope {
-            view.running = None;
-            view.pending = false;
+        // This view's current scope = the AWS snapshot re-owned by its own tab.
+        let current_scope = base_scope.clone().with_owner(Some(view.owner));
+        if !view.read.matches_scope(&current_scope) {
+            // AWS context changed: invalidate, clear the captured invocation and
+            // show the context-changed message. No automatic rerun — re-point the
+            // read's scope to the current one (idle) so it is not flagged again.
+            view.read.request(current_scope.clone());
+            view.read.cancel();
             view.invocation = None;
             view.text =
                 "AWS context changed. Close this tab and open CLI output from the current service."
@@ -219,27 +277,19 @@ pub async fn poll(app: &mut App) -> bool {
             view.failed = true;
             view.scroll = 0;
             view.lines = 1;
-            view.scope = current_scope.clone();
             changed = true;
         }
-        if view.pending {
-            view.pending = false;
+        // Spawn only when a request is queued; no AWS on the input path.
+        if view.read.is_pending() {
             if let Some(invocation) = &view.invocation {
                 let args = invocation.args.clone();
-                view.running = Some(Running(tokio::spawn(run::run(args))));
-                changed = true;
+                changed |= view.read.start(run::run(args));
             }
         }
-        if view
-            .running
-            .as_ref()
-            .is_some_and(|running| running.0.is_finished())
-        {
-            let mut running = view.running.take().unwrap();
-            let result = match (&mut running.0).await {
-                Ok(result) => result,
-                Err(error) => Err(format!("CLI task failed: {error}")),
-            };
+        if let Some(result) = view.read.take_ready(&current_scope).await {
+            // Preserve the view's own prefix for a crashed/cancelled task and its
+            // own display sanitization of the message.
+            let result = result.map_err(|error| error.into_message("CLI task failed"));
             match result {
                 Ok(text) => {
                     view.text = text;
@@ -280,12 +330,7 @@ pub fn render(frame: &mut Frame, app: &App, id: u64, area: Rect) {
     );
     if view.failed {
         ui::render_plain_text(frame, panels[1], &view.text, view.scroll, "CLI error", true);
-    } else if view.pending || view.running.is_some() {
-        frame.render_widget(
-            Paragraph::new(&*view.text).block(ui::titled_block("CLI output")),
-            panels[1],
-        );
-    } else {
+    } else if !view.read.is_busy() {
         ui::render_json_highlighted(
             frame,
             panels[1],

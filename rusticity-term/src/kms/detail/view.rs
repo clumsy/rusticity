@@ -2,14 +2,15 @@
 //! ribbon, filter bar, table and JSON renderer as the other detail services.
 use super::*;
 use crate::{
+    async_read::ReadStatus,
     common::{render_pagination_text, SortDirection},
-    kms::key,
     table::TableWindow,
     ui::{
         self,
         filter::{render_filter_bar, FilterConfig, FilterControl},
+        loading::render_table,
         render_json_highlighted,
-        table::{render_table, Column, TableConfig},
+        table::{Column, TableConfig},
         Summary,
     },
 };
@@ -44,18 +45,15 @@ fn key_state_color(state: &str) -> Color {
 }
 
 /// General configuration fields. Prefer the fresh DescribeKey metadata once
-/// loaded; fall back to the cloned list snapshot so the pane is populated on
-/// entry before the fetch returns.
-fn general_fields(
-    source: &key::Key,
-    meta: Option<&rusticity_core::kms::KmsKey>,
-) -> Vec<(&'static str, String)> {
+/// General configuration fields from the fresh DescribeKey metadata ONLY. This
+/// is called exclusively when the General section is Ready, so mutable fields
+/// never fall back to the stale cloned list snapshot.
+fn general_fields(meta: &rusticity_core::kms::KmsKey) -> Vec<(&'static str, String)> {
     macro_rules! field {
         ($f:ident) => {
-            meta.map(|m| m.$f.as_str()).unwrap_or(source.$f.as_str())
+            meta.$f.as_str()
         };
     }
-    let multi_region = meta.map(|m| m.multi_region).unwrap_or(source.multi_region);
     vec![
         ("Key ID", value(field!(key_id))),
         ("ARN", value(field!(key_arn))),
@@ -67,7 +65,7 @@ fn general_fields(
         ("Origin", value(field!(origin))),
         (
             "Regionality",
-            if multi_region {
+            if meta.multi_region {
                 "Multi-Region".into()
             } else {
                 "Single-Region".into()
@@ -143,17 +141,29 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let (Some(source), Some(view)) = (state.source.as_ref(), state.view()) else {
         return false;
     };
-    // Shared content-sized, max-three-column Details summary.
-    let live_state = view
-        .metadata()
-        .map(|meta| meta.key_state.as_str())
-        .unwrap_or(&source.key_state);
+    let loading = state.loading_status();
+    // Header shows the entered key's IDENTITY only (alias + key id), which the
+    // initial snapshot owns. Status comes strictly from the fresh DescribeKey:
+    // before it arrives (or if General failed) it is shown as unknown, never the
+    // stale list-snapshot state.
+    let status_field = match view.general_status(loading) {
+        ReadStatus::Ready => {
+            let s = view
+                .metadata()
+                .map(|m| m.key_state.as_str())
+                .unwrap_or("-")
+                .to_string();
+            ui::labeled_field_colored("Status", value(&s), key_state_color(&s))
+        }
+        ReadStatus::Failed => ui::labeled_field("Status", "unavailable".to_string()),
+        _ => ui::labeled_field("Status", "…".to_string()),
+    };
     let summary = Summary::new(
         "Details",
         vec![
             ui::labeled_field("Alias", value(&source.alias)),
             ui::labeled_field("Key ID", value(&source.key_id)),
-            ui::labeled_field_colored("Status", value(live_state), key_state_color(live_state)),
+            status_field,
         ],
     );
     let ribbons = ribbon_rows(area.width);
@@ -179,45 +189,60 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) -> bool {
         }
     }
     let body = chunks[2];
-    let live_state = view
-        .metadata()
-        .map(|m| m.key_state.as_str())
-        .unwrap_or(source.key_state.as_str())
-        .to_string();
     match view.tab {
-        Tab::General => render_summary_pane(
-            frame,
-            app,
-            body,
-            "General configuration",
-            general_fields(source, view.metadata()),
-            view.data().error.as_deref(),
-            Some(("Status", key_state_color(&live_state))),
-        ),
-        Tab::Rotation => render_summary_pane(
-            frame,
-            app,
-            body,
-            "Key rotation",
-            rotation_fields(view.rotation()),
-            view.data().error.as_deref(),
-            None,
-        ),
-        Tab::Policy => render_policy(frame, app, view, body),
-        Tab::Aliases | Tab::Tags => render_results(frame, app, view, body),
+        Tab::General => {
+            // Each section gates on its OWN status: a loading/failed/idle General
+            // consumes the pane and shows no stale fields; only Ready renders the
+            // fresh metadata.
+            if ui::loading::render(
+                frame,
+                body,
+                view.general_status(loading),
+                "key details",
+                view.general_error(),
+            ) {
+                return true;
+            }
+            let meta = view.metadata().expect("General Ready implies metadata");
+            render_summary_pane(
+                frame,
+                body,
+                "General configuration",
+                general_fields(meta),
+                Some(("Status", key_state_color(&meta.key_state))),
+            );
+        }
+        Tab::Rotation => {
+            if ui::loading::render(
+                frame,
+                body,
+                view.rotation_status(loading),
+                "key rotation",
+                view.rotation_error(),
+            ) {
+                return true;
+            }
+            render_summary_pane(
+                frame,
+                body,
+                "Key rotation",
+                rotation_fields(view.rotation()),
+                None,
+            );
+        }
+        Tab::Policy => render_policy(frame, view, loading, body),
+        Tab::Aliases | Tab::Tags => render_results(frame, app, view, loading, body),
     }
     true
 }
 
-/// A labeled summary pane (General/Rotation) plus an inline freshness/error
-/// notice, mirroring ECR's General tab.
+/// A labeled summary pane (General/Rotation). Rendered only when the section is
+/// Ready, so it never carries a stale-value notice.
 fn render_summary_pane(
     frame: &mut Frame,
-    app: &App,
-    mut body: Rect,
+    body: Rect,
     title: &str,
     fields: Vec<(&'static str, String)>,
-    error: Option<&str>,
     colored: Option<(&str, Color)>,
 ) {
     let lines = fields
@@ -227,56 +252,35 @@ fn render_summary_pane(
             _ => ui::labeled_field(label, text),
         })
         .collect();
-    if let Some(notice) = error.map(clean).or_else(|| {
-        app.kms_state
-            .detail
-            .busy()
-            .then(|| "Loading… (showing last known values)".into())
-    }) {
-        let parts = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(body);
-        frame.render_widget(
-            Paragraph::new(notice)
-                .style(Style::default().fg(Color::Yellow))
-                .wrap(Wrap { trim: false }),
-            parts[0],
-        );
-        body = parts[1];
-    }
     Summary::new(title, lines).render(frame, body);
 }
 
 /// Read-only key policy: shared JSON renderer, plain fallback when the document
 /// is not JSON-shaped, scrollable, no editor and no writes.
-fn render_policy(frame: &mut Frame, app: &App, view: &View, mut area: Rect) {
-    let data = view.data();
-    if let Some(policy) = view.policy() {
-        if let Some(notice) = data.error.as_deref().map(clean).or_else(|| {
-            app.kms_state
-                .detail
-                .busy()
-                .then(|| "Refreshing… showing last known policy".into())
-        }) {
-            let parts = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
-            frame.render_widget(
-                Paragraph::new(notice)
-                    .style(Style::default().fg(Color::Yellow))
-                    .wrap(Wrap { trim: false }),
-                parts[0],
-            );
-            area = parts[1];
-        }
-        render_json_highlighted(frame, area, policy, view.policy_scroll, "Key policy", true);
+fn render_policy(frame: &mut Frame, view: &View, loading: Option<ReadStatus>, area: Rect) {
+    // Loading/failure/idle consume the pane; the previous policy is never shown
+    // during a reload or after a failed one. Only Ready renders the JSON.
+    if ui::loading::render(
+        frame,
+        area,
+        view.policy_status(loading),
+        "key policy",
+        view.policy_error(),
+    ) {
         return;
     }
-    // No policy loaded — show the per-section error, or a loading/empty notice.
-    let message = if let Some(error) = &data.error {
-        format!("Key policy unavailable: {}", clean(error))
-    } else if app.kms_state.detail.busy() || !data.loaded {
-        "Loading key policy…".into()
-    } else {
-        "No key policy returned by AWS.".into()
-    };
-    frame.render_widget(Paragraph::new(message).wrap(Wrap { trim: false }), area);
+    match view.policy() {
+        Some(policy) => {
+            render_json_highlighted(frame, area, policy, view.policy_scroll, "Key policy", true)
+        }
+        // Ready with no policy document: AWS returned none for this key.
+        None => frame.render_widget(
+            Paragraph::new("No key policy returned by AWS.")
+                .wrap(Wrap { trim: false })
+                .block(ui::titled_block("Key policy")),
+            area,
+        ),
+    }
 }
 
 /// Shared column adapter for a detail-table tab, driven by the Tab schema and
@@ -299,17 +303,11 @@ fn columns(view: &View) -> Vec<Box<dyn Column<Row>>> {
         .collect()
 }
 
-fn empty_message(view: &View, busy: bool) -> &'static str {
-    if busy {
-        return "Loading…";
-    }
+/// Empty-state message, reached only when the table section is Ready, so it is
+/// always a genuine empty or filtered-empty result — never a loading/failure
+/// stand-in.
+fn empty_message(view: &View) -> &'static str {
     let data = view.data();
-    if data.error.is_some() {
-        return "Results unavailable — see warning above; Ctrl+R retries.";
-    }
-    if !data.loaded {
-        return "Not loaded";
-    }
     if !data.table.filter.is_empty() && !data.table.items.is_empty() {
         return "No matching results";
     }
@@ -320,25 +318,14 @@ fn empty_message(view: &View, busy: bool) -> &'static str {
     }
 }
 
-fn render_results(frame: &mut Frame, app: &App, view: &View, mut area: Rect) {
+fn render_results(
+    frame: &mut Frame,
+    app: &App,
+    view: &View,
+    loading: Option<ReadStatus>,
+    area: Rect,
+) {
     let data = view.data();
-    // A per-section error shows as a visible warning above the table; the last
-    // successful rows (if any) stay rendered below it, visibly stale.
-    if let Some(error) = data.error.as_deref().map(str::to_string).or_else(|| {
-        app.kms_state
-            .detail
-            .busy()
-            .then(|| "Refreshing… showing last known rows".into())
-    }) {
-        let parts = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
-        frame.render_widget(
-            Paragraph::new(format!("Warning: {}", clean(&error)))
-                .style(Style::default().fg(Color::Yellow))
-                .wrap(Wrap { trim: false }),
-            parts[0],
-        );
-        area = parts[1];
-    }
     let parts = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let prepared = data
         .table
@@ -360,7 +347,7 @@ fn render_results(frame: &mut Frame, app: &App, view: &View, mut area: Rect) {
     );
     let empty = prepared.items.is_empty();
     let table_columns = columns(view);
-    render_table(
+    if render_table(
         frame,
         TableConfig {
             items: prepared.items,
@@ -384,7 +371,12 @@ fn render_results(frame: &mut Frame, app: &App, view: &View, mut area: Rect) {
             })),
             is_active: app.mode == Mode::Normal,
         },
-    );
+        data.section_status(loading),
+        view.tab.name(),
+        data.error.as_deref(),
+    ) {
+        return;
+    }
     if empty && parts[1].height > 3 && parts[1].width > 2 {
         let inner = Rect {
             x: parts[1].x + 1,
@@ -394,8 +386,7 @@ fn render_results(frame: &mut Frame, app: &App, view: &View, mut area: Rect) {
         };
         frame.render_widget(Clear, inner);
         frame.render_widget(
-            Paragraph::new(empty_message(view, app.kms_state.detail.busy()))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(empty_message(view)).wrap(Wrap { trim: false }),
             inner,
         );
     }

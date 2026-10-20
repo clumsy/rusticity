@@ -1,11 +1,13 @@
 //! KMS key detail page with a cancelable, read-only detail read on entry.
 //!
 //! One bounded read returns independent section results for all five tabs.
-//! Successful data stays visible during refresh; failed sections are explicitly
-//! marked stale rather than shown as a misleading empty result.
-//! Reads only — no key edits, policy edits or rotation writes.
+//! A refresh clears every section immediately; nothing stale is ever shown
+//! during a reload or after a failed one. A failed section shows an explicit
+//! error, never the previous successful data and never a misleading empty
+//! result. Reads only — no key edits, policy edits or rotation writes.
 use crate::{
     app::{App, Service},
+    async_read::{AsyncRead, ReadScope, ReadStatus},
     common::{CyclicEnum, InputFocus},
     keymap::{Action, Mode},
     kms::key::Key,
@@ -15,7 +17,6 @@ use rusticity_core::{
     kms::detail::{KmsAlias, KmsKeyDetail, KmsRotation, KmsTag},
     KmsClient,
 };
-use tokio::task::JoinHandle;
 
 mod input;
 mod view;
@@ -94,6 +95,7 @@ impl Row {
 
 /// Per-tab mutable UI + load state. `loaded` distinguishes "not fetched yet"
 /// from "fetched and empty"; `error` carries a per-section failure message.
+/// A section never retains data behind an error: a failed section is cleared.
 #[derive(Default)]
 pub struct TabData {
     loaded: bool,
@@ -116,21 +118,50 @@ impl TabData {
             row.0.iter().map(|(_, value)| value.as_str())
         })
     }
+
+    /// This section's own render state, given the shared read's status while a
+    /// fetch is in flight. A section that succeeded is Ready even when another
+    /// section failed; a failed section is Failed (its error is shown, never
+    /// stale data); a not-yet-loaded section is Idle.
+    pub(crate) fn section_status(&self, loading: Option<ReadStatus>) -> ReadStatus {
+        if let Some(loading) = loading {
+            loading
+        } else if self.error.is_some() {
+            ReadStatus::Failed
+        } else if self.loaded {
+            ReadStatus::Ready
+        } else {
+            ReadStatus::Idle
+        }
+    }
+
+    /// Reset a section to "not loaded" with no data or error. Column
+    /// preferences and the filter string survive; the rows do not.
+    fn clear(&mut self) {
+        self.loaded = false;
+        self.error = None;
+        self.table.items.clear();
+        self.table.reset();
+    }
 }
 
 /// The open detail view. `source` is a cloned snapshot of the selected key so
 /// the view is stable even if the parent inventory selection or filter changes.
 pub struct View {
     pub tab: Tab,
-    /// Authoritative metadata from the fresh DescribeKey, preferred over the
-    /// cloned list snapshot once loaded.
+    /// Authoritative metadata from the fresh DescribeKey. The General pane shows
+    /// ONLY the initial key-identity snapshot (key id/ARN/alias) before this
+    /// arrives, never the stale list metadata for mutable fields.
     metadata: Option<rusticity_core::kms::KmsKey>,
+    general_error: Option<String>,
     /// Summary metadata panes (General, Rotation) + policy JSON are stored
     /// alongside the per-tab tables; aliases/tags live in `tabs`.
     rotation: Option<KmsRotation>,
     rotation_loaded: bool,
+    rotation_error: Option<String>,
     policy: Option<String>,
     policy_loaded: bool,
+    policy_error: Option<String>,
     pub(crate) policy_scroll: usize,
     tabs: [TabData; 5],
 }
@@ -155,21 +186,73 @@ impl View {
     pub(crate) fn metadata(&self) -> Option<&rusticity_core::kms::KmsKey> {
         self.metadata.as_ref()
     }
+
+    /// The General summary pane's own render state, given the shared loading
+    /// status while a fetch runs. Failed shows the error with no stale fields.
+    pub(crate) fn general_status(&self, loading: Option<ReadStatus>) -> ReadStatus {
+        section_status(
+            loading,
+            self.general_error.is_some(),
+            self.metadata.is_some(),
+        )
+    }
+
+    pub(crate) fn rotation_status(&self, loading: Option<ReadStatus>) -> ReadStatus {
+        section_status(loading, self.rotation_error.is_some(), self.rotation_loaded)
+    }
+
+    pub(crate) fn policy_status(&self, loading: Option<ReadStatus>) -> ReadStatus {
+        section_status(loading, self.policy_error.is_some(), self.policy_loaded)
+    }
+
+    pub(crate) fn general_error(&self) -> Option<&str> {
+        self.general_error.as_deref()
+    }
+
+    pub(crate) fn rotation_error(&self) -> Option<&str> {
+        self.rotation_error.as_deref()
+    }
+
+    pub(crate) fn policy_error(&self) -> Option<&str> {
+        self.policy_error.as_deref()
+    }
+
+    /// Clear every section for a refresh: drop all fetched data and errors so
+    /// nothing stale survives into the reload. Only tab selection, per-tab
+    /// filter strings and column preferences are retained.
+    fn clear_all(&mut self) {
+        self.metadata = None;
+        self.general_error = None;
+        self.rotation = None;
+        self.rotation_loaded = false;
+        self.rotation_error = None;
+        self.policy = None;
+        self.policy_loaded = false;
+        self.policy_error = None;
+        self.policy_scroll = 0;
+        for data in &mut self.tabs {
+            data.clear();
+        }
+    }
+}
+
+/// Shared section-status rule: Loading while the shared read runs, else Failed
+/// on this section's error, else Ready once loaded, else Idle.
+fn section_status(loading: Option<ReadStatus>, has_error: bool, loaded: bool) -> ReadStatus {
+    if let Some(loading) = loading {
+        loading
+    } else if has_error {
+        ReadStatus::Failed
+    } else if loaded {
+        ReadStatus::Ready
+    } else {
+        ReadStatus::Idle
+    }
 }
 
 /// Output of an async section fetch, routed back to the right tab on completion.
 enum Output {
     Detail(Box<KmsKeyDetail>),
-}
-
-struct Running {
-    task: JoinHandle<Result<Output, String>>,
-}
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
 }
 
 /// `pub State` is the build interface the parent embeds at `app.kms_state.detail`.
@@ -178,15 +261,44 @@ pub struct State {
     /// `Some` when a key detail page is open.
     pub source: Option<Key>,
     view: Option<View>,
-    pending: bool,
-    running: Option<Running>,
-    scope: String,
+    read: AsyncRead<Output>,
 }
 
 impl State {
     /// True while a background section fetch is scheduled or in flight.
     pub fn busy(&self) -> bool {
-        self.pending || self.running.is_some()
+        self.read.is_busy()
+    }
+
+    /// The shared read's loading status while a fetch runs, else None. Section
+    /// renderers use it so every pane shows one consistent elapsed spinner.
+    pub(crate) fn loading_status(&self) -> Option<ReadStatus> {
+        self.read.is_busy().then(|| self.read.status())
+    }
+
+    /// Whole-page read state, never inferred from row counts. Loading while the
+    /// read runs; Failed if ANY section failed; Ready once the fetch completed
+    /// (metadata present); Idle when no key is entered. Specific sections may
+    /// still render Ready via their own `section_status` even when another
+    /// section failed.
+    pub(crate) fn read_status(&self) -> ReadStatus {
+        if self.read.is_busy() {
+            return self.read.status();
+        }
+        let Some(view) = self.view.as_ref() else {
+            return ReadStatus::Idle;
+        };
+        let any_error = view.general_error.is_some()
+            || view.rotation_error.is_some()
+            || view.policy_error.is_some()
+            || view.tabs.iter().any(|tab| tab.error.is_some());
+        if any_error {
+            ReadStatus::Failed
+        } else if view.metadata.is_some() {
+            ReadStatus::Ready
+        } else {
+            ReadStatus::Idle
+        }
     }
 
     /// Tear the detail page down and return to the parent inventory.
@@ -202,22 +314,18 @@ impl State {
         self.view.as_mut()
     }
 
-    /// Select a tab, retaining successful data and filters for other tabs. All
-    /// section data lives in one fetch, so switching tabs never reloads unless
-    /// an explicit refresh was requested.
-    fn activate(&mut self, tab: Tab, refresh: bool) {
+    /// Select a tab. Tab selection, per-tab filters and column preferences are
+    /// retained; a refresh clears ALL section data immediately so nothing stale
+    /// is shown during or after the reload.
+    fn activate(&mut self, tab: Tab, refresh: Option<ReadScope>) {
         let Some(view) = self.view.as_mut() else {
             return;
         };
         view.tab = tab;
-        if refresh {
-            // Keep successful data, filter/selection and preferences while a
-            // new read runs. Failed sections are marked stale on completion.
-            for data in &mut view.tabs {
-                data.error = None;
-            }
-            self.running = None;
-            self.pending = true;
+        if let Some(scope) = refresh {
+            view.clear_all();
+            // Supersede any in-flight/finished read, re-queueing the same scope.
+            self.read.request(scope);
         }
     }
 }
@@ -229,23 +337,19 @@ pub fn active(app: &App) -> bool {
         && app.kms_state.detail.source.is_some()
 }
 
-/// A stable fingerprint of the context the detail belongs to. When it changes —
-/// profile, region, account, role, or the user leaving KMS (except via the CLI
-/// output tabs) — the detail is torn down on the next poll with no late repaint.
-fn scope(app: &App) -> String {
-    format!(
-        "{:?}",
-        (
-            &app.profile,
-            &app.config.region,
-            &app.config.account_id,
-            &app.config.role_arn,
-            app.kms_state
-                .detail
-                .source
-                .as_ref()
-                .map(|k| k.key_arn.clone()),
-        )
+/// A stable fingerprint of the context the detail belongs to: AWS identity plus
+/// the entered key ARN, independent of the highlighted inventory row. When it
+/// changes — profile, region, account, role, or the entered key — the detail is
+/// invalidated on the next poll with no late repaint of stale data.
+fn scope(app: &App) -> ReadScope {
+    ReadScope::from_app(
+        app,
+        app.kms_state
+            .detail
+            .source
+            .as_ref()
+            .map(|k| k.key_arn.clone())
+            .unwrap_or_default(),
     )
 }
 
@@ -256,37 +360,26 @@ fn open(app: &mut App) {
     let Some(key) = app.kms_state.keys.get_selected(&filtered).cloned() else {
         return;
     };
-    let mut state = State {
+    // scope() reads app.kms_state.detail.source, which is not set yet; build the
+    // ReadScope from the same tuple against the key we just cloned.
+    let read_scope = ReadScope::from_app(app, key.key_arn.clone());
+    app.kms_state.detail = State {
         source: Some(key),
         view: Some(View {
             tab: Tab::General,
             metadata: None,
+            general_error: None,
             rotation: None,
             rotation_loaded: false,
+            rotation_error: None,
             policy: None,
             policy_loaded: false,
+            policy_error: None,
             policy_scroll: 0,
             tabs: std::array::from_fn(|index| TabData::new(Tab::ALL[index])),
         }),
-        pending: true,
-        running: None,
-        scope: String::new(),
+        read: AsyncRead::requested(read_scope),
     };
-    state.scope = {
-        // scope() reads app.kms_state.detail.source, which is not set yet; build
-        // it from the same tuple against the key we just cloned.
-        format!(
-            "{:?}",
-            (
-                &app.profile,
-                &app.config.region,
-                &app.config.account_id,
-                &app.config.role_arn,
-                state.source.as_ref().map(|k| k.key_arn.clone()),
-            )
-        )
-    };
-    app.kms_state.detail = state;
     app.update_current_tab_breadcrumb();
 }
 
@@ -317,6 +410,9 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
     if app.mode != Mode::Normal {
         return false;
     }
+    // The entered key fixes the read scope; compute it before the mutable borrow
+    // so a refresh can re-queue against it.
+    let read_scope = scope(app);
     let state = &mut app.kms_state.detail;
     let view = state.view.as_mut().unwrap();
     let tab = view.tab;
@@ -328,7 +424,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             } else {
                 tab.prev()
             };
-            state.activate(next, false);
+            state.activate(next, None);
             app.update_current_tab_breadcrumb();
         }
         Action::NextItem if tab.is_table() => view.data_mut().table.next_item(count),
@@ -362,7 +458,14 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             app.page_input.clear();
             app.mode = Mode::FilterInput;
         }
-        Action::Refresh => state.activate(tab, true),
+        Action::Refresh => {
+            if !state.read.matches_scope(&read_scope) {
+                state.close();
+                app.update_current_tab_breadcrumb();
+            } else {
+                state.activate(tab, Some(read_scope));
+            }
+        }
         // Preferences only exist for the table tabs; defer to the parent so the
         // shared column selector opens. Non-table tabs own `p` as a no-op defer.
         Action::OpenColumnSelector if tab.is_table() => return false,
@@ -407,67 +510,68 @@ pub async fn poll(app: &mut App) -> bool {
     }
     // Context moved out from under the detail (scope/profile/region/account/
     // role change, or left KMS): drop it with no late repaint of stale data.
+    // The detail-close is a view policy; `AsyncRead` only owns the read.
     if !app.service_selected
         || !matches!(
             app.current_service,
             Service::KmsKeys | Service::CliOutput(_)
         )
-        || app.kms_state.detail.scope != scope(app)
+        || !app.kms_state.detail.read.matches_scope(&scope(app))
     {
         app.kms_state.detail.close();
         app.update_current_tab_breadcrumb();
         return true;
     }
+    let read_scope = scope(app);
     let state = &mut app.kms_state.detail;
     let mut changed = false;
-    if state.pending {
-        state.pending = false;
+    // Do not clone request inputs or construct a read on idle poll cycles.
+    if state.read.is_pending() {
         let config = app.config.clone();
         let key_arn = state.source.as_ref().unwrap().key_arn.clone();
-        state.running = Some(Running {
-            task: tokio::spawn(async move {
-                let client = KmsClient::new(config);
-                client
-                    .key_details(&key_arn)
-                    .await
-                    .map(|detail| Output::Detail(Box::new(detail)))
-                    .map_err(|error| view::clean(&format!("{error:#}")))
-            }),
+        changed = state.read.start(async move {
+            let client = KmsClient::new(config);
+            client
+                .key_details(&key_arn)
+                .await
+                .map(|detail| Output::Detail(Box::new(detail)))
+                .map_err(|error| view::clean(&format!("{error:#}")))
         });
-        changed = true;
     }
-    if state
-        .running
-        .as_ref()
-        .is_some_and(|running| running.task.is_finished())
-    {
-        let mut running = state.running.take().unwrap();
-        let result = match (&mut running.task).await {
-            Ok(result) => result,
-            Err(error) => Err(format!(
-                "Read unavailable: {}",
-                view::clean(&error.to_string())
-            )),
+    if let Some(result) = state.read.take_ready(&read_scope).await {
+        // Preserve existing wording: the service error passes through verbatim
+        // (already sanitized when produced); a crashed/cancelled task keeps the
+        // "Read unavailable: …" prefix and is sanitized here.
+        let result = match result {
+            Ok(output) => Ok(output),
+            Err(error @ crate::async_read::ReadError::Service(_)) => {
+                Err(error.into_message("Read unavailable"))
+            }
+            Err(error @ crate::async_read::ReadError::Task(_)) => {
+                Err(view::clean(&error.into_message("Read unavailable")))
+            }
         };
         let view = state.view.as_mut().unwrap();
         match result {
             Ok(Output::Detail(detail)) => apply_detail(view, *detail),
             Err(error) => {
-                // A whole-detail failure shows on every section, but previously
-                // loaded data (if any) is retained and marked visibly stale.
+                // A whole-detail failure clears every section and shows the
+                // error on each: no previously loaded data is retained behind a
+                // failed read, and no section is left as a misleading empty.
+                view.metadata = None;
+                view.general_error = Some(error.clone());
+                view.rotation = None;
+                view.rotation_loaded = true;
+                view.rotation_error = Some(error.clone());
+                view.policy = None;
+                view.policy_loaded = true;
+                view.policy_error = Some(error.clone());
+                view.policy_scroll = 0;
                 for data in &mut view.tabs {
-                    if !data.loaded {
-                        data.error = Some(error.clone());
-                        data.loaded = true;
-                    } else {
-                        data.error = Some(format!("Stale — refresh failed: {error}"));
-                    }
-                }
-                if view.rotation.is_none() {
-                    view.rotation_loaded = true;
-                }
-                if view.policy.is_none() {
-                    view.policy_loaded = true;
+                    data.table.items.clear();
+                    data.table.reset();
+                    data.loaded = true;
+                    data.error = Some(error.clone());
                 }
             }
         }
@@ -476,17 +580,24 @@ pub async fn poll(app: &mut App) -> bool {
     changed
 }
 
-/// Fan one worker result out across the tab sections. Failed refreshes retain
-/// only data from the same entered key and clearly label it as stale.
+/// Fan one worker result out across the tab sections. Each section is replaced
+/// wholesale: a successful section shows fresh data, a failed section is cleared
+/// and shows its own error — never the previous data, never a misleading empty.
 fn apply_detail(view: &mut View, detail: KmsKeyDetail) {
     view.metadata = Some(detail.metadata);
+    view.general_error = None;
     let aliases = &mut view.tabs[Tab::Aliases as usize];
     match detail.aliases {
         Ok(items) => {
             aliases.error = None;
             aliases.table.items = items.iter().map(alias_row).collect();
+            aliases.table.reset();
         }
-        Err(error) => aliases.error = Some(section_error(aliases.loaded, error)),
+        Err(error) => {
+            aliases.error = Some(error);
+            aliases.table.items.clear();
+            aliases.table.reset();
+        }
     }
     aliases.loaded = true;
     let tags = &mut view.tabs[Tab::Tags as usize];
@@ -494,27 +605,29 @@ fn apply_detail(view: &mut View, detail: KmsKeyDetail) {
         Ok(items) => {
             tags.error = None;
             tags.table.items = items.iter().map(tag_row).collect();
+            tags.table.reset();
         }
-        Err(error) => tags.error = Some(section_error(tags.loaded, error)),
+        Err(error) => {
+            tags.error = Some(error);
+            tags.table.items.clear();
+            tags.table.reset();
+        }
     }
     tags.loaded = true;
-    let general = &mut view.tabs[Tab::General as usize];
-    general.loaded = true;
-    general.error = None;
-    let rotation_tab = &mut view.tabs[Tab::Rotation as usize];
     match detail.rotation {
         Ok(rotation) => {
-            rotation_tab.error = None;
+            view.rotation_error = None;
             view.rotation = Some(rotation);
         }
-        Err(error) => rotation_tab.error = Some(section_error(view.rotation.is_some(), error)),
+        Err(error) => {
+            view.rotation_error = Some(error);
+            view.rotation = None;
+        }
     }
-    rotation_tab.loaded = true;
     view.rotation_loaded = true;
-    let policy_tab = &mut view.tabs[Tab::Policy as usize];
     match detail.policy {
         Ok(policy) => {
-            policy_tab.error = None;
+            view.policy_error = None;
             // Pretty print valid JSON; retain readable text if AWS returns a
             // non-JSON document. Strip terminal controls but preserve newlines.
             let text = serde_json::from_str::<serde_json::Value>(&policy)
@@ -533,19 +646,13 @@ fn apply_detail(view: &mut View, detail: KmsKeyDetail) {
                     .collect(),
             );
         }
-        Err(error) => policy_tab.error = Some(section_error(view.policy.is_some(), error)),
+        Err(error) => {
+            view.policy_error = Some(error);
+            view.policy = None;
+        }
     }
-    policy_tab.loaded = true;
     view.policy_loaded = true;
     view.policy_scroll = view.policy_scroll.min(policy_max_scroll(view));
-}
-
-fn section_error(had_data: bool, error: String) -> String {
-    if had_data {
-        format!("Stale — refresh failed: {error}")
-    } else {
-        error
-    }
 }
 
 fn policy_max_scroll(view: &View) -> usize {

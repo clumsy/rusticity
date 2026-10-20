@@ -173,13 +173,30 @@ mod cancellation_tests {
 
     #[tokio::test]
     async fn aborting_runner_terminates_the_actual_child_process() {
+        assert_child_terminated(false).await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_shared_read_terminates_the_actual_child_process() {
+        assert_child_terminated(true).await;
+    }
+
+    async fn assert_child_terminated(shared: bool) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let script = format!("import os,socket,time; s=socket.create_connection(('127.0.0.1',{})); s.sendall(str(os.getpid()).encode()); s.close(); time.sleep(60)",address.port());
         let mut command = Command::new("python3");
         command.args(["-c", &script]);
-        let task = tokio::spawn(execute(command, Duration::from_secs(30)));
+        let app = crate::app::App::new_without_client("test".into(), Some("us-east-1".into()));
+        let scope = crate::async_read::ReadScope::from_app(&app, "");
+        let mut read = crate::async_read::AsyncRead::requested(scope);
+        let task = if shared {
+            assert!(read.start(execute(command, Duration::from_secs(30))));
+            None
+        } else {
+            Some(tokio::spawn(execute(command, Duration::from_secs(30))))
+        };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         let pid = loop {
             if let Ok((mut stream, _)) = listener.accept() {
@@ -196,8 +213,13 @@ mod cancellation_tests {
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
-        task.abort();
-        assert!(task.await.unwrap_err().is_cancelled());
+        if let Some(task) = task {
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        } else {
+            read.reset();
+            assert!(!read.is_busy());
+        }
         let path = format!("/proc/{pid}/stat");
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {

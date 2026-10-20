@@ -3,6 +3,7 @@
 use super::subscription::Column;
 use crate::{
     app::{App, Service},
+    async_read::{AsyncRead, ReadScope, ReadStatus},
     common::{filter_by_fields, render_pagination_text, ColumnId, InputFocus, SortDirection},
     inventory::{self, InventoryInput},
     keymap::{Action, Mode},
@@ -10,22 +11,13 @@ use crate::{
     ui::{
         self,
         filter::{render_simple_filter, SimpleFilterConfig},
-        table::{expanded_from_columns, render_table, TableConfig},
+        loading::render_table,
+        table::{expanded_from_columns, TableConfig},
     },
 };
-use ratatui::{
-    prelude::*,
-    widgets::{Paragraph, Wrap},
-};
+use ratatui::{prelude::*, widgets::Paragraph};
 use rusticity_core::{sns::SnsSubscription, SnsClient, SnsTopic};
-use tokio::task::JoinHandle;
 
-struct Running(JoinHandle<Result<Vec<SnsSubscription>, String>>);
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
 pub struct State {
     pub topic: Option<SnsTopic>,
     pub table: TableState<SnsSubscription>,
@@ -33,9 +25,7 @@ pub struct State {
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
     pub error: Option<String>,
-    loaded: bool,
-    scope: String,
-    running: Option<Running>,
+    read: AsyncRead<Vec<SnsSubscription>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -46,39 +36,40 @@ impl Default for State {
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
             error: None,
-            loaded: false,
-            scope: String::new(),
-            running: None,
+            read: AsyncRead::default(),
         }
     }
 }
 impl State {
     pub fn busy(&self) -> bool {
-        self.table.loading || self.running.is_some()
+        self.read.is_busy()
+    }
+    /// View-facing read state, never inferred from row count. Loading from the
+    /// shared read while busy; Failed when the last read failed; Ready once a
+    /// read completed; Idle when no key is entered.
+    pub(crate) fn read_status(&self) -> ReadStatus {
+        if self.read.is_busy() {
+            self.read.status()
+        } else if self.error.is_some() {
+            ReadStatus::Failed
+        } else {
+            self.read.status()
+        }
     }
     pub fn close(&mut self) {
-        self.running = None;
-        self.topic = None;
+        *self = State::default();
+    }
+    /// Clear results immediately for a refresh of the SAME topic: drop the old
+    /// rows, selection and error so nothing stale is shown while the fresh read
+    /// runs. Only resource identity, filter and column preferences survive.
+    fn clear_for_refresh(&mut self) {
         self.table.items.clear();
-        self.table.filter.clear();
         self.table.reset();
-        self.table.loading = false;
         self.error = None;
-        self.loaded = false;
-        self.scope.clear();
-        self.input_focus = InputFocus::Filter;
     }
 }
-fn scope(app: &App) -> String {
-    format!(
-        "{:?}",
-        (
-            &app.profile,
-            &app.config.region,
-            &app.config.account_id,
-            &app.config.role_arn
-        )
-    )
+fn scope(app: &App, topic: &SnsTopic) -> ReadScope {
+    ReadScope::from_app(app, topic.arn.clone())
 }
 pub fn active(app: &App) -> bool {
     app.service_selected
@@ -124,11 +115,11 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             let Some(topic) = app.sns_state.topics.get_selected(&rows).cloned() else {
                 return true;
             };
-            let scope = scope(app);
+            let scope = scope(app, &topic);
             let state = &mut app.sns_state.subscriptions;
             state.close();
+            state.read.request(scope);
             state.topic = Some(topic);
-            state.scope = scope;
             state.table.loading = true;
             app.page_input.clear();
             app.update_current_tab_breadcrumb();
@@ -145,10 +136,25 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
                 return true;
             }
             Action::Refresh => {
+                let scope = app
+                    .sns_state
+                    .subscriptions
+                    .topic
+                    .as_ref()
+                    .map(|topic| scope(app, topic));
                 let state = &mut app.sns_state.subscriptions;
-                state.running = None;
+                if let Some(scope) = scope {
+                    if !state.read.matches_scope(&scope) {
+                        state.close();
+                        app.update_current_tab_breadcrumb();
+                        return true;
+                    }
+                    // Drop the displayed rows the instant a refresh begins so the
+                    // old result is never shown during or after the fresh read.
+                    state.clear_for_refresh();
+                    state.read.request(scope);
+                }
                 state.table.loading = true;
-                state.error = None;
                 return true;
             }
             Action::Yank => {
@@ -188,8 +194,13 @@ pub async fn poll(app: &mut App) -> bool {
     if app.sns_state.subscriptions.topic.is_none() {
         return false;
     }
-    let current_scope = scope(app);
-    if app.sns_state.subscriptions.scope != current_scope
+    let topic = app.sns_state.subscriptions.topic.as_ref().unwrap().clone();
+    let current_scope = scope(app, &topic);
+    if !app
+        .sns_state
+        .subscriptions
+        .read
+        .matches_scope(&current_scope)
         || !app.service_selected
         || !matches!(
             app.current_service,
@@ -201,38 +212,37 @@ pub async fn poll(app: &mut App) -> bool {
     }
     let state = &mut app.sns_state.subscriptions;
     let mut changed = false;
-    if state.table.loading && state.running.is_none() {
-        let topic = state.topic.as_ref().unwrap().arn.clone();
+    if state.table.loading && !state.read.is_busy() {
+        // Shared InventoryInput can schedule a retry through table.loading.
+        state.read.request(current_scope.clone());
+    }
+    if state.table.loading && state.read.is_pending() {
         let config = app.config.clone();
-        state.running = Some(Running(tokio::spawn(async move {
+        let topic_arn = topic.arn.clone();
+        if state.read.start(async move {
             SnsClient::new(config)
-                .list_subscriptions_by_topic(&topic)
+                .list_subscriptions_by_topic(&topic_arn)
                 .await
                 .map_err(|e| format!("{e:#}"))
-        })));
-        changed = true;
+        }) {
+            changed = true;
+        }
     }
-    if state
-        .running
-        .as_ref()
-        .is_some_and(|task| task.0.is_finished())
-    {
-        let mut task = state.running.take().unwrap();
-        let result = match (&mut task.0).await {
-            Ok(result) => result,
-            Err(e) => Err(format!("Subscription read failed: {e}")),
-        };
+    if let Some(result) = state.read.take_ready(&current_scope).await {
         state.table.loading = false;
         match result {
             Ok(rows) => {
                 state.table.items = rows;
-                state.loaded = true;
                 state.error = None;
                 state.table.reset();
             }
             Err(error) => {
+                // Never leave stale rows behind a failed read.
+                state.table.items.clear();
+                state.table.reset();
                 state.error = Some(
                     error
+                        .into_message("Subscription read failed")
                         .chars()
                         .map(|c| if c.is_control() { ' ' } else { c })
                         .collect(),
@@ -259,22 +269,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .split(area);
     summary.render_fill(frame, sections[0]);
-    let mut body = sections[1];
-    if let Some(error) = &state.error {
-        let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body);
-        let prefix = if state.loaded {
-            "Refresh failed; showing previously loaded subscriptions"
-        } else {
-            "Subscriptions unavailable"
-        };
-        frame.render_widget(
-            Paragraph::new(format!("{prefix}: {error} — Ctrl+R retries"))
-                .style(Style::default().fg(Color::Yellow))
-                .wrap(Wrap { trim: false }),
-            sections[0],
-        );
-        body = sections[1];
-    }
+    let body = sections[1];
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body);
     let view = state
         .table
@@ -303,7 +298,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .into_iter()
         .map(Column::into_table_column)
         .collect();
-    render_table(
+    if render_table(
         frame,
         TableConfig {
             items: view.items,
@@ -317,15 +312,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             get_expanded_content: Some(Box::new(|s| expanded_from_columns(&expanded, s))),
             is_active: app.mode == Mode::Normal,
         },
-    );
+        state.read_status(),
+        "Subscriptions",
+        state.error.as_deref(),
+    ) {
+        return;
+    }
     if empty && sections[1].height > 3 && sections[1].width > 2 {
-        let message = if state.busy() {
-            "Loading subscriptions… Esc cancels"
-        } else if state.error.is_some() {
-            "Read failed — Ctrl+R retries"
-        } else if !state.loaded {
-            "Not loaded"
-        } else if !state.table.items.is_empty() {
+        // Reached only when the read is Ready, so this is a genuine empty or
+        // filtered-empty result, never a stand-in for loading or failure.
+        let message = if !state.table.items.is_empty() {
             "No matching subscriptions"
         } else {
             "No subscriptions for this topic"

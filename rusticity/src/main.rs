@@ -50,16 +50,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     while app.running {
-        if rusticity_term::stepfunctions::executions::poll(&mut app).await {
-            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-        }
-        if rusticity_term::kms::detail::poll(&mut app).await {
-            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-        }
-        if rusticity_term::sns::subscriptions::poll(&mut app).await {
-            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-        }
-        if rusticity_term::cli_output::poll(&mut app).await {
+        rusticity_term::tab_runtime::sync_active(&mut app);
+        if rusticity_term::tab_runtime::poll(&mut app).await {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         if !rusticity_term::cli_output::active(&app)
@@ -77,7 +69,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         // Any service loading → animate the spinner via periodic redraws
-        let any_loading = app.cli_output.busy()
+        let any_loading = rusticity_term::tab_runtime::has_background_work(&app)
+            || app.cli_output.busy()
             || app.ecr_state.scan.busy()
             || app.s3_state.object_view.busy()
             || app.s3_state.object_view.notice.is_some()
@@ -125,6 +118,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Shared g-prefix navigation must still reach its handler below.
                         if rusticity_term::cli_output::handle_key(&mut app, key)
                             || handle_key(key, app.mode).is_some_and(|action| action == rusticity_term::keymap::Action::OpenCliOutput && rusticity_term::cli_output::handle_action(&mut app, &action)) {
+                            rusticity_term::tab_runtime::sync_active(&mut app);
                             let frame = terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if clipboard.flush(&mut app.clipboard, frame.buffer) {
                                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -223,6 +217,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         let prev_current_tab = app.current_tab;
 
                         app.handle_action(action);
+                        let opened_new_tab = rusticity_term::tab_runtime::opened_new_tab(&app, &prev_tabs);
+                        if rusticity_term::tab_runtime::restored_existing_tab(&app, &prev_tabs, prev_current_tab) {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            continue;
+                        }
                         if app.mode == Mode::ResourceFinder {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             continue;
@@ -238,7 +237,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load log groups when service is switched to and empty
                         if app.service_selected && app.current_service == Service::CloudWatchLogGroups
-                            && (!prev_service_selected || prev_service != Service::CloudWatchLogGroups)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::CloudWatchLogGroups)
                             && app.log_groups_state.log_groups.items.is_empty() {
                             app.log_groups_state.loading = true;
                             app.log_groups_state.loading_message = "Loading log groups...".to_string();
@@ -250,7 +249,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load S3 buckets when service is switched to and empty
                         if app.service_selected && app.current_service == Service::S3Buckets
-                            && (!prev_service_selected || prev_service != Service::S3Buckets)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::S3Buckets)
                             && app.s3_state.buckets.items.is_empty() {
                             app.s3_state.buckets.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -264,7 +263,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load SQS queues when service is switched to and empty
                         if app.service_selected && app.current_service == Service::SqsQueues
-                            && (!prev_service_selected || prev_service != Service::SqsQueues)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::SqsQueues)
                             && app.sqs_state.queues.items.is_empty() {
                             app.sqs_state.queues.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -491,7 +490,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load CloudWatch Alarms when service is switched to and empty
                         if app.service_selected && app.current_service == Service::CloudWatchAlarms
-                            && (!prev_service_selected || prev_service != Service::CloudWatchAlarms)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::CloudWatchAlarms)
                             && app.alarms_state.table.items.is_empty() {
                             app.alarms_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -505,7 +504,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load CloudTrail events when service is switched to and empty
                         if app.service_selected && app.current_service == Service::CloudTrailEvents
-                            && (!prev_service_selected || prev_service != Service::CloudTrailEvents)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::CloudTrailEvents)
                             && app.cloudtrail_state.table.items.is_empty() {
                             app.cloudtrail_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -547,7 +546,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load EC2 instances when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::Ec2Instances
-                            && ((!prev_service_selected || prev_service != Service::Ec2Instances)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::Ec2Instances)
                                 || app.ec2_state.table.loading)
                         {
                             app.ec2_state.table.loading = true;
@@ -672,7 +671,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load ECR repositories when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::EcrRepositories
-                            && ((!prev_service_selected || prev_service != Service::EcrRepositories)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::EcrRepositories)
                                 || app.ecr_state.repositories.loading)
                             && app.ecr_state.current_repository.is_none() {
                             app.ecr_state.repositories.loading = true;
@@ -698,24 +697,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.ecr_state.repositories.loading = false;
                         }
 
-                        // Load KMS keys when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::KmsKeys
-                            && ((!prev_service_selected || prev_service != Service::KmsKeys)
-                                || app.kms_state.keys.loading) {
-                            app.kms_state.keys.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_kms_keys().await {
-                                app.error_message = Some(format!("Failed to load KMS keys: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.kms_state.keys.loading = false;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // KMS inventory reads are queued and polled by tab_runtime.
 
                         // Load EFS file systems when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::EfsFileSystems
-                            && ((!prev_service_selected || prev_service != Service::EfsFileSystems)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::EfsFileSystems)
                                 || app.efs_state.file_systems.loading) {
                             app.efs_state.file_systems.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -729,7 +715,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         }
 
                         if app.service_selected && app.current_service == Service::VpcVpcs
-                            && ((!prev_service_selected || prev_service != Service::VpcVpcs)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::VpcVpcs)
                                 || app.vpc_state.vpcs.loading) {
                             app.vpc_state.vpcs.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -742,7 +728,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         }
 
                         if app.service_selected && app.current_service == Service::RdsInstances
-                            && ((!prev_service_selected || prev_service != Service::RdsInstances)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::RdsInstances)
                                 || app.rds_state.instances.loading) {
                             app.rds_state.instances.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -754,36 +740,12 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
-                        if app.service_selected && app.current_service == Service::SnsTopics
-                            && app.sns_state.subscriptions.topic.is_none()
-                            && ((!prev_service_selected || prev_service != Service::SnsTopics)
-                                || app.sns_state.topics.loading) {
-                            app.sns_state.topics.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_sns_topics().await {
-                                app.error_message = Some(format!("Failed to load SNS topics: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // SNS inventory reads remain owned by their tabs in the background.
 
-                        if app.service_selected && app.current_service == Service::StepFunctionsStateMachines
-                            && app.stepfunctions_state.executions.machine.is_none()
-                            && ((!prev_service_selected || prev_service != Service::StepFunctionsStateMachines)
-                                || app.stepfunctions_state.machines.loading) {
-                            app.stepfunctions_state.machines.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_stepfunctions().await {
-                                app.error_message = Some(format!("Failed to load state machines: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // Step Functions inventories are driven by tab_runtime, not awaited here.
 
                         if app.service_selected && app.current_service == Service::SecretsManagerSecrets
-                            && ((!prev_service_selected || prev_service != Service::SecretsManagerSecrets)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::SecretsManagerSecrets)
                                 || app.secretsmanager_state.secrets.loading) {
                             app.secretsmanager_state.secrets.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -797,7 +759,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load DynamoDB tables when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::DynamoDbTables
-                            && ((!prev_service_selected || prev_service != Service::DynamoDbTables)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::DynamoDbTables)
                                 || app.dynamodb_state.tables.loading) {
                             app.dynamodb_state.tables.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -914,7 +876,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load FSx file systems when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::FsxFileSystems
-                            && ((!prev_service_selected || prev_service != Service::FsxFileSystems)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::FsxFileSystems)
                                 || app.fsx_state.file_systems.loading) {
                             app.fsx_state.file_systems.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -946,7 +908,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load API Gateway APIs when service is switched to, empty, or loading
                         if app.service_selected && app.current_service == Service::ApiGatewayApis
-                            && ((!prev_service_selected || prev_service != Service::ApiGatewayApis)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::ApiGatewayApis)
                                 || app.apig_state.apis.loading)
                         {
                             app.apig_state.apis.loading = true;
@@ -961,7 +923,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load Lambda functions
                         if app.service_selected && app.current_service == Service::LambdaFunctions
-                            && ((!prev_service_selected || prev_service != Service::LambdaFunctions)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::LambdaFunctions)
                                 || app.lambda_state.table.loading) {
                             app.lambda_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -975,7 +937,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load Lambda applications
                         if app.service_selected && app.current_service == Service::LambdaApplications
-                            && ((!prev_service_selected || prev_service != Service::LambdaApplications)
+                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::LambdaApplications)
                                 || app.lambda_application_state.table.loading) {
                             app.lambda_application_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -990,7 +952,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // Load CloudFormation stacks when service is switched to, empty, or explicitly reloading (e.g. view_nested toggled)
                         if app.service_selected && app.current_service == Service::CloudFormationStacks
                             && (app.cfn_state.table.loading
-                                || ((!prev_service_selected || prev_service != Service::CloudFormationStacks)
+                                || ((!prev_service_selected || opened_new_tab || prev_service != Service::CloudFormationStacks)
                                     && app.cfn_state.table.items.is_empty())) {
                             app.cfn_state.table.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -1043,7 +1005,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load IAM users when service is switched to and empty
                         if app.service_selected && app.current_service == Service::IamUsers
-                            && (!prev_service_selected || prev_service != Service::IamUsers)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::IamUsers)
                             && app.iam_state.users.items.is_empty() {
                             app.iam_state.users.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -1057,7 +1019,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load IAM roles when service is switched to and empty
                         if app.service_selected && app.current_service == Service::IamRoles
-                            && (!prev_service_selected || prev_service != Service::IamRoles)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::IamRoles)
                             && app.iam_state.roles.items.is_empty() {
                             app.iam_state.roles.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -1071,7 +1033,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         // Load IAM user groups when service is switched to and empty
                         if app.service_selected && app.current_service == Service::IamUserGroups
-                            && (!prev_service_selected || prev_service != Service::IamUserGroups)
+                            && (!prev_service_selected || opened_new_tab || prev_service != Service::IamUserGroups)
                             && app.iam_state.groups.items.is_empty() {
                             app.iam_state.groups.loading = true;
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;

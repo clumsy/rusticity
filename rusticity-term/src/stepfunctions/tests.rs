@@ -54,6 +54,17 @@ fn app() -> App {
     app
 }
 
+fn tabbed_app() -> App {
+    let mut app = app();
+    app.tabs.push(crate::app::Tab {
+        id: crate::tab_runtime::TabId::new(),
+        service: app.current_service,
+        title: app.current_service.name().into(),
+        breadcrumb: app.current_service.name().into(),
+    });
+    app
+}
+
 fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     app.handle_action(handle_key(KeyEvent::new(code, modifiers), app.mode).unwrap());
 }
@@ -72,6 +83,40 @@ fn screen(app: &App, width: u16, height: u16) -> String {
 
 fn model(app: &App) -> crate::preferences::Preferences {
     bindings::model_for(app, Service::StepFunctionsStateMachines)
+}
+
+/// Drive the entered executions view to a completed (Ready) state with `rows`,
+/// exactly as a real poll completion would — no hand-set flags, no AWS. The
+/// machine must already be entered (via Select). Synchronous tests use it so
+/// `read_status()` is genuinely Ready.
+fn ready_executions(app: &mut App, rows: Vec<ExecutionMetadata>) {
+    let machine = app
+        .stepfunctions_state
+        .executions
+        .machine
+        .as_ref()
+        .expect("a machine must be entered first")
+        .clone();
+    let scope = crate::async_read::ReadScope::from_app(app, machine.arn.clone());
+    app.stepfunctions_state
+        .executions
+        .test_ready_with(scope, rows);
+}
+
+/// Drive the entered executions view to a failed (Failed) state, as a real poll
+/// failure would — rows cleared, error set, no AWS.
+fn fail_executions(app: &mut App, message: &str) {
+    let machine = app
+        .stepfunctions_state
+        .executions
+        .machine
+        .as_ref()
+        .expect("a machine must be entered first")
+        .clone();
+    let scope = crate::async_read::ReadScope::from_app(app, machine.arn.clone());
+    app.stepfunctions_state
+        .executions
+        .test_fail_with(scope, message);
 }
 
 #[test]
@@ -282,19 +327,28 @@ async fn standard_poll_aborts_on_scope_change_and_preserves_cli_tab() {
 }
 
 #[test]
-fn stale_rows_are_kept_on_error_and_rendered_with_a_warning() {
-    let mut app = self::app();
+fn refresh_clears_rows_and_failure_renders_no_prior_rows() {
+    let mut app = tabbed_app();
     app.stepfunctions_state.machines.filter = "wf-024".into();
     app.handle_action(Action::Select);
-    let state = &mut app.stepfunctions_state.executions;
-    state.table.loading = false;
-    state.table.items = vec![exec("prev", "SUCCEEDED", Some(1000))];
-    // Simulate a loaded-then-failed-refresh: rows stay, warning shown.
-    state.loaded = true;
-    state.error = Some("AccessDenied".into());
+    ready_executions(&mut app, vec![exec("prev", "SUCCEEDED", Some(1000))]);
+    assert!(screen(&app, 220, 30).contains("prev"));
+    // A refresh drops the rows immediately; the loading pane shows no old data.
+    app.handle_action(Action::Refresh);
+    assert!(app.stepfunctions_state.executions.table.items.is_empty());
+    let loading = screen(&app, 220, 30);
+    assert!(loading.contains("Loading executions"));
+    assert!(!loading.contains("prev"));
+    // A failed refresh shows the error, never the previous rows or a warning.
+    fail_executions(&mut app, "AccessDenied");
+    assert_eq!(
+        app.stepfunctions_state.executions.read_status(),
+        crate::async_read::ReadStatus::Failed
+    );
     let text = screen(&app, 220, 30);
-    assert!(text.contains("Refresh failed; showing previously loaded executions"));
-    assert!(text.contains("prev"));
+    assert!(text.contains("Read failed") && text.contains("AccessDenied"));
+    assert!(!text.contains("prev"));
+    assert!(!text.contains("previously loaded"));
 }
 
 #[test]
@@ -302,13 +356,13 @@ fn executions_use_shared_filter_focus_and_pagination() {
     let mut app = self::app();
     app.stepfunctions_state.machines.filter = "wf-024".into();
     app.handle_action(Action::Select);
-    let state = &mut app.stepfunctions_state.executions;
-    state.table.loading = false;
-    state.loaded = true;
-    state.table.page_size = PageSize::Ten;
-    state.table.items = (0..25)
-        .map(|i| exec(&format!("e{i:03}"), "SUCCEEDED", Some(i as u64 * 1000)))
-        .collect();
+    ready_executions(
+        &mut app,
+        (0..25)
+            .map(|i| exec(&format!("e{i:03}"), "SUCCEEDED", Some(i as u64 * 1000)))
+            .collect(),
+    );
+    app.stepfunctions_state.executions.table.page_size = PageSize::Ten;
     // Filtering by status narrows rows via the shared field filter.
     app.stepfunctions_state.executions.table.filter = "e01".into();
     assert_eq!(super::executions::filtered(&app).len(), 10);
@@ -429,7 +483,7 @@ fn state_machine_and_execution_page_sizes_are_independent() {
 
 #[test]
 fn inventory_renders_title_hints_and_loading() {
-    let mut app = self::app();
+    let mut app = tabbed_app();
     app.stepfunctions_state.machines.page_size = PageSize::Ten;
     let text = screen(&app, 240, 45);
     assert!(text.contains("State machines (25)"));
@@ -437,7 +491,7 @@ fn inventory_renders_title_hints_and_loading() {
         assert!(text.contains(hint), "missing {hint}");
     }
     app.stepfunctions_state.machines.items.clear();
-    app.stepfunctions_state.machines.loading = true;
+    crate::stepfunctions::inventory::request(&mut app);
     assert!(screen(&app, 240, 45).contains("Loading state machines"));
 }
 
@@ -552,7 +606,7 @@ fn both_session_restore_paths_and_retry_keep_state_machine_inventory() {
         app.handle_action(Action::RetryLoad);
         assert!(app.stepfunctions_state.machines.loading);
         assert!(app.error_message.is_none());
-        assert_eq!(app.stepfunctions_state.machines.items.len(), 25);
+        assert!(app.stepfunctions_state.machines.items.is_empty());
     }
 }
 
@@ -669,9 +723,7 @@ fn execution_new_fields_filter_render_and_keep_arn_copy_and_table_cli() {
     row.redrive_count = Some(987);
     row.redrive_date = "2026-10-16T22:00:03Z".into();
     let arn = row.arn.clone();
-    app.stepfunctions_state.executions.table.items = vec![row];
-    app.stepfunctions_state.executions.table.loading = false;
-    app.stepfunctions_state.executions.loaded = true;
+    ready_executions(&mut app, vec![row]);
     app.stepfunctions_state.executions.visible_column_ids = C::ids();
     for query in ["PROD", "987", "2026-10-16", ":42"] {
         app.stepfunctions_state.executions.table.filter = query.into();
@@ -701,4 +753,17 @@ fn execution_new_fields_filter_render_and_keep_arn_copy_and_table_cli() {
         &crate::cli_command::invocation(&app).unwrap().args[..2],
         ["stepfunctions", "list-executions"]
     );
+}
+
+#[test]
+fn refresh_cannot_rebind_old_executions_to_a_changed_context() {
+    let mut app = self::app();
+    app.stepfunctions_state.machines.filter = "wf-024".into();
+    app.handle_action(Action::Select);
+    app.stepfunctions_state.executions.table.items = vec![exec("old", "SUCCEEDED", Some(1000))];
+    app.config.role_arn = "arn:aws:iam::123456789012:role/other".into();
+    app.handle_action(Action::Refresh);
+    assert!(app.stepfunctions_state.executions.machine.is_none());
+    assert!(app.stepfunctions_state.executions.table.items.is_empty());
+    assert!(!app.stepfunctions_state.executions.busy());
 }

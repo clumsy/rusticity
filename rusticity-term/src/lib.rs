@@ -1,5 +1,6 @@
 pub mod apig;
 pub mod app;
+mod async_read;
 pub mod aws;
 pub mod cfn;
 pub mod cli_command;
@@ -29,6 +30,7 @@ pub mod session;
 pub mod sns;
 pub mod sqs;
 pub mod stepfunctions;
+pub mod tab_runtime;
 pub mod table;
 pub mod tags;
 pub mod ui;

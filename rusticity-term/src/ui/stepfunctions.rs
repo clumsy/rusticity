@@ -1,3 +1,4 @@
+use crate::async_read::{AsyncRead, ReadStatus};
 use crate::{
     app::App,
     common::{filter_by_fields, render_pagination_text, ColumnId, InputFocus, SortDirection},
@@ -7,11 +8,11 @@ use crate::{
     ui::{
         filter::{render_simple_filter, SimpleFilterConfig},
         format_title,
-        table::{expanded_from_columns, render_table, TableConfig},
-        titled_block,
+        loading::render_table,
+        table::{expanded_from_columns, TableConfig},
     },
 };
-use ratatui::{prelude::*, widgets::Paragraph};
+use ratatui::prelude::*;
 use rusticity_core::StateMachineMetadata;
 
 pub struct State {
@@ -20,6 +21,12 @@ pub struct State {
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
+    /// Owned background read backing the root State Machines inventory.
+    pub(crate) inventory: AsyncRead<Vec<StateMachineMetadata>>,
+    /// Inline error from the most recent inventory read; never an ErrorModal.
+    pub(crate) inventory_error: Option<String>,
+    /// Machine ARN/name a finder navigation queued to select once rows arrive.
+    pub pending_focus: Option<String>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -29,6 +36,22 @@ impl Default for State {
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
+            inventory: AsyncRead::default(),
+            inventory_error: None,
+            pending_focus: None,
+        }
+    }
+}
+impl State {
+    /// Root inventory read status, with populated-but-Idle treated as Ready so
+    /// legacy loaders and seeded fixtures still render the table (see ui::sns).
+    pub(crate) fn load_status(&self) -> ReadStatus {
+        if self.executions.machine.is_some() {
+            return self.executions.read_status();
+        }
+        match self.inventory.status() {
+            ReadStatus::Idle if !self.machines.items.is_empty() => ReadStatus::Ready,
+            status => status,
         }
     }
 }
@@ -73,15 +96,6 @@ pub fn render_state_machines(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: state.input_focus == InputFocus::Pagination,
         },
     );
-    if state.machines.loading && state.machines.items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("Loading state machines...")
-                .block(titled_block("State machines"))
-                .alignment(Alignment::Center),
-            chunks[1],
-        );
-        return;
-    }
     let columns: Vec<_> = state
         .visible_column_ids
         .iter()
@@ -108,6 +122,9 @@ pub fn render_state_machines(frame: &mut Frame, app: &App, area: Rect) {
             })),
             is_active: app.mode == Mode::Normal,
         },
+        state.load_status(),
+        "State machines",
+        state.inventory_error.as_deref(),
     );
 }
 

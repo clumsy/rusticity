@@ -10,6 +10,7 @@
 //! read keeps previously loaded rows (stale, never silently emptied).
 use crate::{
     app::{App, Service},
+    async_read::{AsyncRead, ReadScope, ReadStatus},
     common::{
         filter_by_fields, render_pagination_text, translate_column, ColumnId, InputFocus,
         SortDirection,
@@ -20,7 +21,8 @@ use crate::{
     ui::{
         self,
         filter::{render_simple_filter, SimpleFilterConfig},
-        table::{expanded_from_columns, render_table, Column as TableColumn, TableConfig},
+        loading::render_table,
+        table::{expanded_from_columns, Column as TableColumn, TableConfig},
     },
 };
 use ratatui::{
@@ -28,7 +30,6 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 use rusticity_core::{ExecutionMetadata, StateMachineMetadata, StepFunctionsClient};
-use tokio::task::JoinHandle;
 
 /// Machine `machine_type` literal whose executions are not listable via the
 /// metadata ListExecutions API. Matched case-insensitively.
@@ -220,13 +221,6 @@ fn status_style(execution: &ExecutionMetadata) -> Style {
     Style::default().fg(color)
 }
 
-struct Running(JoinHandle<Result<Vec<ExecutionMetadata>, String>>);
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 pub struct State {
     pub machine: Option<StateMachineMetadata>,
     pub table: TableState<ExecutionMetadata>,
@@ -234,9 +228,7 @@ pub struct State {
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
     pub error: Option<String>,
-    pub(super) loaded: bool,
-    scope: String,
-    running: Option<Running>,
+    read: AsyncRead<Vec<ExecutionMetadata>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -247,15 +239,29 @@ impl Default for State {
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
             error: None,
-            loaded: false,
-            scope: String::new(),
-            running: None,
+            read: AsyncRead::default(),
         }
     }
 }
 impl State {
     pub fn busy(&self) -> bool {
-        self.table.loading || self.running.is_some()
+        self.read.is_busy()
+    }
+    /// View-facing read state, never inferred from row count. An Express machine
+    /// is a Ready (its explicit "unsupported" notice is rendered separately, not
+    /// as a failed read). Otherwise: Loading while busy, Failed on the last
+    /// read's failure, Ready once completed, Idle when no machine is entered.
+    pub(crate) fn read_status(&self) -> ReadStatus {
+        if self.unsupported() {
+            return ReadStatus::Ready;
+        }
+        if self.read.is_busy() {
+            self.read.status()
+        } else if self.error.is_some() {
+            ReadStatus::Failed
+        } else {
+            self.read.status()
+        }
     }
     /// True when the entered machine is Express, whose executions the metadata
     /// API cannot list. Rendering shows an explicit message and `poll` never
@@ -264,29 +270,42 @@ impl State {
         self.machine.as_ref().is_some_and(is_express)
     }
     pub fn close(&mut self) {
-        self.running = None;
-        self.machine = None;
+        *self = State::default();
+    }
+    /// Clear results immediately for a refresh of the SAME machine: drop old
+    /// rows, selection and error so nothing stale is shown while the fresh read
+    /// runs. Only resource identity, filter and column preferences survive.
+    fn clear_for_refresh(&mut self) {
         self.table.items.clear();
-        self.table.filter.clear();
         self.table.reset();
-        self.table.loading = false;
         self.error = None;
-        self.loaded = false;
-        self.scope.clear();
-        self.input_focus = InputFocus::Filter;
+    }
+    /// Test-only: drive the view to a completed (Ready) state with `rows`,
+    /// exactly as a real poll completion would (status becomes Ready via the
+    /// shared read, no flags hand-set, no AWS). `scope` is the entered machine's
+    /// read scope. Runs the trivial future on a local current-thread runtime.
+    #[cfg(test)]
+    pub(super) fn test_ready_with(&mut self, scope: ReadScope, rows: Vec<ExecutionMetadata>) {
+        self.read = AsyncRead::resolved(scope, true);
+        self.table.items = rows;
+        self.table.loading = false;
+        self.table.reset();
+        self.error = None;
+    }
+    /// Test-only: drive the view to a failed (Failed) state with `message`,
+    /// exactly as a real poll failure would. Clears any rows, as production does.
+    #[cfg(test)]
+    pub(super) fn test_fail_with(&mut self, scope: ReadScope, message: &str) {
+        self.read = AsyncRead::resolved(scope, false);
+        self.table.items.clear();
+        self.table.loading = false;
+        self.table.reset();
+        self.error = Some(message.into());
     }
 }
 
-fn scope(app: &App) -> String {
-    format!(
-        "{:?}",
-        (
-            &app.profile,
-            &app.config.region,
-            &app.config.account_id,
-            &app.config.role_arn
-        )
-    )
+fn scope(app: &App, machine: &StateMachineMetadata) -> ReadScope {
+    ReadScope::from_app(app, machine.arn.clone())
 }
 
 pub fn active(app: &App) -> bool {
@@ -353,12 +372,18 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             else {
                 return true;
             };
-            let scope = scope(app);
+            let scope = scope(app, &machine);
             let express = is_express(&machine);
             let state = &mut app.stepfunctions_state.executions;
             state.close();
+            // Track the scope either way so a context change still closes the
+            // view. Express machines queue no request (never listed); STANDARD
+            // machines queue one for the poll to spawn.
+            state.read.request(scope);
+            if express {
+                state.read.cancel();
+            }
             state.machine = Some(machine);
-            state.scope = scope;
             // Express machines are not listable: open the summary but do not
             // enter a loading state, so poll never issues a request for them.
             state.table.loading = !express;
@@ -379,10 +404,25 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             Action::Refresh => {
                 // A refresh on an Express machine is a no-op: nothing to list.
                 if !app.stepfunctions_state.executions.unsupported() {
+                    let scope = app
+                        .stepfunctions_state
+                        .executions
+                        .machine
+                        .as_ref()
+                        .map(|machine| scope(app, machine));
                     let state = &mut app.stepfunctions_state.executions;
-                    state.running = None;
+                    if let Some(scope) = scope {
+                        if !state.read.matches_scope(&scope) {
+                            state.close();
+                            app.update_current_tab_breadcrumb();
+                            return true;
+                        }
+                        // Drop the displayed rows the instant a refresh begins so
+                        // the old result is never shown during the fresh read.
+                        state.clear_for_refresh();
+                        state.read.request(scope);
+                    }
                     state.table.loading = true;
-                    state.error = None;
                 }
                 return true;
             }
@@ -421,8 +461,19 @@ pub async fn poll(app: &mut App) -> bool {
     if app.stepfunctions_state.executions.machine.is_none() {
         return false;
     }
-    let current_scope = scope(app);
-    if app.stepfunctions_state.executions.scope != current_scope
+    let machine = app
+        .stepfunctions_state
+        .executions
+        .machine
+        .as_ref()
+        .unwrap()
+        .clone();
+    let current_scope = scope(app, &machine);
+    if !app
+        .stepfunctions_state
+        .executions
+        .read
+        .matches_scope(&current_scope)
         || !app.service_selected
         || !matches!(
             app.current_service,
@@ -442,38 +493,37 @@ pub async fn poll(app: &mut App) -> bool {
     }
     let state = &mut app.stepfunctions_state.executions;
     let mut changed = false;
-    if state.table.loading && state.running.is_none() {
-        let machine = state.machine.as_ref().unwrap().clone();
+    if state.table.loading && !state.read.is_busy() {
+        // Shared InventoryInput can schedule a retry through table.loading.
+        state.read.request(current_scope.clone());
+    }
+    if state.table.loading && state.read.is_pending() {
         let config = app.config.clone();
-        state.running = Some(Running(tokio::spawn(async move {
+        let machine = machine.clone();
+        if state.read.start(async move {
             StepFunctionsClient::new(config)
                 .list_executions(&machine)
                 .await
                 .map_err(|e| format!("{e:#}"))
-        })));
-        changed = true;
+        }) {
+            changed = true;
+        }
     }
-    if state
-        .running
-        .as_ref()
-        .is_some_and(|task| task.0.is_finished())
-    {
-        let mut task = state.running.take().unwrap();
-        let result = match (&mut task.0).await {
-            Ok(result) => result,
-            Err(e) => Err(format!("Execution read failed: {e}")),
-        };
+    if let Some(result) = state.read.take_ready(&current_scope).await {
         state.table.loading = false;
         match result {
             Ok(rows) => {
                 state.table.items = rows;
-                state.loaded = true;
                 state.error = None;
                 state.table.reset();
             }
             Err(error) => {
+                // Never leave stale rows behind a failed read.
+                state.table.items.clear();
+                state.table.reset();
                 state.error = Some(
                     error
+                        .into_message("Execution read failed")
                         .chars()
                         .map(|c| if c.is_control() { ' ' } else { c })
                         .collect(),
@@ -503,7 +553,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .split(area);
     summary.render_fill(frame, sections[0]);
-    let mut body = sections[1];
+    let body = sections[1];
 
     // Express: explicit unsupported notice; the executions table is not shown
     // and no request was ever issued.
@@ -520,21 +570,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    if let Some(error) = &state.error {
-        let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body);
-        let prefix = if state.loaded {
-            "Refresh failed; showing previously loaded executions"
-        } else {
-            "Executions unavailable"
-        };
-        frame.render_widget(
-            Paragraph::new(format!("{prefix}: {error} — Ctrl+R retries"))
-                .style(Style::default().fg(Color::Yellow))
-                .wrap(Wrap { trim: false }),
-            sections[0],
-        );
-        body = sections[1];
-    }
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(body);
     let view = state
         .table
@@ -563,7 +598,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .into_iter()
         .map(Column::into_table_column)
         .collect();
-    render_table(
+    if render_table(
         frame,
         TableConfig {
             items: view.items,
@@ -577,15 +612,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             get_expanded_content: Some(Box::new(|e| expanded_from_columns(&expanded, e))),
             is_active: app.mode == Mode::Normal,
         },
-    );
+        state.read_status(),
+        "Executions",
+        state.error.as_deref(),
+    ) {
+        return;
+    }
     if empty && sections[1].height > 3 && sections[1].width > 2 {
-        let message = if state.busy() {
-            "Loading executions… Esc cancels"
-        } else if state.error.is_some() {
-            "Read failed — Ctrl+R retries"
-        } else if !state.loaded {
-            "Not loaded"
-        } else if !state.table.items.is_empty() {
+        // Reached only when the read is Ready, so this is a genuine empty or
+        // filtered-empty result, never a stand-in for loading or failure.
+        let message = if !state.table.items.is_empty() {
             "No matching executions"
         } else {
             "No executions for this state machine"
@@ -622,12 +658,22 @@ mod lifecycle_tests {
         app
     }
     async fn finish(app: &mut App, result: Result<Vec<ExecutionMetadata>, String>) {
-        app.stepfunctions_state.executions.running = Some(Running(tokio::spawn(async { result })));
+        let machine = app
+            .stepfunctions_state
+            .executions
+            .machine
+            .as_ref()
+            .unwrap()
+            .clone();
+        let scope = scope(app, &machine);
+        let state = &mut app.stepfunctions_state.executions;
+        state.read.request(scope);
+        assert!(state.read.start(async move { result }));
         tokio::task::yield_now().await;
         assert!(poll(app).await);
     }
     #[tokio::test]
-    async fn actual_refresh_retains_rows_on_failure_and_recovers_on_retry() {
+    async fn refresh_clears_rows_immediately_and_failure_shows_no_prior_rows() {
         let mut app = app();
         finish(
             &mut app,
@@ -639,13 +685,21 @@ mod lifecycle_tests {
             }]),
         )
         .await;
+        // A refresh drops the displayed rows the instant it begins: nothing
+        // stale is retained while the fresh read runs.
         app.handle_action(Action::Refresh);
         assert!(app.stepfunctions_state.executions.table.loading);
-        assert_eq!(app.stepfunctions_state.executions.table.items.len(), 1);
+        assert!(app.stepfunctions_state.executions.table.items.is_empty());
+        assert!(matches!(
+            app.stepfunctions_state.executions.read_status(),
+            ReadStatus::Loading { .. }
+        ));
+        // A failed refresh leaves no rows and reports Failed, never the old data.
         finish(&mut app, Err("AccessDenied".into())).await;
+        assert!(app.stepfunctions_state.executions.table.items.is_empty());
         assert_eq!(
-            app.stepfunctions_state.executions.table.items[0].name,
-            "kept"
+            app.stepfunctions_state.executions.read_status(),
+            ReadStatus::Failed
         );
         assert!(app
             .stepfunctions_state
@@ -654,20 +708,50 @@ mod lifecycle_tests {
             .as_deref()
             .unwrap()
             .contains("AccessDenied"));
+        // A successful empty retry is Ready, not Idle, and clears the error.
         app.handle_action(Action::Refresh);
         finish(&mut app, Ok(vec![])).await;
-        assert!(app.stepfunctions_state.executions.loaded);
+        assert_eq!(
+            app.stepfunctions_state.executions.read_status(),
+            ReadStatus::Ready
+        );
         assert!(app.stepfunctions_state.executions.table.items.is_empty());
         assert!(app.stepfunctions_state.executions.error.is_none());
     }
     #[tokio::test]
     async fn closing_or_changing_scope_aborts_running_read() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
         for change in 0..5 {
             let mut app = app();
-            let task =
-                tokio::spawn(std::future::pending::<Result<Vec<ExecutionMetadata>, String>>());
-            let abort = task.abort_handle();
-            app.stepfunctions_state.executions.running = Some(Running(task));
+            // A drop guard stands in for the spawned read: aborting the task
+            // (on close or scope change) drops the future and flips the flag —
+            // the real cancellation signal, with no network opened.
+            let aborted = Arc::new(AtomicBool::new(false));
+            struct Guard(Arc<AtomicBool>);
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            let guard = Guard(aborted.clone());
+            let machine = app
+                .stepfunctions_state
+                .executions
+                .machine
+                .as_ref()
+                .unwrap()
+                .clone();
+            let scope = scope(&app, &machine);
+            let state = &mut app.stepfunctions_state.executions;
+            state.read.request(scope);
+            assert!(state.read.start(async move {
+                let _guard = guard;
+                std::future::pending::<Result<Vec<ExecutionMetadata>, String>>().await
+            }));
+            tokio::task::yield_now().await;
             match change {
                 0 => app.handle_action(Action::GoBack),
                 1 => app.profile = "other".into(),
@@ -679,7 +763,7 @@ mod lifecycle_tests {
                 assert!(poll(&mut app).await);
             }
             tokio::task::yield_now().await;
-            assert!(abort.is_finished());
+            assert!(aborted.load(Ordering::SeqCst));
             assert!(app.stepfunctions_state.executions.machine.is_none());
             assert!(!app.stepfunctions_state.executions.busy());
         }

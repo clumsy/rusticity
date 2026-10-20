@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod columns;
+pub mod inventory;
 pub mod subscription;
 pub mod subscriptions;
 use crate::console::{component, ConsoleUrl};

@@ -14,6 +14,7 @@ fn app() -> App {
             rusticity_core::SnsTopic::from_arn("arn:aws:sns:us-east-1:123456789012:test").unwrap(),
         ];
     app.tabs.push(Tab {
+        id: crate::tab_runtime::TabId::new(),
         service: Service::SnsTopics,
         title: "SNS › Topics".into(),
         breadcrumb: "SNS › Topics".into(),
@@ -45,9 +46,20 @@ fn screen(app: &App, width: u16, height: u16) -> (String, bool) {
     )
 }
 async fn finish(app: &mut App, id: u64, result: Result<String, String>) {
+    // Other queued fixture tabs must not launch a real AWS CLI process when
+    // poll advances all owners. Keep them pending on a local future instead.
+    for (&other_id, other) in &mut app.cli_output.views {
+        if other_id != id && other.read.is_pending() {
+            other.read.start(std::future::pending());
+        }
+    }
+    let owner = app.cli_output.views.get(&id).unwrap().owner;
+    let read_scope = super::scope_for(app, owner);
     let view = app.cli_output.views.get_mut(&id).unwrap();
-    view.pending = false;
-    view.running = Some(Running(tokio::spawn(async { result })));
+    // Queue a request at the view's own-owner scope and consume it with the
+    // canned result, standing in for the real subprocess read.
+    view.read.request(read_scope);
+    assert!(view.read.start(async move { result }));
     tokio::task::yield_now().await;
     assert!(poll(app).await);
 }
@@ -61,8 +73,8 @@ fn opens_a_real_tab_with_same_command_without_changing_source() {
     assert_eq!(app.tabs.len(), 2);
     assert_eq!(app.tabs[1].service, Service::CliOutput(id));
     assert_eq!(app.tabs[0].service, Service::SnsTopics);
-    assert!(view(&app).pending);
-    assert!(view(&app).running.is_none());
+    assert!(view(&app).read.is_pending());
+    assert!(!view(&app).read.is_running());
     assert_eq!(
         view(&app).invocation.as_ref().unwrap().args,
         invocation.args
@@ -118,10 +130,10 @@ async fn common_json_renderer_scrolling_and_copy_work_in_output_tab() {
 async fn multiple_output_tabs_finish_in_background_and_keep_independent_results() {
     let mut app = app();
     let first = open(&mut app);
-    app.cli_output.views.get_mut(&first).unwrap().pending = false;
+    app.cli_output.views.get_mut(&first).unwrap().read.cancel();
     press(&mut app, KeyCode::Char('['), KeyModifiers::NONE);
     let second = open(&mut app);
-    app.cli_output.views.get_mut(&second).unwrap().pending = false;
+    app.cli_output.views.get_mut(&second).unwrap().read.cancel();
     assert_ne!(first, second);
     assert_eq!(app.tabs.len(), 3);
     finish(&mut app, first, Ok("{\"first\":1}".into())).await;
@@ -165,7 +177,7 @@ async fn errors_refresh_and_context_changes_never_retarget_a_captured_command() 
     assert!(!view(&app).text.contains('\x1b'));
     let args = view(&app).invocation.as_ref().unwrap().args.clone();
     press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
-    assert!(view(&app).pending);
+    assert!(view(&app).read.is_pending());
     assert_eq!(view(&app).invocation.as_ref().unwrap().args, args);
     app.profile = "other".into();
     assert!(poll(&mut app).await);
@@ -181,11 +193,23 @@ async fn closing_output_tab_or_clearing_tabs_aborts_running_task() {
     for clear_all in [false, true] {
         let mut app = app();
         let id = open(&mut app);
-        let task = tokio::spawn(std::future::pending::<Result<String, String>>());
-        let abort = task.abort_handle();
+        // Consume the open-time queued request with a never-completing future
+        // carrying a drop guard, so dropping the view (abort-on-drop in
+        // AsyncRead) is observable.
+        let (tx, mut aborted) = tokio::sync::oneshot::channel::<()>();
+        struct Guard(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+        let guard = Guard(Some(tx));
         let v = app.cli_output.views.get_mut(&id).unwrap();
-        v.pending = false;
-        v.running = Some(Running(task));
+        assert!(v.read.start(async move {
+            let _guard = guard;
+            std::future::pending::<Result<String, String>>().await
+        }));
+        tokio::task::yield_now().await;
         if clear_all {
             app.tabs.clear();
             poll(&mut app).await;
@@ -193,13 +217,13 @@ async fn closing_output_tab_or_clearing_tabs_aborts_running_task() {
             press(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
         }
         tokio::task::yield_now().await;
-        assert!(abort.is_finished());
+        assert_eq!(aborted.try_recv(), Ok(()));
         assert!(app.cli_output.views.is_empty());
     }
 }
 
-#[test]
-fn controls_do_not_open_parent_preferences_or_mutate_source_and_shortcuts_remain() {
+#[tokio::test]
+async fn controls_do_not_open_parent_preferences_or_mutate_source_and_shortcuts_remain() {
     let mut app = app();
     open(&mut app);
     for key in [
@@ -227,6 +251,9 @@ fn controls_do_not_open_parent_preferences_or_mutate_source_and_shortcuts_remain
         .services
         .iter()
         .any(|name| name.contains("CLI output")));
+    assert!(screen(&app, 240, 35).0.contains("Esc: cancel / back"));
+    let id = active_id(&app).unwrap();
+    finish(&mut app, id, Ok("{}".into())).await;
     assert!(screen(&app, 240, 35).0.contains("^w/⎋ close / cancel"));
 }
 
@@ -262,7 +289,7 @@ fn every_service_opens_an_independent_output_tab_or_explicit_unsupported_result(
         let id = open(&mut app);
         assert_eq!(app.tabs[0].service, service);
         assert_eq!(app.tabs[1].service, Service::CliOutput(id));
-        assert!(view(&app).pending || view(&app).failed);
+        assert!(view(&app).read.is_pending() || view(&app).failed);
         press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert_eq!(app.current_service, service);
         assert_eq!(app.tabs.len(), 1);
@@ -289,4 +316,83 @@ fn shared_tab_picker_and_g_prefix_are_not_swallowed_by_output_view() {
         .tabs
         .iter()
         .any(|tab| tab.service == Service::CliOutput(id)));
+}
+
+#[tokio::test]
+async fn context_change_discards_ready_cli_output_and_does_not_rerun() {
+    let mut app = app();
+    let id = open(&mut app);
+    let read = &mut app.cli_output.views.get_mut(&id).unwrap().read;
+    assert!(read.start(async { Ok("obsolete output from old context".into()) }));
+    tokio::task::yield_now().await;
+    app.config.account_id = "999999999999".into();
+    assert!(poll(&mut app).await);
+    assert!(view(&app).failed);
+    assert!(view(&app).text.contains("AWS context changed"));
+    assert!(!view(&app).text.contains("obsolete output"));
+    assert!(view(&app).invocation.is_none());
+    assert!(!app.cli_output.busy());
+    // Context invalidation is a single transition, not a redraw or rerun loop.
+    assert!(!poll(&mut app).await);
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
+    assert!(!app.cli_output.busy());
+}
+
+#[tokio::test]
+async fn switching_focus_to_another_tab_never_invalidates_a_cli_tab() {
+    // A CLI tab is pinned to its OWN tab id, not whichever tab has focus, so a
+    // background completion lands on the tab that opened it and merely viewing a
+    // sibling tab never marks it "context changed".
+    let mut app = app();
+    let first = open(&mut app);
+    let first_owner = app.cli_output.views.get(&first).unwrap().owner;
+    // Return to the source tab before opening another independent CLI tab.
+    press(&mut app, KeyCode::Char('['), KeyModifiers::NONE);
+    let second = open(&mut app);
+    let second_owner = app.cli_output.views.get(&second).unwrap().owner;
+    assert_ne!(first_owner, second_owner);
+    // Finish the FIRST (now background) tab while the SECOND holds focus. With
+    // owner-scoping this result is accepted, not rejected as context-changed.
+    finish(&mut app, first, Ok("{\"first\":1}".into())).await;
+    assert!(!app.cli_output.views.get(&first).unwrap().failed);
+    assert!(app
+        .cli_output
+        .views
+        .get(&first)
+        .unwrap()
+        .text
+        .contains("first"));
+    assert!(!app
+        .cli_output
+        .views
+        .get(&first)
+        .unwrap()
+        .text
+        .contains("context changed"));
+    // status_for reports the background tab's own completed state.
+    assert_eq!(
+        app.cli_output.status_for(first),
+        crate::async_read::ReadStatus::Ready
+    );
+    // Finishing the focused tab works too; neither disturbs the other.
+    finish(&mut app, second, Ok("{\"second\":2}".into())).await;
+    assert!(app
+        .cli_output
+        .views
+        .get(&first)
+        .unwrap()
+        .text
+        .contains("first"));
+    assert!(app
+        .cli_output
+        .views
+        .get(&second)
+        .unwrap()
+        .text
+        .contains("second"));
+    // An unknown id is Idle, never a fabricated Ready.
+    assert_eq!(
+        app.cli_output.status_for(9999),
+        crate::async_read::ReadStatus::Idle
+    );
 }

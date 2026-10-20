@@ -285,7 +285,7 @@ fn refresh_retry_and_sessions_remain_metadata_inventory() {
         app.handle_action(Action::RetryLoad);
         assert!(app.secretsmanager_state.secrets.loading);
         assert!(app.error_message.is_none());
-        assert_eq!(app.secretsmanager_state.secrets.items.len(), 25);
+        assert!(app.secretsmanager_state.secrets.items.is_empty());
     }
 }
 #[test]

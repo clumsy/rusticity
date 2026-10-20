@@ -138,6 +138,21 @@ and 1 MiB of stdout, uses no shell, and shows unsupported targets or failed read
 explicitly. Output tabs are not saved in sessions; their in-memory results may
 contain sensitive AWS metadata and are discarded on close or AWS context change.
 
+## Loading and freshness
+
+Tab-owned asynchronous loading currently covers SNS, Step Functions, KMS, and CLI
+output. The indicator to the right of each tab is a spinner while loading, `✓`
+after a successful read (including an empty result), or `!` after a failure.
+Indicators use the same text color as their tab label, including on the selected
+background. Filters and table headers remain visible while loading; the table body
+shows `Loading…` instead of old rows. Elapsed time and cancellation hints appear in
+the status bar's message area. Switching or opening another tab does not cancel the
+originating tab's read. Closing its tab,
+explicit cancellation, a superseding refresh, or an AWS-context change does.
+Refresh immediately removes old results; a failed read shows an error, not cached
+data. The checkmark means the latest request completed, not that AWS is continuously
+live. Other service readers have not yet been migrated to this loading lifecycle.
+
 ## Development
 
 The project uses a Cargo workspace with three crates:

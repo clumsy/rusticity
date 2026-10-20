@@ -1,12 +1,13 @@
 use crate::app::App;
+use crate::async_read::{AsyncRead, ReadStatus};
 use crate::common::{
     render_pagination_text, ColumnId, CyclicEnum, InputFocus, SortDirection, TextFilter,
 };
 use crate::kms::key::{self, Key as KmsKey};
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
-use crate::ui::{format_title, render_tabs};
+use crate::ui::table::{expanded_from_columns, Column, TableConfig};
+use crate::ui::{format_title, loading::render_table, render_tabs};
 use ratatui::prelude::*;
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -20,6 +21,12 @@ pub struct State {
     pub aws_visible_column_ids: Vec<ColumnId>,
     /// Visible column IDs for the Customer managed keys tab
     pub customer_visible_column_ids: Vec<ColumnId>,
+    /// Owned background read backing the root keys inventory.
+    pub(crate) inventory: AsyncRead<Vec<KmsKey>>,
+    /// Inline error from the most recent inventory read; never an ErrorModal.
+    pub(crate) inventory_error: Option<String>,
+    /// Key id/ARN a finder navigation queued to select once rows arrive.
+    pub pending_focus: Option<String>,
 }
 
 impl Default for State {
@@ -38,6 +45,21 @@ impl State {
             input_focus: InputFocus::Filter,
             aws_visible_column_ids: Column::aws_managed_default_visible().to_vec(),
             customer_visible_column_ids: Column::customer_managed_default_visible().to_vec(),
+            inventory: AsyncRead::default(),
+            inventory_error: None,
+            pending_focus: None,
+        }
+    }
+
+    /// Root inventory read status, with populated-but-Idle treated as Ready so
+    /// legacy loaders and seeded fixtures still render the table (see ui::sns).
+    pub(crate) fn load_status(&self) -> ReadStatus {
+        if self.detail.source.is_some() {
+            return self.detail.read_status();
+        }
+        match self.inventory.status() {
+            ReadStatus::Idle if !self.keys.items.is_empty() => ReadStatus::Ready,
+            status => status,
         }
     }
 
@@ -175,7 +197,13 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
         is_active: app.mode != crate::keymap::Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    render_table(
+        frame,
+        config,
+        app.kms_state.load_status(),
+        app.kms_state.tab.name(),
+        app.kms_state.inventory_error.as_deref(),
+    );
 }
 
 #[cfg(test)]

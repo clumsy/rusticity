@@ -89,6 +89,36 @@ fn dynamodb_items_hotkeys(app: &App) -> Vec<Span<'static>> {
     hints
 }
 
+fn tab_loading_message(app: &App) -> Option<Line<'static>> {
+    let tab = app.tabs.get(app.current_tab)?;
+    let crate::async_read::ReadStatus::Loading { started } =
+        crate::tab_runtime::status_for(app, tab.id)
+    else {
+        return None;
+    };
+    let label = match tab.service {
+        Service::KmsKeys if app.kms_state.detail.source.is_some() => "KMS key details",
+        Service::KmsKeys => "KMS keys",
+        Service::SnsTopics if app.sns_state.subscriptions.topic.is_some() => "subscriptions",
+        Service::SnsTopics => "SNS topics",
+        Service::StepFunctionsStateMachines
+            if app.stepfunctions_state.executions.machine.is_some() =>
+        {
+            "executions"
+        }
+        Service::StepFunctionsStateMachines => "state machines",
+        Service::CliOutput(_) => "CLI JSON",
+        _ => return None,
+    };
+    Some(Line::styled(
+        format!(
+            "Loading {label}… {:.1}s ⋮ Esc: cancel / back",
+            started.elapsed().as_secs_f64()
+        ),
+        Style::default().fg(Color::Cyan),
+    ))
+}
+
 pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let is_insert = match app.mode {
         Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => true,
@@ -521,20 +551,14 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap()
         .as_millis();
 
-    // Any service loading → show generic spinner inline with version on the right
-    let is_loading = app.cli_output.busy()
-        || app.ecr_state.scan.busy()
+    // Tab-owned reads show their indicator beside the tab label only. Keep the
+    // footer spinner for legacy readers that do not yet have tab indicators.
+    let is_loading = app.ecr_state.scan.busy()
         || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
         || app.vpc_state.vpcs.loading
-        || app.sns_state.topics.loading
-        || app.kms_state.detail.busy()
-        || app.sns_state.subscriptions.busy()
-        || app.stepfunctions_state.machines.loading
-        || app.stepfunctions_state.executions.busy()
         || app.secretsmanager_state.secrets.loading
         || app.rds_state.instances.loading
-        || app.kms_state.keys.loading
         || app.ecr_state.repositories.loading
         || app.ec2_state.table.loading
         || app.cfn_state.table.loading
@@ -589,16 +613,19 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             }),
         ))
     } else {
-        app.clipboard.notice().map(|notice| {
-            Line::styled(
-                notice.message.clone(),
-                Style::default().fg(if notice.failed {
-                    Color::Red
-                } else {
-                    Color::Green
-                }),
-            )
-        })
+        app.clipboard
+            .notice()
+            .map(|notice| {
+                Line::styled(
+                    notice.message.clone(),
+                    Style::default().fg(if notice.failed {
+                        Color::Red
+                    } else {
+                        Color::Green
+                    }),
+                )
+            })
+            .or_else(|| tab_loading_message(app))
     };
 
     let chunks = Layout::default()

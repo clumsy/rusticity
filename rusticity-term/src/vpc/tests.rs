@@ -321,7 +321,8 @@ fn vpc_session_restoration_uses_both_entrypoints() {
         app.handle_action(action);
         assert_eq!(app.current_service, Service::VpcVpcs);
         assert_eq!(app.tabs[0].service, Service::VpcVpcs);
-        assert!(screen(&app, 240, 45).contains("VPCs (25)"));
+        assert!(app.vpc_state.vpcs.items.is_empty());
+        assert!(screen(&app, 240, 45).contains("VPCs (0)"));
     }
 }
 

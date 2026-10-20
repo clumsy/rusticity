@@ -39,6 +39,7 @@ pub use crate::sqs::trigger::Column as SqsTriggerColumn;
 use crate::sqs::{
     EventBridgePipe, LambdaTrigger, Queue as SqsQueue, QueueTag as SqsQueueTag, SnsSubscription,
 };
+use crate::tab_runtime::{TabId, TabRuntime};
 use crate::table::TableState;
 pub use crate::ui::apig::{
     filtered_apis, State as ApigState, FILTER_CONTROLS as APIG_FILTER_CONTROLS,
@@ -69,7 +70,8 @@ pub use crate::ui::ecr::{
 };
 pub use crate::ui::efs::State as EfsState;
 pub use crate::ui::fsx::State as FsxState;
-use crate::ui::iam::{GroupTab, RoleTab, State as IamState, UserTab};
+pub use crate::ui::iam::State as IamState;
+use crate::ui::iam::{GroupTab, RoleTab, UserTab};
 pub use crate::ui::kms::{State as KmsState, Tab as KmsTab};
 pub use crate::ui::lambda::{
     filtered_lambda_applications, filtered_lambda_functions,
@@ -77,7 +79,7 @@ pub use crate::ui::lambda::{
     DetailTab as LambdaDetailTab, State as LambdaState, FILTER_CONTROLS as LAMBDA_FILTER_CONTROLS,
 };
 use crate::ui::monitoring::MonitoringState;
-use crate::ui::rds::State as RdsState;
+pub use crate::ui::rds::State as RdsState;
 pub use crate::ui::s3::{
     calculate_total_bucket_rows, calculate_total_object_rows, BucketType as S3BucketType,
     ObjectTab as S3ObjectTab, State as S3State,
@@ -90,7 +92,7 @@ pub use crate::ui::sqs::{
     State as SqsState, FILTER_CONTROLS as SQS_FILTER_CONTROLS,
     SUBSCRIPTION_FILTER_CONTROLS as SQS_SUBSCRIPTION_FILTER_CONTROLS, SUBSCRIPTION_REGION,
 };
-use crate::ui::vpc::State as VpcState;
+pub use crate::ui::vpc::State as VpcState;
 pub use crate::ui::{
     CloudWatchLogGroupsState, DateRangeType, DetailTab, EventColumn, LogGroupColumn, Preferences,
     StreamColumn, StreamSort, TimeUnit,
@@ -108,6 +110,11 @@ use rusticity_core::{RdsClient, SecretsManagerClient, VpcClient};
 
 #[derive(Clone)]
 pub struct Tab {
+    /// Stable per-tab identity. Independent of index and title: it survives
+    /// reordering, distinguishes two tabs on the same service, and is never
+    /// reissued after a tab closes. Background reads are matched to their tab
+    /// by this id.
+    pub id: crate::tab_runtime::TabId,
     pub service: Service,
     pub title: String,
     pub breadcrumb: String,
@@ -140,6 +147,9 @@ pub struct App {
     pub current_service: Service,
     pub tabs: Vec<Tab>,
     pub current_tab: usize,
+    /// Per-tab ownership of mutable service view state. Lets two tabs on the
+    /// same service hold independent rows, reads and drill-downs.
+    pub tab_runtime: crate::tab_runtime::TabRuntime,
     pub tab_picker_selected: usize,
     pub tab_filter: String,
     pub pending_key: Option<char>,
@@ -294,6 +304,28 @@ pub struct CloudTrailState {
     pub resources_expanded_index: Option<usize>,
     /// The EventName filter currently applied via API (set on Enter, cleared on empty filter).
     pub active_event_name_filter: Option<String>,
+}
+
+impl CloudTrailState {
+    /// Fresh, empty CloudTrail view state. Matches the literal both `App`
+    /// constructors install; used by the tab runtime to reset a tab's state.
+    pub fn new() -> Self {
+        Self {
+            table: TableState::new(),
+            input_focus: InputFocus::Filter,
+            current_event: None,
+            event_json_scroll: 0,
+            detail_focus: CloudTrailDetailFocus::Resources,
+            resources_expanded_index: None,
+            active_event_name_filter: None,
+        }
+    }
+}
+
+impl Default for CloudTrailState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -653,6 +685,7 @@ impl App {
             current_service: Service::CloudWatchLogGroups,
             tabs: Vec::new(),
             current_tab: 0,
+            tab_runtime: TabRuntime::default(),
             tab_picker_selected: 0,
             tab_filter: String::new(),
             pending_key: None,
@@ -894,6 +927,7 @@ impl App {
             current_service: Service::CloudWatchLogGroups,
             tabs: Vec::new(),
             current_tab: 0,
+            tab_runtime: TabRuntime::default(),
             tab_picker_selected: 0,
             tab_filter: String::new(),
             pending_key: None,
@@ -1106,7 +1140,26 @@ impl App {
         }
     }
 
+    /// Public entry point: keeps the per-tab state window in sync around the
+    /// real handler. We sync BEFORE (so the handler sees the active tab's state),
+    /// sync AFTER (so any tab switch the handler performed is reflected), and
+    /// intercept a root-level Refresh/Retry for managed services so their rows
+    /// clear before the next render. `handle_action_inner` also calls
+    /// [`crate::tab_runtime::sync_active`] immediately after each in-body tab
+    /// switch (picker / next / prev / close / session replace) so a per-service
+    /// reset never mutates the previously-visible tab's parked state.
     pub fn handle_action(&mut self, action: Action) {
+        crate::tab_runtime::sync_active(self);
+        // Clear managed rows up front on a root Refresh/Retry so the frame does
+        // not briefly show stale data. Non-managed / non-root actions fall
+        // through untouched.
+        if !crate::tab_runtime::handle_action(self, &action) {
+            self.handle_action_inner(action);
+        }
+        crate::tab_runtime::sync_active(self);
+    }
+
+    fn handle_action_inner(&mut self, action: Action) {
         if crate::cli_output::handle_action(self, &action) {
             return;
         }
@@ -1351,6 +1404,7 @@ impl App {
                 if !self.tabs.is_empty() {
                     self.current_tab = (self.current_tab + 1) % self.tabs.len();
                     self.current_service = self.tabs[self.current_tab].service;
+                    crate::tab_runtime::sync_active(self);
                 }
             }
             Action::PrevTab => {
@@ -1361,11 +1415,16 @@ impl App {
                         self.current_tab - 1
                     };
                     self.current_service = self.tabs[self.current_tab].service;
+                    crate::tab_runtime::sync_active(self);
                 }
             }
             Action::CloseTab => {
                 if !self.tabs.is_empty() {
                     self.tabs.remove(self.current_tab);
+                    // Drop the closed tab's parked snapshot, aborting its owned
+                    // background reads. Only the closing tab's owner is purged;
+                    // other tabs' reads continue.
+                    crate::tab_runtime::purge_closed(self);
                     if self.tabs.is_empty() {
                         // Last tab closed - show service picker
                         self.service_selected = false;
@@ -1383,6 +1442,7 @@ impl App {
                         self.service_selected = true;
                         self.mode = Mode::Normal;
                     }
+                    crate::tab_runtime::sync_active(self);
                 }
             }
             Action::OpenTabPicker => {
@@ -1442,6 +1502,7 @@ impl App {
                         };
 
                         self.tabs.push(Tab {
+                            id: TabId::new(),
                             service,
                             title: if service == Service::RdsInstances {
                                 service.name().into()
@@ -1469,6 +1530,8 @@ impl App {
                         self.service_selected = true;
                         self.current_session = Some(session.clone());
                     }
+                    crate::tab_runtime::reset_for_session_replace(self);
+                    crate::tab_runtime::sync_active(self);
                 }
                 self.mode = Mode::Normal;
             }
@@ -1478,6 +1541,7 @@ impl App {
             Action::OpenServicePicker => {
                 if self.mode == Mode::ServicePicker {
                     self.tabs.push(Tab {
+                        id: TabId::new(),
                         service: Service::S3Buckets,
                         title: "S3 › Buckets".to_string(),
                         breadcrumb: "S3 › Buckets".to_string(),
@@ -1487,6 +1551,7 @@ impl App {
                     self.view_mode = ViewMode::List;
                     self.service_selected = true;
                     self.mode = Mode::Normal;
+                    crate::tab_runtime::sync_active(self);
                 } else {
                     self.mode = Mode::ServicePicker;
                     self.service_picker.filter.clear();
@@ -4173,12 +4238,19 @@ impl App {
 
                 // Create new tab
                 self.tabs.push(Tab {
+                    id: TabId::new(),
                     service: new_service,
                     title: service.to_string(),
                     breadcrumb: service.to_string(),
                 });
                 self.current_tab = self.tabs.len() - 1;
                 self.current_service = new_service;
+                // Sync IMMEDIATELY after selecting the new tab, before the
+                // per-service resets below run: they must mutate the NEW tab's
+                // fresh state, never the previously-visible tab's parked state.
+                // This also parks the old owner and (for managed services) queues
+                // the first inventory read.
+                crate::tab_runtime::sync_active(self);
                 if new_service == Service::VpcVpcs {
                     self.vpc_state.vpcs.reset();
                     self.vpc_state.vpcs.loading = true;
@@ -4215,6 +4287,7 @@ impl App {
                 self.current_service = self.tabs[idx].service;
                 self.mode = Mode::Normal;
                 self.tab_filter.clear();
+                crate::tab_runtime::sync_active(self);
             }
         } else if self.mode == Mode::SessionPicker {
             let filtered = self.get_filtered_sessions();
@@ -4234,6 +4307,7 @@ impl App {
                     .tabs
                     .iter()
                     .map(|st| Tab {
+                        id: TabId::new(),
                         service: match st.service.as_str() {
                             "RdsInstances" => Service::RdsInstances,
                             "VpcVpcs" => Service::VpcVpcs,
@@ -4266,6 +4340,11 @@ impl App {
                     self.current_service = self.tabs[0].service;
                     self.service_selected = true;
                 }
+
+                // Session replace installs all-new tab ids; drop every parked
+                // snapshot from the old session and resync onto the new tab 0.
+                crate::tab_runtime::reset_for_session_replace(self);
+                crate::tab_runtime::sync_active(self);
 
                 self.mode = Mode::Normal;
             }
@@ -5630,7 +5709,7 @@ impl App {
 }
 
 impl CloudWatchInsightsState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             insights: InsightsState::default(),
             loading: false,
@@ -5639,7 +5718,7 @@ impl CloudWatchInsightsState {
 }
 
 impl CloudWatchAlarmsState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             table: TableState::new(),
             current_alarm: None,
@@ -5717,16 +5796,19 @@ mod tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchAlarms,
                 title: "CloudWatch › Alarms".to_string(),
                 breadcrumb: "CloudWatch › Alarms".to_string(),
@@ -5753,16 +5835,19 @@ mod tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchAlarms,
                 title: "CloudWatch › Alarms".to_string(),
                 breadcrumb: "CloudWatch › Alarms".to_string(),
@@ -5789,16 +5874,19 @@ mod tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchAlarms,
                 title: "CloudWatch › Alarms".to_string(),
                 breadcrumb: "CloudWatch › Alarms".to_string(),
@@ -5817,6 +5905,7 @@ mod tests {
     fn test_close_last_tab_exits_service() {
         let mut app = test_app();
         app.tabs = vec![Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch › Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -5835,16 +5924,19 @@ mod tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchAlarms,
                 title: "CloudWatch › Alarms".to_string(),
                 breadcrumb: "CloudWatch › Alarms".to_string(),
@@ -5869,6 +5961,7 @@ mod tests {
     fn test_close_service_last_tab_shows_picker() {
         let mut app = test_app();
         app.tabs = vec![Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch › Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -5890,11 +5983,13 @@ mod tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
@@ -5929,6 +6024,7 @@ mod tests {
     fn test_tab_breadcrumb_updates() {
         let mut app = test_app();
         app.tabs = vec![Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch › Log Groups".to_string(),
             breadcrumb: "CloudWatch > Log groups".to_string(),
@@ -6699,11 +6795,13 @@ mod tests {
 
         // Add some tabs
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch".to_string(),
             breadcrumb: "CloudWatch".to_string(),
         });
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::S3Buckets,
             title: "S3".to_string(),
             breadcrumb: "S3".to_string(),
@@ -7212,6 +7310,7 @@ mod tests {
         app.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
 
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -7248,6 +7347,7 @@ mod tests {
         });
 
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -7307,6 +7407,7 @@ mod tests {
 
         // Add a tab
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -7988,6 +8089,7 @@ mod tests {
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.tabs = vec![Tab {
+            id: TabId::new(),
             service: Service::CloudFormationStacks,
             title: "CloudFormation › Stacks".to_string(),
             breadcrumb: "CloudFormation › Stacks".to_string(),
@@ -8646,11 +8748,13 @@ mod tab_filter_tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "Tab 1".to_string(),
                 breadcrumb: "CloudWatch > Log groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::S3Buckets,
                 title: "Tab 2".to_string(),
                 breadcrumb: "S3 › Buckets".to_string(),
@@ -8669,16 +8773,19 @@ mod tab_filter_tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch Logs".to_string(),
                 breadcrumb: "CloudWatch > Log groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::S3Buckets,
                 title: "S3 Buckets".to_string(),
                 breadcrumb: "S3 › Buckets".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchAlarms,
                 title: "CloudWatch Alarms".to_string(),
                 breadcrumb: "CloudWatch › Alarms".to_string(),
@@ -8700,11 +8807,13 @@ mod tab_filter_tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "Tab 1".to_string(),
                 breadcrumb: "CloudWatch > Log groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::S3Buckets,
                 title: "Tab 2".to_string(),
                 breadcrumb: "S3 › Buckets".to_string(),
@@ -8729,11 +8838,13 @@ mod tab_filter_tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch Logs".to_string(),
                 breadcrumb: "CloudWatch > Log groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::S3Buckets,
                 title: "S3 Buckets".to_string(),
                 breadcrumb: "S3 › Buckets".to_string(),
@@ -8757,11 +8868,13 @@ mod tab_filter_tests {
         let mut app = test_app();
         app.tabs = vec![
             Tab {
+                id: TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch Logs".to_string(),
                 breadcrumb: "CloudWatch > Log groups".to_string(),
             },
             Tab {
+                id: TabId::new(),
                 service: Service::S3Buckets,
                 title: "S3 Buckets".to_string(),
                 breadcrumb: "S3 › Buckets".to_string(),
@@ -12238,6 +12351,7 @@ mod region_latency_tests {
         app.mode = Mode::Normal;
         app.cfn_state.status_filter = CfnStatusFilter::All;
         app.tabs = vec![Tab {
+            id: TabId::new(),
             service: Service::CloudFormationStacks,
             title: "CloudFormation › Stacks".to_string(),
             breadcrumb: "CloudFormation › Stacks".to_string(),
@@ -14686,6 +14800,7 @@ mod sqs_tests {
         app.current_service = Service::CloudFormationStacks;
         app.service_selected = true;
         app.tabs.push(Tab {
+            id: TabId::new(),
             service: Service::CloudFormationStacks,
             title: "CFN".to_string(),
             breadcrumb: "CloudFormation".to_string(),

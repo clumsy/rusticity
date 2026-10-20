@@ -92,8 +92,8 @@ fn detail(
 fn apply(app: &mut App, detail: KmsKeyDetail) {
     let view = app.kms_state.detail.view_mut().unwrap();
     super::apply_detail(view, detail);
-    app.kms_state.detail.pending = false;
-    app.kms_state.detail.running = None;
+    // The read is idle after a completed fetch; keep the scope for later refresh.
+    app.kms_state.detail.read.cancel();
 }
 
 fn screen(app: &App, width: u16) -> String {
@@ -248,23 +248,41 @@ fn per_section_error_is_visible_not_no_results() {
     );
     act(&mut app, KeyCode::Tab, KeyModifiers::NONE); // Aliases
     let out = screen(&app, 160);
-    assert!(out.contains("Warning"), "error surfaced as warning");
+    // The failed section consumes the pane with an explicit error — never rows
+    // and never a "No aliases" empty-success stand-in.
+    assert!(out.contains("Read failed"), "error surfaced");
     assert!(out.contains("AccessDenied"), "error text visible");
+    assert!(!out.contains("No aliases"));
+    // A sibling section that succeeded still renders Ready.
+    for _ in 0..3 {
+        act(&mut app, KeyCode::Tab, KeyModifiers::NONE); // -> Tags
+    }
+    assert_eq!(app.kms_state.detail.view().unwrap().tab, Tab::Tags);
+    assert!(!screen(&app, 160).contains("Read failed"));
 }
 
 #[test]
-fn general_pane_prefers_fresh_metadata_over_list_snapshot() {
+fn general_pane_shows_fresh_metadata_only_never_the_stale_list_snapshot() {
     let mut app = app();
+    app.tabs.push(crate::app::Tab {
+        id: crate::tab_runtime::TabId::new(),
+        service: Service::KmsKeys,
+        title: Service::KmsKeys.name().into(),
+        breadcrumb: Service::KmsKeys.name().into(),
+    });
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    // Before fetch: list snapshot description shown.
+    // Before the fetch returns, General is loading: the stale list-snapshot
+    // description must NOT be shown.
     let out = screen(&app, 160);
-    assert!(out.contains("list desc"));
+    assert!(!out.contains("list desc"));
+    assert!(out.contains("Loading KMS key details"));
     apply(&mut app, detail(Ok(vec![]), Ok(vec![])));
     let out = screen(&app, 160);
     assert!(
         out.contains("fresh desc"),
-        "fresh DescribeKey metadata preferred"
+        "fresh DescribeKey metadata shown once Ready"
     );
+    assert!(!out.contains("list desc"));
 }
 
 #[test]
@@ -316,7 +334,7 @@ async fn leaving_kms_tears_down_detail() {
 }
 
 #[tokio::test]
-async fn stale_data_retained_and_marked_on_real_refresh_failure() {
+async fn refresh_clears_all_sections_and_failure_retains_no_prior_data() {
     let mut app = app();
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     apply(
@@ -329,32 +347,36 @@ async fn stale_data_retained_and_marked_on_real_refresh_failure() {
             Ok(vec![]),
         ),
     );
+    // A refresh clears every section immediately: no rows, metadata, rotation or
+    // policy survive into the reload.
     act(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     assert!(app.kms_state.detail.busy());
-    assert_eq!(
-        app.kms_state.detail.view().unwrap().tabs[Tab::Aliases as usize]
-            .table
-            .items
-            .len(),
-        1
-    );
-    // Inject the failing background completion, then let real poll update state.
-    app.kms_state.detail.pending = false;
-    let task = tokio::spawn(async { Err("AccessDeniedException: refresh".into()) });
+    let view = app.kms_state.detail.view().unwrap();
+    assert!(view.tabs[Tab::Aliases as usize].table.items.is_empty());
+    assert!(view.metadata().is_none());
+    assert!(view.rotation().is_none());
+    assert!(view.policy().is_none());
+    // Inject the failing background completion in place of the real AWS read.
+    assert!(app
+        .kms_state
+        .detail
+        .read
+        .start(async { Err("AccessDeniedException: refresh".into()) }));
     tokio::task::yield_now().await;
-    app.kms_state.detail.running = Some(Running { task });
     assert!(poll(&mut app).await);
     let view = app.kms_state.detail.view().unwrap();
-    assert_eq!(view.tabs[Tab::Aliases as usize].table.items.len(), 1);
-    assert!(view
-        .tabs
-        .iter()
-        .all(|tab| tab.error.as_deref().unwrap().contains("Stale")));
-    assert!(view.metadata.is_some() && view.rotation.is_some() && view.policy.is_some());
+    // Every section is empty and errored — no previous data, no "Stale" marker.
+    assert!(view.tabs[Tab::Aliases as usize].table.items.is_empty());
+    assert!(view.metadata().is_none() && view.rotation().is_none() && view.policy().is_none());
+    assert_eq!(
+        app.kms_state.detail.read_status(),
+        crate::async_read::ReadStatus::Failed
+    );
     app.kms_state.detail.view_mut().unwrap().tab = Tab::Policy;
     let out = screen(&app, 160);
-    assert!(out.contains("Stale") && out.contains("AccessDenied"));
-    assert!(out.contains("2012-10-17"));
+    assert!(out.contains("Read failed") && out.contains("AccessDenied"));
+    assert!(!out.contains("Stale"));
+    assert!(!out.contains("2012-10-17"));
 }
 
 #[test]
@@ -403,6 +425,12 @@ fn table_tab_page_size_is_independent_per_table() {
 #[tokio::test]
 async fn cli_tab_does_not_close_detail_and_actions_use_entered_key() {
     let mut app = app();
+    app.tabs.push(crate::app::Tab {
+        id: crate::tab_runtime::TabId::new(),
+        service: Service::KmsKeys,
+        title: "KMS".into(),
+        breadcrumb: "KMS".into(),
+    });
     assert!(app.get_console_url().ends_with("#/kms/keys"));
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     apply(&mut app, detail(Ok(vec![]), Ok(vec![])));
@@ -419,9 +447,11 @@ async fn cli_tab_does_not_close_detail_and_actions_use_entered_key() {
     assert!(!super::handle_action(&mut app, &Action::OpenCliOutput));
     act(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
     assert!(matches!(app.current_service, Service::CliOutput(_)));
-    assert!(!poll(&mut app).await);
+    // The originating key state is parked while CLI output has focus.
+    assert!(app.kms_state.detail.source.is_none());
+    app.handle_action(Action::PrevTab);
+    assert_eq!(app.current_service, Service::KmsKeys);
     assert!(app.kms_state.detail.source.is_some());
-    app.current_service = Service::KmsKeys;
     assert!(!poll(&mut app).await);
     act(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     assert!(app.get_console_url().ends_with("#/kms/keys"));
@@ -433,10 +463,22 @@ async fn esc_and_scope_changes_abort_inflight_task_and_discard_data() {
     for change in 0..5 {
         let mut app = app();
         act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        app.kms_state.detail.pending = false;
-        let task = tokio::spawn(std::future::pending::<Result<Output, String>>());
-        let abort = task.abort_handle();
-        app.kms_state.detail.running = Some(Running { task });
+        // Enter already queued a request at the current scope; consume it with a
+        // never-completing future carrying a drop guard, so dropping the read
+        // (abort-on-drop in AsyncRead) is observable.
+        let (tx, mut aborted) = tokio::sync::oneshot::channel::<()>();
+        struct Guard(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+        let guard = Guard(Some(tx));
+        assert!(app.kms_state.detail.read.start(async move {
+            let _guard = guard;
+            std::future::pending::<Result<Output, String>>().await
+        }));
+        tokio::task::yield_now().await;
         match change {
             0 => act(&mut app, KeyCode::Esc, KeyModifiers::NONE),
             1 => app.profile = "other".into(),
@@ -448,14 +490,15 @@ async fn esc_and_scope_changes_abort_inflight_task_and_discard_data() {
             assert!(poll(&mut app).await);
         }
         tokio::task::yield_now().await;
-        assert!(abort.is_finished());
+        // The spawned task was aborted, so its future (and drop guard) dropped.
+        assert_eq!(aborted.try_recv(), Ok(()));
         assert!(!app.kms_state.detail.busy());
         assert!(app.kms_state.detail.source.is_none());
     }
 }
 
 #[test]
-fn section_failure_keeps_previous_data_while_other_sections_refresh() {
+fn failed_section_is_cleared_while_sibling_sections_show_fresh_data() {
     let mut app = app();
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     apply(
@@ -481,18 +524,19 @@ fn section_failure_keeps_previous_data_while_other_sections_refresh() {
     refreshed.metadata.key_state = "Disabled".into();
     apply(&mut app, refreshed);
     let view = app.kms_state.detail.view().unwrap();
-    assert_eq!(
-        view.tabs[Tab::Aliases as usize].table.items[0].field("Alias"),
-        "alias/old"
-    );
+    // The failed Aliases section is cleared — the old row is gone, not stale.
+    assert!(view.tabs[Tab::Aliases as usize].table.items.is_empty());
     assert!(view.tabs[Tab::Aliases as usize]
         .error
         .as_deref()
         .unwrap()
-        .contains("Stale"));
+        .contains("AccessDenied"));
+    // A sibling section that succeeded shows its fresh data.
     assert_eq!(view.tabs[Tab::Tags as usize].table.items.len(), 1);
     assert!(view.tabs[Tab::Tags as usize].error.is_none());
-    assert!(view.policy.is_some() && view.rotation.is_some());
+    // Failed summary sections are cleared, not retained.
+    assert!(view.policy().is_none() && view.rotation().is_none());
+    // General succeeded, so its fresh (Disabled) metadata shows.
     let out = screen(&app, 160);
     assert!(out.contains("Disabled"));
 }
@@ -625,4 +669,16 @@ fn status_hints_and_rendering_survive_narrow_areas_on_every_tab() {
             }
         }
     }
+}
+
+#[test]
+fn refresh_cannot_rebind_old_key_metadata_to_a_changed_context() {
+    let mut app = app();
+    act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    apply(&mut app, detail(Ok(vec![]), Ok(vec![])));
+    app.profile = "other".into();
+    act(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
+    assert!(app.kms_state.detail.source.is_none());
+    assert!(app.kms_state.detail.view().is_none());
+    assert!(!app.kms_state.detail.busy());
 }

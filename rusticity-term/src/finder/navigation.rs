@@ -65,6 +65,7 @@ pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -
 }
 
 fn start_resource_view(app: &mut App, kind: ResourceKind) {
+    crate::tab_runtime::sync_active(app);
     let target = service(kind);
     app.current_service = target;
     app.service_selected = true;
@@ -72,11 +73,13 @@ fn start_resource_view(app: &mut App, kind: ResourceKind) {
     app.mode = Mode::Normal;
     app.page_input.clear();
     app.tabs.push(Tab {
+        id: crate::tab_runtime::TabId::new(),
         service: target,
         title: target.name().into(),
         breadcrumb: target.name().into(),
     });
     app.current_tab = app.tabs.len() - 1;
+    crate::tab_runtime::sync_active(app);
 }
 
 fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -> Result<()> {
@@ -204,20 +207,9 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
         }
         ResourceKind::Key => {
             app.kms_state.detail.close();
-            app.load_kms_keys().await?;
-            let key = app
-                .kms_state
-                .keys
-                .items
-                .iter()
-                .find(|k| k.key_id == resource.id)
-                .ok_or_else(|| anyhow::anyhow!("Key no longer appears in inventory"))?;
-            app.kms_state.tab = if key.key_manager.eq_ignore_ascii_case("aws") {
-                ui::kms::Tab::AwsManaged
-            } else {
-                ui::kms::Tab::CustomerManaged
-            };
-            focus!(app.kms_state.keys, key_id);
+            crate::kms::inventory::request(app);
+            app.kms_state.pending_focus = Some(resource.id.clone());
+            app.kms_state.keys.filter = resource.id.clone();
         }
         ResourceKind::Function => {
             app.lambda_state.current_function = None;
@@ -270,21 +262,15 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<()> {
         }
         ResourceKind::Topic => {
             app.sns_state.subscriptions.close();
-            app.load_sns_topics().await?;
-            focus!(app.sns_state.topics, name);
-            app.sns_state.topics.selected = ui::sns::filtered_topics(app)
-                .iter()
-                .position(|row| row.name == resource.id)
-                .unwrap_or(0);
+            crate::sns::inventory::request(app);
+            app.sns_state.pending_focus = Some(resource.id.clone());
+            app.sns_state.topics.filter = resource.id.clone();
         }
         ResourceKind::StateMachine => {
             app.stepfunctions_state.executions.close();
-            app.load_stepfunctions().await?;
-            focus!(app.stepfunctions_state.machines, arn);
-            app.stepfunctions_state.machines.selected = ui::stepfunctions::filtered_machines(app)
-                .iter()
-                .position(|row| row.arn == resource.id)
-                .unwrap_or(0);
+            crate::stepfunctions::inventory::request(app);
+            app.stepfunctions_state.pending_focus = Some(resource.id.clone());
+            app.stepfunctions_state.machines.filter = resource.id.clone();
         }
         ResourceKind::Secret => {
             // The id is the full ARN; focus on it and select the exact row via

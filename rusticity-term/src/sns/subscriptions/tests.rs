@@ -12,6 +12,12 @@ fn app() -> App {
     app.current_service = Service::SnsTopics;
     app.service_selected = true;
     app.mode = Mode::Normal;
+    app.tabs.push(crate::app::Tab {
+        id: crate::tab_runtime::TabId::new(),
+        service: app.current_service,
+        title: app.current_service.name().into(),
+        breadcrumb: app.current_service.name().into(),
+    });
     app.config.account_id = "123456789012".into();
     app.sns_state.topics.items = vec![
         SnsTopic::from_arn("arn:aws:sns:us-east-1:123456789012:other").unwrap(),
@@ -39,17 +45,29 @@ fn row(i: usize) -> SnsSubscription {
     }
 }
 async fn finish(app: &mut App, result: Result<Vec<SnsSubscription>, String>) {
-    app.sns_state.subscriptions.running = Some(Running(tokio::spawn(async { result })));
+    let topic = app.sns_state.subscriptions.topic.as_ref().unwrap().clone();
+    let scope = scope(app, &topic);
+    let state = &mut app.sns_state.subscriptions;
+    state.read.request(scope);
+    assert!(state.read.start(async move { result }));
     tokio::task::yield_now().await;
     assert!(poll(app).await);
 }
+/// A view whose topic-scoped read has completed with 25 rows (status Ready).
+/// Synchronous tests build it by driving a real local completion — no AWS and
+/// no hand-set flags, so `read_status()` is genuinely Ready as in production.
 fn loaded() -> App {
     let mut app = app();
     open(&mut app);
+    let rows: Vec<SnsSubscription> = (0..25).rev().map(row).collect();
+    let topic = app.sns_state.subscriptions.topic.as_ref().unwrap().clone();
+    let scope = scope(&app, &topic);
     let state = &mut app.sns_state.subscriptions;
+    state.read = AsyncRead::resolved(scope, true);
     state.table.loading = false;
-    state.loaded = true;
-    state.table.items = (0..25).rev().map(row).collect();
+    state.table.items = rows;
+    state.table.reset();
+    state.error = None;
     app
 }
 fn screen(app: &App, width: u16, height: u16) -> String {
@@ -236,32 +254,72 @@ fn cli_copy_and_output_use_topic_scoped_subscription_read_even_for_pending_rows(
     assert!(app.clipboard.snapshot_requested());
 }
 #[tokio::test]
-async fn empty_success_and_denied_reads_are_distinct_and_refresh_retains_previous_rows() {
+async fn empty_success_and_denied_reads_are_distinct_and_refresh_clears_previous_rows() {
     let mut app = app();
     open(&mut app);
+    // A denied read shows an explicit failure, never an empty "No subscriptions".
     finish(&mut app, Err("AuthorizationError: denied".into())).await;
+    assert_eq!(
+        app.sns_state.subscriptions.read_status(),
+        crate::async_read::ReadStatus::Failed
+    );
     let text = screen(&app, 240, 40);
-    assert!(text.contains("Subscriptions unavailable"));
+    assert!(text.contains("Read failed") && text.contains("denied"));
     assert!(!text.contains("No subscriptions for this topic"));
+    // A successful empty read is Ready, shown as the genuine empty state.
     press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     finish(&mut app, Ok(vec![])).await;
+    assert_eq!(
+        app.sns_state.subscriptions.read_status(),
+        crate::async_read::ReadStatus::Ready
+    );
     assert!(screen(&app, 240, 40).contains("No subscriptions for this topic"));
+    // Load one row, then refresh: the row is dropped the instant the refresh
+    // begins and never reappears while loading.
     finish(&mut app, Ok(vec![row(0)])).await;
-    press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
-    finish(&mut app, Err("ExpiredToken: expired".into())).await;
     assert_eq!(app.sns_state.subscriptions.table.items.len(), 1);
-    let text = screen(&app, 240, 40);
-    assert!(text.contains("previously loaded"));
-    assert!(text.contains("user000"));
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
+    assert!(app.sns_state.subscriptions.table.items.is_empty());
+    let loading = screen(&app, 240, 40);
+    assert!(loading.contains("Loading subscriptions"));
+    assert!(!loading.contains("user000"));
+    // A failed refresh leaves no rows and shows no stale data.
+    finish(&mut app, Err("ExpiredToken: expired".into())).await;
+    assert!(app.sns_state.subscriptions.table.items.is_empty());
+    let failed = screen(&app, 240, 40);
+    assert!(failed.contains("Read failed") && failed.contains("expired"));
+    assert!(!failed.contains("user000"));
+    assert!(!failed.contains("previously loaded"));
 }
 #[tokio::test]
 async fn escape_context_switch_and_service_change_abort_pending_task() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     for case in 0..6 {
         let mut app = app();
         open(&mut app);
-        let task = tokio::spawn(std::future::pending::<Result<Vec<SnsSubscription>, String>>());
-        let abort = task.abort_handle();
-        app.sns_state.subscriptions.running = Some(Running(task));
+        // A drop guard stands in for the spawned read: aborting the task (on
+        // context change or close) drops the future and flips the flag, which
+        // is the real cancellation signal — no network is ever opened.
+        let aborted = Arc::new(AtomicBool::new(false));
+        struct Guard(Arc<AtomicBool>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let guard = Guard(aborted.clone());
+        let topic = app.sns_state.subscriptions.topic.as_ref().unwrap().clone();
+        let scope = scope(&app, &topic);
+        let state = &mut app.sns_state.subscriptions;
+        state.read.request(scope);
+        assert!(state.read.start(async move {
+            let _guard = guard;
+            std::future::pending::<Result<Vec<SnsSubscription>, String>>().await
+        }));
+        tokio::task::yield_now().await;
         match case {
             0 => app.profile = "other".into(),
             1 => app.config.region = "eu-west-1".into(),
@@ -274,7 +332,7 @@ async fn escape_context_switch_and_service_change_abort_pending_task() {
             assert!(poll(&mut app).await);
         }
         tokio::task::yield_now().await;
-        assert!(abort.is_finished());
+        assert!(aborted.load(Ordering::SeqCst));
         assert!(!app.sns_state.subscriptions.busy());
         assert!(app.sns_state.subscriptions.topic.is_none());
     }
@@ -327,4 +385,17 @@ fn returning_from_subscriptions_restores_topics_list_console_link() {
         app.get_console_url(),
         "https://us-east-1.console.aws.amazon.com/sns/v3/home?region=us-east-1#/topics"
     );
+}
+
+#[test]
+fn refresh_cannot_rebind_old_subscriptions_to_a_changed_context() {
+    let mut app = loaded();
+    assert!(!app.sns_state.subscriptions.table.items.is_empty());
+    app.config.account_id = "999999999999".into();
+    // Refresh may arrive before the next poll. It must discard the old view,
+    // not bless cached rows under the newly selected AWS identity.
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
+    assert!(app.sns_state.subscriptions.topic.is_none());
+    assert!(app.sns_state.subscriptions.table.items.is_empty());
+    assert!(!app.sns_state.subscriptions.busy());
 }

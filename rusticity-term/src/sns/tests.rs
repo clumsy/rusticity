@@ -19,6 +19,12 @@ fn app() -> App {
     app.current_service = Service::SnsTopics;
     app.service_selected = true;
     app.mode = Mode::Normal;
+    app.tabs.push(crate::app::Tab {
+        id: crate::tab_runtime::TabId::new(),
+        service: app.current_service,
+        title: app.current_service.name().into(),
+        breadcrumb: app.current_service.name().into(),
+    });
     app.config.account_id = "123456789012".into();
     app.sns_state.topics.items = (0..25)
         .rev()
@@ -263,7 +269,7 @@ fn sns_preferences_toggle_actual_columns_protect_last_and_change_page_size() {
 }
 
 #[test]
-fn sns_refresh_and_error_retry_preserve_rows_and_do_not_refresh_logs() {
+fn sns_refresh_and_error_retry_clear_rows_and_do_not_refresh_logs() {
     let mut app = app();
     app.handle_action(Action::Refresh);
     assert!(app.sns_state.topics.loading);
@@ -275,7 +281,7 @@ fn sns_refresh_and_error_retry_preserve_rows_and_do_not_refresh_logs() {
     assert!(app.sns_state.topics.loading);
     assert_eq!(app.mode, Mode::Normal);
     assert!(app.error_message.is_none());
-    assert_eq!(app.sns_state.topics.items.len(), 25);
+    assert!(app.sns_state.topics.items.is_empty());
 }
 
 #[test]
@@ -304,7 +310,7 @@ fn sns_rendering_and_status_hints_cover_all_common_actions() {
     press(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
     assert!(app.clipboard.snapshot_requested());
     app.sns_state.topics.items.clear();
-    app.sns_state.topics.loading = true;
+    crate::sns::inventory::request(&mut app);
     assert!(screen(&app, 240, 45).contains("Loading SNS topics"));
     for (w, h) in [(20, 4), (80, 15)] {
         screen(&app, w, h);

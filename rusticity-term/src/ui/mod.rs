@@ -15,6 +15,7 @@ pub mod fsx;
 pub mod iam;
 pub mod kms;
 pub mod lambda;
+pub(crate) mod loading;
 pub mod monitoring;
 mod pagination;
 mod preferences;
@@ -671,13 +672,19 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(info_widget, chunks[0]);
 
     // Tabs line
-    let tab_data: Vec<(&str, bool)> = app
-        .tabs
-        .iter()
-        .enumerate()
-        .map(|(i, tab)| (tab.title.as_ref(), i == app.current_tab))
-        .collect();
-    let spans = render_tab_spans(&tab_data);
+    let mut spans = Vec::new();
+    for (index, tab) in app.tabs.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw(" ⋮ "));
+        }
+        let style = service_tab_style(index == app.current_tab);
+        spans.push(Span::styled(tab.title.as_str(), style));
+        if let Some(mut marker) = loading::marker(crate::tab_runtime::status_for(app, tab.id)) {
+            spans.push(Span::styled(" ", style));
+            marker.style = style.patch(marker.style);
+            spans.push(marker);
+        }
+    }
 
     let tabs_widget = Paragraph::new(Line::from(spans));
     frame.render_widget(tabs_widget, chunks[1]);
@@ -1861,11 +1868,13 @@ mod tests {
         // Test that tabs are formatted with ⋮ separator
         let tabs = [
             Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
@@ -1889,11 +1898,13 @@ mod tests {
     fn test_current_tab_highlighted() {
         let tabs = [
             crate::app::Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             crate::app::Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: Service::CloudWatchInsights,
                 title: "CloudWatch › Logs Insights".to_string(),
                 breadcrumb: "CloudWatch › Logs Insights".to_string(),
@@ -2031,11 +2042,13 @@ mod tests {
     fn test_tab_picker_shows_breadcrumb_and_preview() {
         let tabs = [
             crate::app::Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: crate::app::Service::CloudWatchLogGroups,
                 title: "CloudWatch › Log Groups".to_string(),
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
             },
             crate::app::Tab {
+                id: crate::tab_runtime::TabId::new(),
                 service: crate::app::Service::CloudWatchAlarms,
                 title: "CloudWatch > Alarms".to_string(),
                 breadcrumb: "CloudWatch > Alarms".to_string(),
@@ -2873,6 +2886,7 @@ mod tests {
         app.current_service = Service::CloudWatchAlarms;
         app.service_selected = true;
         app.tabs.push(crate::app::Tab {
+            id: crate::tab_runtime::TabId::new(),
             service: Service::CloudWatchAlarms,
             title: "CloudWatch > Alarms".to_string(),
             breadcrumb: "CloudWatch > Alarms".to_string(),
@@ -5547,6 +5561,7 @@ mod tests {
         app.service_selected = true;
         app.view_mode = ViewMode::Detail;
         app.tabs.push(crate::app::Tab {
+            id: crate::tab_runtime::TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch › Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),
@@ -5584,6 +5599,7 @@ mod tests {
         app.service_selected = true;
         app.view_mode = ViewMode::Events;
         app.tabs.push(crate::app::Tab {
+            id: crate::tab_runtime::TabId::new(),
             service: Service::CloudWatchLogGroups,
             title: "CloudWatch › Log Groups".to_string(),
             breadcrumb: "CloudWatch › Log Groups".to_string(),

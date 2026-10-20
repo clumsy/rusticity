@@ -27,6 +27,7 @@ pub struct State {
     pub(crate) inventory_error: Option<String>,
     /// Topic ARN/name a finder navigation queued to select once rows arrive.
     pub pending_focus: Option<String>,
+    pub(crate) open_after_load: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -39,6 +40,7 @@ impl Default for State {
             inventory: AsyncRead::default(),
             inventory_error: None,
             pending_focus: None,
+            open_after_load: false,
         }
     }
 }
@@ -52,6 +54,7 @@ impl State {
             return self.subscriptions.read_status();
         }
         match self.inventory.status() {
+            ReadStatus::Ready if self.inventory_error.is_some() => ReadStatus::Failed,
             ReadStatus::Idle if !self.topics.items.is_empty() => ReadStatus::Ready,
             status => status,
         }

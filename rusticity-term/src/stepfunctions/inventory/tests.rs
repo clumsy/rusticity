@@ -163,3 +163,30 @@ fn handle_action_ignores_non_inventory_actions_and_inactive_service() {
     assert!(!active(&app));
     assert!(!handle_action(&mut app, &Action::Refresh));
 }
+
+#[tokio::test]
+async fn navigation_enters_exact_machine_and_preserves_express_no_request_rule() {
+    for machine_type in ["STANDARD", "EXPRESS"] {
+        let mut app = app();
+        let mut wanted = machine("wanted");
+        wanted.machine_type = machine_type.into();
+        app.stepfunctions_state.pending_focus = Some(wanted.arn.clone());
+        app.stepfunctions_state.open_after_load = true;
+        assert!(finish(&mut app, Ok(vec![machine("wanted-suffix"), wanted.clone()])).await);
+        assert_eq!(
+            app.stepfunctions_state
+                .executions
+                .machine
+                .as_ref()
+                .unwrap()
+                .arn,
+            wanted.arn
+        );
+        assert_eq!(
+            app.stepfunctions_state.executions.busy(),
+            machine_type == "STANDARD"
+        );
+        assert!(app.stepfunctions_state.machines.filter.is_empty());
+        assert!(!app.stepfunctions_state.open_after_load);
+    }
+}

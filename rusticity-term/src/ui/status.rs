@@ -125,6 +125,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::ResourceFinder => app.resource_finder.focus == FinderFocus::Filter,
         Mode::ServicePicker | Mode::SpaceMenu => app.service_picker.filter_active,
         Mode::RegionPicker => app.region_filter_active,
+        Mode::BookmarkPicker => app.bookmarks.filtering,
         Mode::SessionPicker => app.session_filter_active,
         Mode::ProfilePicker => app.profile_filter_active,
         _ => false,
@@ -137,7 +138,16 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
 
-    let mut help = if app.mode == Mode::Normal && crate::cli_output::active(app) {
+    let mut help = if app.mode == Mode::BookmarkPicker {
+        let mut hints = first_hint("↑↓", "select");
+        hints.extend(hint("⏎", "open saved context"));
+        hints.extend(hint("i / ⇥", "filter"));
+        hints.extend(hint("←→", "details"));
+        hints.extend(hint("Del", "remove"));
+        hints.extend(hint("^r", "reload"));
+        hints.extend(last_hint("⎋", "back"));
+        hints
+    } else if app.mode == Mode::Normal && crate::cli_output::active(app) {
         let mut hints = first_hint("[]", "tabs");
         hints.extend(hint("↑↓", "scroll"));
         hints.extend(hint("^u/^d", "page"));
@@ -546,6 +556,18 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    if crate::bookmarks::available(app) {
+        if app.current_service == Service::DynamoDbTables && is_items_tab(app) && can_load_more(app)
+        {
+            help.extend(hint("^b", "bookmark"));
+        } else {
+            let mut bookmark = first_hint("^b", "bookmark");
+            bookmark.push(Span::raw(" "));
+            bookmark.extend(help);
+            help = bookmark;
+        }
+    }
+
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -624,6 +646,14 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                         Color::Green
                     }),
                 )
+            })
+            .or_else(|| {
+                app.bookmarks.notice().map(|(message, failed)| {
+                    Line::styled(
+                        message.to_string(),
+                        Style::default().fg(if failed { Color::Red } else { Color::Green }),
+                    )
+                })
             })
             .or_else(|| tab_loading_message(app))
     };

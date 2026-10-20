@@ -41,6 +41,8 @@ pub fn request(app: &mut App) {
     state.keys.reset();
     state.keys.loading = true;
     state.inventory_error = None;
+    state.pending_focus = None;
+    state.open_after_load = false;
     state.inventory.request(scope);
 }
 
@@ -56,6 +58,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             state.keys.loading = false;
             state.inventory_error = Some("Cancelled — Ctrl+R to retry".into());
             state.pending_focus = None;
+            state.open_after_load = false;
             true
         }
         (Mode::Normal, Action::Refresh) | (Mode::ErrorModal, Action::RetryLoad) => {
@@ -85,6 +88,7 @@ pub async fn poll(app: &mut App) -> bool {
         state.keys.loading = false;
         state.inventory_error = None;
         state.pending_focus = None;
+        state.open_after_load = false;
         return true;
     }
 
@@ -118,6 +122,7 @@ pub async fn poll(app: &mut App) -> bool {
                 state.keys.items.clear();
                 state.keys.reset();
                 state.pending_focus = None;
+                state.open_after_load = false;
                 state.inventory_error = Some(sanitize(error.into_message("KMS keys read failed")));
             }
         }
@@ -149,9 +154,13 @@ fn to_ui_key(k: rusticity_core::kms::KmsKey) -> UiKey {
 }
 
 fn apply_pending_focus(app: &mut App) {
+    let open = std::mem::take(&mut app.kms_state.open_after_load);
     let Some(target) = app.kms_state.pending_focus.take() else {
         return;
     };
+    if open {
+        app.kms_state.keys.filter.clear();
+    }
     if let Some(key) = app
         .kms_state
         .keys
@@ -170,6 +179,13 @@ fn apply_pending_focus(app: &mut App) {
         .position(|key: &&UiKey| key.key_id == target || key.key_arn == target)
     {
         app.kms_state.keys.selected = index;
+        if open {
+            crate::finder::navigation::enter_loaded(app);
+        }
+    } else if open {
+        app.kms_state.keys.items.clear();
+        app.kms_state.inventory_error =
+            Some(format!("Resource not found or not accessible: {target}"));
     }
 }
 

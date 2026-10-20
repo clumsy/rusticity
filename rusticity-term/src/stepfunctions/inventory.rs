@@ -36,6 +36,8 @@ pub fn request(app: &mut App) {
     state.machines.reset();
     state.machines.loading = true;
     state.inventory_error = None;
+    state.pending_focus = None;
+    state.open_after_load = false;
     state.inventory.request(scope);
 }
 
@@ -51,6 +53,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             state.machines.loading = false;
             state.inventory_error = Some("Cancelled — Ctrl+R to retry".into());
             state.pending_focus = None;
+            state.open_after_load = false;
             true
         }
         (Mode::Normal, Action::Refresh) | (Mode::ErrorModal, Action::RetryLoad) => {
@@ -80,6 +83,7 @@ pub async fn poll(app: &mut App) -> bool {
         state.machines.loading = false;
         state.inventory_error = None;
         state.pending_focus = None;
+        state.open_after_load = false;
         return true;
     }
 
@@ -121,6 +125,7 @@ pub async fn poll(app: &mut App) -> bool {
                 state.machines.items.clear();
                 state.machines.reset();
                 state.pending_focus = None;
+                state.open_after_load = false;
                 state.inventory_error =
                     Some(sanitize(error.into_message("State machines read failed")));
             }
@@ -131,14 +136,25 @@ pub async fn poll(app: &mut App) -> bool {
 }
 
 fn apply_pending_focus(app: &mut App) {
+    let open = std::mem::take(&mut app.stepfunctions_state.open_after_load);
     let Some(target) = app.stepfunctions_state.pending_focus.take() else {
         return;
     };
+    if open {
+        app.stepfunctions_state.machines.filter.clear();
+    }
     if let Some(index) = crate::ui::stepfunctions::filtered_machines(app)
         .iter()
         .position(|machine: &&StateMachineMetadata| machine.arn == target || machine.name == target)
     {
         app.stepfunctions_state.machines.selected = index;
+        if open {
+            crate::finder::navigation::enter_loaded(app);
+        }
+    } else if open {
+        app.stepfunctions_state.machines.items.clear();
+        app.stepfunctions_state.inventory_error =
+            Some(format!("Resource not found or not accessible: {target}"));
     }
 }
 

@@ -580,6 +580,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Mode::ProfilePicker => render_profile_picker(frame, app, area),
         Mode::CalendarPicker => render_calendar_picker(frame, app, area),
         Mode::TabPicker => render_tab_picker(frame, app, area),
+        Mode::BookmarkPicker => crate::bookmarks::render(frame, app, area),
         Mode::SessionPicker => render_session_picker(frame, app, area),
         Mode::QuitConfirm => render_quit_confirm(frame, area),
         _ => {}
@@ -1016,6 +1017,10 @@ fn render_space_menu(frame: &mut Frame, area: Rect) {
             Span::raw(" regions"),
         ]),
         Line::from(vec![
+            Span::styled("k", Style::default().fg(Color::Yellow)),
+            Span::raw(" bookmarks"),
+        ]),
+        Line::from(vec![
             Span::styled("s", Style::default().fg(Color::Yellow)),
             Span::raw(" sessions"),
         ]),
@@ -1247,7 +1252,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
     }
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     r.centered(
         Constraint::Percentage(percent_x.min(100)),
         Constraint::Percentage(percent_y.min(100)),
@@ -1278,6 +1283,14 @@ fn render_help_modal(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![Span::styled("⇤⇥ ", red_text()), Span::raw("  Tab")]),
         Line::from(vec![Span::styled("␣  ", red_text()), Span::raw("  Space")]),
+        Line::from(vec![
+            Span::styled("^b ", red_text()),
+            Span::raw("  Ctrl+b (toggle resource bookmark)"),
+        ]),
+        Line::from(vec![
+            Span::styled("␣k ", red_text()),
+            Span::raw("  Space then k (open bookmarks)"),
+        ]),
         Line::from(vec![
             Span::styled("^l ", red_text()),
             Span::raw("  Ctrl+l (related resources)"),

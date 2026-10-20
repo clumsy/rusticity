@@ -65,7 +65,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         finder::poll(&mut app);
-        if app.clipboard.expire_notice() {
+        let notice_expired = app.clipboard.expire_notice();
+        let bookmark_notice_expired = app.bookmarks.expire_notice();
+        if notice_expired || bookmark_notice_expired {
             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
         }
         // Any service loading → animate the spinner via periodic redraws
@@ -75,6 +77,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.s3_state.object_view.busy()
             || app.s3_state.object_view.notice.is_some()
             || app.clipboard.notice().is_some()
+            || app.bookmarks.notice().is_some()
             || app.mode == Mode::ResourceFinder
             || app.log_groups_state.loading
             || app.kms_state.keys.loading
@@ -114,6 +117,28 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                 match event? {
                     Some(Event::Key(key)) => {
                         use crossterm::event::KeyCode;
+                        // Bookmarks use the local store on explicit input only. Do not
+                        // fall through into any service refresh/select loaders.
+                        let bookmark_action = handle_key(key, app.mode);
+                        if app.mode == Mode::BookmarkPicker || matches!(bookmark_action,
+                            Some(rusticity_term::keymap::Action::ToggleBookmark | rusticity_term::keymap::Action::OpenBookmarkPicker)) {
+                            if let Some(action) = bookmark_action { app.handle_action(action); }
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            let mut enter_resource = false;
+                            if app.bookmarks.pending_open.is_some() {
+                                match rusticity_term::bookmarks::open_pending(&mut app).await {
+                                    Ok(enter) => enter_resource = enter,
+                                    Err(error) => {
+                                        app.error_message = Some(format!("Failed to open bookmark: {error:#}"));
+                                        app.error_scroll = 0;
+                                        app.mode = Mode::ErrorModal;
+                                    }
+                                }
+                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            }
+                            // Reuse the normal Enter dispatch and native detail loaders.
+                            if !enter_resource { continue; }
+                        }
                         // Output-tab keys bypass service loaders; opening is explicit.
                         // Shared g-prefix navigation must still reach its handler below.
                         if rusticity_term::cli_output::handle_key(&mut app, key)
@@ -134,16 +159,20 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             if clipboard.flush(&mut app.clipboard, frame.buffer) {
                                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             }
+                            let mut enter_resource = false;
                             if let Some(resource) = app.resource_finder.pending_open.take() {
-                                if let Err(error) = finder::navigation::open_resource(&mut app, resource).await {
-                                    app.error_message = Some(format!("Failed to open resource: {error:#}"));
-                                    app.error_scroll = 0;
-                                    app.mode = Mode::ErrorModal;
+                                match finder::navigation::open_resource(&mut app, resource).await {
+                                    Ok(enter) => enter_resource = enter,
+                                    Err(error) => {
+                                        app.error_message = Some(format!("Failed to open resource: {error:#}"));
+                                        app.error_scroll = 0;
+                                        app.mode = Mode::ErrorModal;
+                                    }
                                 }
                                 app.resource_finder.opening = false;
                                 terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             }
-                            continue;
+                            if !enter_resource { continue; }
                         }
 
                         // Async detail reads/transfers must not fall through to

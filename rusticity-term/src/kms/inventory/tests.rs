@@ -214,3 +214,22 @@ fn handle_action_ignores_non_inventory_actions_and_entered_detail() {
     assert!(!active(&app));
     assert!(!handle_action(&mut app, &Action::Refresh));
 }
+
+#[tokio::test]
+async fn navigation_enters_exact_key_despite_duplicate_aliases() {
+    let mut app = app();
+    let wanted = ui_key("wanted-key", "same-label");
+    let mut other = ui_key("other-key", "same-label");
+    other.key_manager = "Aws".into();
+    app.kms_state.pending_focus = Some(wanted.key_arn.clone());
+    app.kms_state.open_after_load = true;
+    assert!(finish(&mut app, Ok(vec![other, wanted.clone()])).await);
+    assert_eq!(
+        app.kms_state.detail.source.as_ref().unwrap().key_arn,
+        wanted.key_arn
+    );
+    assert_eq!(app.kms_state.tab, Tab::CustomerManaged);
+    assert!(app.kms_state.keys.filter.is_empty());
+    assert!(app.kms_state.detail.busy());
+    assert!(!app.kms_state.open_after_load);
+}

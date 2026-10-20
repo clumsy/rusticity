@@ -16,11 +16,16 @@ pub enum Mode {
     ProfilePicker,
     CalendarPicker,
     TabPicker,
+    BookmarkPicker,
     SessionPicker,
     QuitConfirm,
 }
 
 pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
+    if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
+        return matches!(mode, Mode::Normal | Mode::ResourceFinder)
+            .then_some(Action::ToggleBookmark);
+    }
     if key.code == KeyCode::Char('e') && key.modifiers == KeyModifiers::CONTROL {
         return matches!(mode, Mode::Normal | Mode::ResourceFinder)
             .then_some(Action::OpenCliOutput);
@@ -100,6 +105,7 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('a') => Some(Action::OpenCloudWatchAlarms),
             KeyCode::Char('c') => Some(Action::CloseService),
             KeyCode::Char('b') | KeyCode::Char('t') => Some(Action::OpenTabPicker),
+            KeyCode::Char('k') => Some(Action::OpenBookmarkPicker),
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
             KeyCode::Char('f') => Some(Action::OpenResourceFinder),
             KeyCode::Char('h') => Some(Action::ShowHelp),
@@ -284,6 +290,28 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char(c) => Some(Action::FilterInput(c)),
             _ => None,
         },
+        Mode::BookmarkPicker => match key.code {
+            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Enter => Some(Action::Select),
+            KeyCode::Down => Some(Action::NextItem),
+            KeyCode::Up => Some(Action::PrevItem),
+            KeyCode::PageDown => Some(Action::PageDown),
+            KeyCode::PageUp => Some(Action::PageUp),
+            KeyCode::Left => Some(Action::CollapseRow),
+            KeyCode::Right => Some(Action::ExpandRow),
+            KeyCode::Tab | KeyCode::BackTab => Some(Action::NextFilterFocus),
+            KeyCode::Delete => Some(Action::DeleteBookmark),
+            KeyCode::Backspace => Some(Action::FilterBackspace),
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Refresh),
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                Some(Action::FilterInput(c))
+            }
+            _ => None,
+        },
         Mode::ProfilePicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
             KeyCode::Char('i') => Some(Action::EnterFilterMode),
@@ -314,6 +342,9 @@ pub enum Action {
     OpenSpaceMenu,
     CloseMenu,
     OpenServicePicker,
+    ToggleBookmark,
+    OpenBookmarkPicker,
+    DeleteBookmark,
     OpenResourceFinder,
     OpenRelatedResources,
     OpenCloudWatch,

@@ -156,6 +156,25 @@ guidance; retries remain manual with `Ctrl+R`. The checkmark means the latest
 request completed, not that AWS is continuously live. Other service readers have
 not yet been migrated to this loading lifecycle.
 
+## Resource bookmarks
+
+`Ctrl+B` toggles a bookmark for the selected resource (or the supported parent
+resource in a nested view), only when it has a dedicated resource view. It also
+works on a selected finder result. The status bar shows the shortcut only for
+eligible selections. VPC, RDS, Secrets Manager, and unsupported references cannot
+be bookmarked until dedicated views exist. `Space`,
+then `k`, opens the bookmark picker: `i`/Tab filters, arrows select, Right/Left
+show/hide the identity, Enter opens, Delete removes, and `Ctrl+R` reloads the file.
+The existing `Space b`/`Space t` tab picker is unchanged.
+
+Bookmarks store only identity metadata plus profile, Region, and an account guard
+in `~/.rusticity/bookmarks.json`. Opening explicitly uses the saved profile/Region
+and verifies the account before resolving the exact ID/ARN and entering its
+resource view in a new tab. It never uses a display-name filter as the destination.
+It does not restore resource contents or nested-tab state. Unsupported resources
+are refused; failed or missing resources do not delete their bookmarks. No
+credentials, secret values, or AWS mutations are involved in saving bookmarks.
+
 ## Development
 
 The project uses a Cargo workspace with three crates:

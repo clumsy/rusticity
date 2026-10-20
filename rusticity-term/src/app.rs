@@ -266,6 +266,7 @@ pub struct App {
     pub profile_filter_active: bool,
     pub available_profiles: Vec<AwsProfile>,
     pub clipboard: ClipboardState,
+    pub bookmarks: crate::bookmarks::State,
     pub cli_output: crate::cli_output::State,
 }
 
@@ -894,6 +895,7 @@ impl App {
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
             clipboard: ClipboardState::default(),
+            bookmarks: crate::bookmarks::State::default(),
             cli_output: crate::cli_output::State::default(),
         })
     }
@@ -1136,6 +1138,7 @@ impl App {
             profile_picker_selected: 0,
             available_profiles: Vec::new(),
             clipboard: ClipboardState::default(),
+            bookmarks: crate::bookmarks::State::default(),
             cli_output: crate::cli_output::State::default(),
         }
     }
@@ -1153,7 +1156,9 @@ impl App {
         // Clear managed rows up front on a root Refresh/Retry so the frame does
         // not briefly show stale data. Non-managed / non-root actions fall
         // through untouched.
-        if !crate::tab_runtime::handle_action(self, &action) {
+        if !crate::bookmarks::handle_action(self, &action)
+            && !crate::tab_runtime::handle_action(self, &action)
+        {
             self.handle_action_inner(action);
         }
         crate::tab_runtime::sync_active(self);
@@ -1195,6 +1200,9 @@ impl App {
         }
         match action {
             Action::Noop
+            | Action::ToggleBookmark
+            | Action::OpenBookmarkPicker
+            | Action::DeleteBookmark
             | Action::OpenResourceFinder
             | Action::OpenRelatedResources
             | Action::CopyCliCommand

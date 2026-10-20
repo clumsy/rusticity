@@ -39,6 +39,8 @@ pub fn request(app: &mut App) {
     state.topics.reset();
     state.topics.loading = true;
     state.inventory_error = None;
+    state.pending_focus = None;
+    state.open_after_load = false;
     state.inventory.request(scope);
 }
 
@@ -57,6 +59,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
             state.topics.loading = false;
             state.inventory_error = Some("Cancelled — Ctrl+R to retry".into());
             state.pending_focus = None;
+            state.open_after_load = false;
             true
         }
         (Mode::Normal, Action::Refresh) | (Mode::ErrorModal, Action::RetryLoad) => {
@@ -93,6 +96,7 @@ pub async fn poll(app: &mut App) -> bool {
         state.topics.loading = false;
         state.inventory_error = None;
         state.pending_focus = None;
+        state.open_after_load = false;
         return true;
     }
 
@@ -125,6 +129,7 @@ pub async fn poll(app: &mut App) -> bool {
                 state.topics.items.clear();
                 state.topics.reset();
                 state.pending_focus = None;
+                state.open_after_load = false;
                 state.inventory_error =
                     Some(sanitize(error.into_message("SNS topics read failed")));
             }
@@ -136,14 +141,25 @@ pub async fn poll(app: &mut App) -> bool {
 
 /// Select the row a finder navigation queued, once the fresh rows are in.
 fn apply_pending_focus(app: &mut App) {
+    let open = std::mem::take(&mut app.sns_state.open_after_load);
     let Some(target) = app.sns_state.pending_focus.take() else {
         return;
     };
+    if open {
+        app.sns_state.topics.filter.clear();
+    }
     if let Some(index) = crate::ui::sns::filtered_topics(app)
         .iter()
         .position(|topic: &&SnsTopic| topic.arn == target || topic.name == target)
     {
         app.sns_state.topics.selected = index;
+        if open {
+            crate::finder::navigation::enter_loaded(app);
+        }
+    } else if open {
+        app.sns_state.topics.items.clear();
+        app.sns_state.inventory_error =
+            Some(format!("Resource not found or not accessible: {target}"));
     }
 }
 

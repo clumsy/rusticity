@@ -177,6 +177,8 @@ const VIEW_OPERATIONS: &[&str] = &[
     "sns list-topics",
     "sns list-subscriptions-by-topic",
     "secretsmanager list-secrets",
+    "secretsmanager describe-secret",
+    "secretsmanager list-secret-version-ids",
     "rds describe-db-instances",
     "ec2 describe-vpcs",
     "ec2 describe-instances",

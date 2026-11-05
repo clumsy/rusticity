@@ -1195,7 +1195,9 @@ impl App {
         if crate::stepfunctions::actions::handle_action(self, &action) {
             return;
         }
-        if crate::secretsmanager::actions::handle_action(self, &action) {
+        if crate::secretsmanager::detail::handle_action(self, &action)
+            || crate::secretsmanager::actions::handle_action(self, &action)
+        {
             return;
         }
         match action {
@@ -3137,7 +3139,10 @@ impl App {
                 }
             }
             Service::SecretsManagerSecrets => {
-                parts.extend(["Secrets Manager".into(), "Secrets".into()])
+                parts.extend(["Secrets Manager".into(), "Secrets".into()]);
+                if let Some(secret) = &self.secretsmanager_state.detail.source {
+                    parts.push(secret.name.clone());
+                }
             }
             Service::FsxFileSystems => {
                 parts.extend(crate::fsx::actions::breadcrumb(self));
@@ -4281,6 +4286,7 @@ impl App {
                     self.stepfunctions_state.machines.loading = true;
                 }
                 if new_service == Service::SecretsManagerSecrets {
+                    self.secretsmanager_state.detail.close();
                     self.secretsmanager_state.secrets.reset();
                     self.secretsmanager_state.secrets.loading = true;
                 }

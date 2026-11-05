@@ -107,6 +107,9 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             "executions"
         }
         Service::StepFunctionsStateMachines => "state machines",
+        Service::SecretsManagerSecrets if app.secretsmanager_state.detail.source.is_some() => {
+            "secret details"
+        }
         Service::CliOutput(_) => "CLI JSON",
         _ => return None,
     };
@@ -271,7 +274,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     {
         // Service-specific Items hints must precede the legacy ViewMode branches.
         dynamodb_items_hotkeys(app)
-    } else if app.mode == Mode::Normal && crate::kms::detail::active(app) {
+    } else if app.mode == Mode::Normal
+        && (crate::kms::detail::active(app) || crate::secretsmanager::detail::active(app))
+    {
         let mut hints = first_hint("⇤⇥", "tabs");
         hints.extend(hint("↑↓", "scroll / select"));
         hints.extend(hint("i", "filter table"));
@@ -321,6 +326,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::SnsTopics {
             hints.extend(hint("⏎", "subscriptions"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::SecretsManagerSecrets {
+            hints.extend(hint("⏎", "secret details"));
             hints.extend(hint("←→", "toggle"));
         } else {
             hints.extend(hint("⏎ / ←→", "toggle"));

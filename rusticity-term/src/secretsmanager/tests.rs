@@ -145,7 +145,8 @@ fn filter_and_pagination_reuse_shared_input_and_never_start_value_requests() {
         app.view_mode = legacy;
         app.secretsmanager_state.secrets.page_size = PageSize::Ten;
         press(&mut app, KeyCode::Down, KeyModifiers::NONE);
-        press(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        // Enter opens the secret detail; → toggles the inventory row.
+        press(&mut app, KeyCode::Right, KeyModifiers::NONE);
         assert_eq!(app.secretsmanager_state.secrets.expanded_item, Some(1));
         press(&mut app, KeyCode::Char('i'), KeyModifiers::NONE);
         for c in "PROD".chars() {

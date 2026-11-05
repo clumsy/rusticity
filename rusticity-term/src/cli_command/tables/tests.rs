@@ -168,6 +168,55 @@ fn secrets_lists_secrets() {
 }
 
 #[test]
+fn secrets_entered_detail_tables_scope_by_full_arn_and_summaries_are_none() {
+    use crate::secretsmanager::detail::Tab;
+    let arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf";
+    let mut app = app(Service::SecretsManagerSecrets);
+    app.secretsmanager_state.secrets.items = vec![rusticity_core::SecretMetadata {
+        name: "prod/db".into(),
+        arn: arn.into(),
+        ..Default::default()
+    }];
+    app.handle_action(Action::Select);
+    let tab = |app: &App| {
+        app.secretsmanager_state
+            .detail
+            .view()
+            .map(|view| view.tab)
+            .unwrap()
+    };
+    let expected = [
+        (Tab::Overview, None),
+        (Tab::Rotation, None),
+        (
+            Tab::Versions,
+            Some("secretsmanager list-secret-version-ids"),
+        ),
+        (Tab::Replication, Some("secretsmanager describe-secret")),
+        (Tab::Tags, Some("secretsmanager describe-secret")),
+    ];
+    for (want_tab, want_op) in expected {
+        assert_eq!(tab(&app), want_tab);
+        let result = target(&app);
+        match want_op {
+            None => assert!(
+                matches!(result, Ok(None)),
+                "{want_tab:?}: {}",
+                shape(&result)
+            ),
+            Some(want) => {
+                let (op, input) = view_of(&result);
+                assert_eq!(op, want);
+                assert_eq!(input, serde_json::json!({ "SecretId": arn }));
+                assert_eq!(scope_of(&result).unwrap().kind, ResourceKind::Secret);
+                assert!(!op.contains("value"), "never a secret-value command");
+            }
+        }
+        app.handle_action(Action::NextDetailTab);
+    }
+}
+
+#[test]
 fn rds_describes_all_db_instances_unscoped() {
     let app = app(Service::RdsInstances);
     let (op, input) = view_of(&target(&app));

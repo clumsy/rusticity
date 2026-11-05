@@ -141,8 +141,39 @@ fn sns(app: &App) -> Result<Option<Target>, String> {
 }
 
 // ── Secrets Manager ───────────────────────────────────────────────────────────
-// Only a top inventory of secrets; no entered table. list-secrets, unscoped.
-fn secrets(_app: &App) -> Result<Option<Target>, String> {
+// Top inventory → list-secrets, unscoped. Entered secret: Versions →
+// list-secret-version-ids; Replication and Tags are tables taken from the
+// parent DescribeSecret, so they map to describe-secret. Both are scoped by the
+// full secret ARN. The summary panes → None (the row command is describe-secret
+// for the entered secret). Never a secret-value command.
+fn secrets(app: &App) -> Result<Option<Target>, String> {
+    use crate::secretsmanager::detail::Tab;
+    let detail = &app.secretsmanager_state.detail;
+    if let Some(secret) = &detail.source {
+        let region = secret.arn.split(':').nth(3).unwrap_or_default().to_string();
+        let scope = Some(scope_resource(
+            ResourceKind::Secret,
+            &secret.name,
+            &secret.arn,
+            &region,
+        ));
+        let input = json!({ "SecretId": secret.arn });
+        return match detail.view().map(|v| v.tab).unwrap_or_default() {
+            Tab::Versions => Ok(Some(view(
+                "secretsmanager list-secret-version-ids",
+                input,
+                None,
+                scope,
+            ))),
+            Tab::Replication | Tab::Tags => Ok(Some(view(
+                "secretsmanager describe-secret",
+                input,
+                None,
+                scope,
+            ))),
+            Tab::Overview | Tab::Rotation => Ok(None),
+        };
+    }
     Ok(Some(view(
         "secretsmanager list-secrets",
         json!({}),

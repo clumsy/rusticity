@@ -13,7 +13,10 @@ pub fn selected_arn(app: &App) -> Option<String> {
         .map(|s| s.arn.clone())
 }
 pub fn console_url(app: &App) -> String {
-    super::console_url(&app.config.region)
+    match &app.secretsmanager_state.detail.source {
+        Some(secret) => super::console_url_secret(&app.config.region, &secret.name),
+        None => super::console_url(&app.config.region),
+    }
 }
 pub fn go_to_page(app: &mut App, page: usize) {
     let count = filtered_secrets(app).len();

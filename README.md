@@ -44,7 +44,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring
 - 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
 - 🪣 **S3**: Buckets and objects with navigation
-- 🔐 **Secrets Manager**: Secret metadata inventory (no secret values)
+- 🔐 **Secrets Manager**: Secret metadata inventory and secret details (configuration, rotation, replication, versions, tags), with no secret values
 - 🔀 **Step Functions**: State machines and Standard-workflow execution metadata (no execution input/output)
 - 📣 **SNS**: Topics
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
@@ -161,8 +161,8 @@ not yet been migrated to this loading lifecycle.
 `Ctrl+B` toggles a bookmark for the selected resource (or the supported parent
 resource in a nested view), only when it has a dedicated resource view. It also
 works on a selected finder result. The status bar shows the shortcut only for
-eligible selections. VPC, RDS, Secrets Manager, and unsupported references cannot
-be bookmarked until dedicated views exist. `Space`,
+eligible selections. VPC, RDS, and unsupported references cannot be bookmarked
+until dedicated views exist. `Space`,
 then `k`, opens the bookmark picker: `i`/Tab filters, arrows select, Right/Left
 show/hide the identity, Enter opens, Delete removes, and `Ctrl+R` reloads the file.
 The existing `Space b`/`Space t` tab picker is unchanged.

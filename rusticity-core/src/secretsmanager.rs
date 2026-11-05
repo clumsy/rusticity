@@ -1,6 +1,8 @@
 //! Read-only Secrets Manager metadata inventory. ListSecrets supplies metadata
 //! without per-secret DescribeSecret calls or secret-value retrieval. It excludes
 //! secrets scheduled for deletion by default.
+pub mod detail;
+
 use crate::config::AwsConfig;
 use crate::pagination::{Pagination, StopReason};
 use anyhow::{bail, Context, Result};
@@ -149,6 +151,12 @@ impl SecretsManagerClient {
             }
         }
         bail!("Secrets Manager ListSecrets exceeded {max_pages} pages; inventory is incomplete")
+    }
+
+    /// Read-only metadata detail for one secret, identified by its full ARN.
+    /// Uses only DescribeSecret and ListSecretVersionIds; never a secret value.
+    pub async fn secret_details(&self, secret_arn: &str) -> Result<detail::SecretDetail> {
+        detail::secret_details(&self.config, secret_arn).await
     }
 }
 

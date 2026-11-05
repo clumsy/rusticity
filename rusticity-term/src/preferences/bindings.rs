@@ -38,6 +38,7 @@ enum Source {
     SfnStateMachines,
     SfnExecutions,
     SecretsManagerSecrets,
+    SecretsManagerSecretDetails,
 }
 
 fn columns(
@@ -152,6 +153,9 @@ impl Source {
                 Self::SfnExecutions
             }
             Service::StepFunctionsStateMachines => Self::SfnStateMachines,
+            Service::SecretsManagerSecrets if crate::secretsmanager::detail::active(app) => {
+                Self::SecretsManagerSecretDetails
+            }
             Service::SecretsManagerSecrets => Self::SecretsManagerSecrets,
             _ => return None,
         })
@@ -318,6 +322,20 @@ impl Source {
                 |id| crate::secretsmanager::columns::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
+            Self::SecretsManagerSecretDetails => {
+                let view = secret_detail(app);
+                // Summary panes carry no columns and leak no inventory preferences.
+                if !view.tab.is_table() {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                }
+                let ids: Vec<_> = view.tab.columns().iter().map(|(id, _)| *id).collect();
+                columns(
+                    &ids,
+                    &view.data().visible_column_ids,
+                    |id| Some(id.into()),
+                    None,
+                )
+            }
         };
         let prefs = match self {
             Self::EfsTags
@@ -391,6 +409,7 @@ impl Source {
             Self::SfnExecutions => app.stepfunctions_state.executions.table.page_size,
             Self::SfnStateMachines => app.stepfunctions_state.machines.page_size,
             Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.page_size,
+            Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -440,6 +459,9 @@ impl Source {
             Self::SfnExecutions => app.stepfunctions_state.executions.table.set_page_size(size),
             Self::SfnStateMachines => app.stepfunctions_state.machines.set_page_size(size),
             Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.set_page_size(size),
+            Self::SecretsManagerSecretDetails => {
+                secret_detail_mut(app).data_mut().table.set_page_size(size)
+            }
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -482,9 +504,26 @@ impl Source {
             Self::SfnExecutions => &mut app.stepfunctions_state.executions.visible_column_ids,
             Self::SfnStateMachines => &mut app.stepfunctions_state.visible_column_ids,
             Self::SecretsManagerSecrets => &mut app.secretsmanager_state.visible_column_ids,
+            Self::SecretsManagerSecretDetails => {
+                &mut secret_detail_mut(app).data_mut().visible_column_ids
+            }
             _ => return None,
         })
     }
+}
+
+fn secret_detail(app: &App) -> &crate::secretsmanager::detail::View {
+    app.secretsmanager_state
+        .detail
+        .view()
+        .expect("secret detail source")
+}
+
+fn secret_detail_mut(app: &mut App) -> &mut crate::secretsmanager::detail::View {
+    app.secretsmanager_state
+        .detail
+        .view_mut()
+        .expect("secret detail source")
 }
 
 pub(crate) fn active(app: &App) -> Option<Preferences> {

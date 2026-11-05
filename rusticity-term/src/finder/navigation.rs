@@ -9,11 +9,9 @@ use rusticity_core::LogGroup;
 /// Only kinds with a dedicated resource view can be bookmarked.
 pub fn has_detail(kind: ResourceKind) -> bool {
     match kind {
-        ResourceKind::Vpc
-        | ResourceKind::Database
-        | ResourceKind::Secret
-        | ResourceKind::Reference => false,
-        ResourceKind::Api
+        ResourceKind::Vpc | ResourceKind::Database | ResourceKind::Reference => false,
+        ResourceKind::Secret
+        | ResourceKind::Api
         | ResourceKind::Stack
         | ResourceKind::Alarm
         | ResourceKind::LogGroup
@@ -359,8 +357,9 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
             app.stepfunctions_state.machines.filter.clear();
         }
         ResourceKind::Secret => {
-            // The id is the full ARN; focus on it and select the exact row via
-            // the filtered helper so same-named secrets stay distinct.
+            // The id is the full ARN. Isolate that exact row so same-named
+            // secrets stay distinct; the ordinary Enter path opens its detail.
+            app.secretsmanager_state.detail.close();
             app.load_secrets().await?;
             focus!(app.secretsmanager_state.secrets, arn);
             app.secretsmanager_state.secrets.selected = ui::secretsmanager::filtered_secrets(app)

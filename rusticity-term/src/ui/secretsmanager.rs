@@ -15,14 +15,23 @@ use ratatui::{prelude::*, widgets::Paragraph};
 use rusticity_core::SecretMetadata;
 
 pub struct State {
+    pub detail: crate::secretsmanager::detail::State,
     pub secrets: TableState<SecretMetadata>,
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
 }
+impl State {
+    /// Read status for the tab indicator. Only the entered detail is tracked;
+    /// the inventory still uses its legacy loader and reports Idle.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.detail.read_status()
+    }
+}
 impl Default for State {
     fn default() -> Self {
         Self {
+            detail: crate::secretsmanager::detail::State::default(),
             secrets: TableState::new(),
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
@@ -50,8 +59,8 @@ pub fn filtered_secrets(app: &App) -> Vec<&SecretMetadata> {
                 crate::secretsmanager::columns::replication_type(s),
                 match s.rotation_enabled {
                     Some(true) => "Enabled",
-                    Some(false) => "Disabled",
-                    None => "Unknown",
+                    // Absent means never configured; the console shows Disabled.
+                    Some(false) | None => "Disabled",
                 },
             ]
         },
@@ -60,6 +69,10 @@ pub fn filtered_secrets(app: &App) -> Vec<&SecretMetadata> {
     rows
 }
 pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
+    if crate::secretsmanager::detail::active(app) {
+        crate::secretsmanager::detail::render(frame, app, area);
+        return;
+    }
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.secretsmanager_state;
     let view = state

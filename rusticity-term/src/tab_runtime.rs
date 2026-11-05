@@ -546,7 +546,10 @@ pub fn has_background_work(app: &App) -> bool {
 fn is_managed(service: Service) -> bool {
     matches!(
         service,
-        Service::SnsTopics | Service::StepFunctionsStateMachines | Service::KmsKeys
+        Service::SnsTopics
+            | Service::StepFunctionsStateMachines
+            | Service::KmsKeys
+            | Service::SecretsManagerSecrets
     )
 }
 
@@ -583,6 +586,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::SnsTopics => app.sns_state.load_status(),
         Service::StepFunctionsStateMachines => app.stepfunctions_state.load_status(),
         Service::KmsKeys => app.kms_state.load_status(),
+        Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -594,6 +598,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::SnsTopics(s, _) => s.load_status(),
         Snapshot::StepFunctionsStateMachines(s, _) => s.load_status(),
         Snapshot::KmsKeys(s, _) => s.load_status(),
+        Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -744,6 +749,8 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
             let inventory = crate::kms::inventory::poll(app).await;
             crate::kms::detail::poll(app).await || inventory
         }
+        // The inventory keeps its legacy loader; only the entered detail is owned.
+        Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
         _ => false,
     }
 }

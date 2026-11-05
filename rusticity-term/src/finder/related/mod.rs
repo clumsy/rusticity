@@ -312,9 +312,13 @@ pub fn selected(app: &App) -> Option<Resource> {
         }
         Service::SecretsManagerSecrets => {
             // The id is the full ARN (its suffix disambiguates same-named
-            // secrets); the SDK name is the display name.
+            // secrets); the SDK name is the display name. An entered detail is
+            // the selection, independent of the inventory highlight.
             let filtered = crate::ui::secretsmanager::filtered_secrets(app);
-            let secret = filtered.get(app.secretsmanager_state.secrets.selected)?;
+            let secret = match &app.secretsmanager_state.detail.source {
+                Some(entered) => entered,
+                None => filtered.get(app.secretsmanager_state.secrets.selected)?,
+            };
             Some(Resource {
                 kind: ResourceKind::Secret,
                 id: secret.arn.clone(),

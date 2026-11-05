@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::{cw::AlarmColumn, s3::BucketColumn};
+pub mod acm;
 pub mod apig;
 pub mod cfn;
 pub mod cloudtrail;
@@ -773,6 +774,7 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
+        Service::AcmCertificates => acm::render_certificates(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }
@@ -1239,6 +1241,7 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::LambdaApplications => lambda::render_applications(frame, app, area),
         Service::S3Buckets => s3::render_buckets(frame, app, area),
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
+        Service::AcmCertificates => acm::render_certificates(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }

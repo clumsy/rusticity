@@ -110,6 +110,7 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
         Service::SecretsManagerSecrets if app.secretsmanager_state.detail.source.is_some() => {
             "secret details"
         }
+        Service::AcmCertificates => "certificates",
         Service::CliOutput(_) => "CLI JSON",
         _ => return None,
     };
@@ -312,6 +313,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::VpcVpcs
                 | Service::SnsTopics
                 | Service::SecretsManagerSecrets
+                | Service::AcmCertificates
                 | Service::StepFunctionsStateMachines
                 | Service::KmsKeys
         )

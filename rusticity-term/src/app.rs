@@ -41,6 +41,7 @@ use crate::sqs::{
 };
 use crate::tab_runtime::{TabId, TabRuntime};
 use crate::table::TableState;
+pub use crate::ui::acm::State as AcmState;
 pub use crate::ui::apig::{
     filtered_apis, State as ApigState, FILTER_CONTROLS as APIG_FILTER_CONTROLS,
 };
@@ -161,6 +162,7 @@ pub struct App {
     pub sqs_state: SqsState,
     pub sns_state: SnsState,
     pub secretsmanager_state: SecretsManagerState,
+    pub acm_state: AcmState,
     pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
@@ -379,6 +381,7 @@ pub enum ViewMode {
 pub enum Service {
     /// Ephemeral output tab, not an AWS service picker entry.
     CliOutput(u64),
+    AcmCertificates,
     ApiGatewayApis,
     CloudWatchLogGroups,
     CloudWatchInsights,
@@ -409,6 +412,7 @@ impl Service {
     pub fn name(&self) -> &str {
         match self {
             Service::CliOutput(_) => "CLI output",
+            Service::AcmCertificates => "ACM › Certificates",
             Service::ApiGatewayApis => "API Gateway › APIs",
             Service::CloudWatchLogGroups => "CloudWatch › Log Groups",
             Service::CloudWatchInsights => "CloudWatch › Logs Insights",
@@ -466,6 +470,9 @@ impl App {
         }
         if self.current_service == Service::SecretsManagerSecrets {
             return Some(&mut self.secretsmanager_state.secrets.filter);
+        }
+        if self.current_service == Service::AcmCertificates {
+            return Some(&mut self.acm_state.certificates.filter);
         }
         if self.current_service == Service::SnsTopics {
             return Some(if self.sns_state.subscriptions.topic.is_some() {
@@ -584,6 +591,8 @@ impl App {
                 }
             } else if self.current_service == Service::SecretsManagerSecrets {
                 self.secretsmanager_state.secrets.reset();
+            } else if self.current_service == Service::AcmCertificates {
+                self.acm_state.certificates.reset();
             }
             // Automatically reset selection for all services
             if self.current_service == Service::CloudWatchAlarms {
@@ -706,6 +715,7 @@ impl App {
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
+            acm_state: AcmState::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -949,6 +959,7 @@ impl App {
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
+            acm_state: AcmState::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -1197,6 +1208,7 @@ impl App {
         }
         if crate::secretsmanager::detail::handle_action(self, &action)
             || crate::secretsmanager::actions::handle_action(self, &action)
+            || crate::acm::actions::handle_action(self, &action)
         {
             return;
         }
@@ -1395,6 +1407,7 @@ impl App {
                     Service::VpcVpcs => self.vpc_state.vpcs.reset(),
                     Service::SnsTopics => self.sns_state.topics.reset(),
                     Service::SecretsManagerSecrets => self.secretsmanager_state.secrets.reset(),
+                    Service::AcmCertificates => self.acm_state.certificates.reset(),
                     Service::StepFunctionsStateMachines => {
                         self.stepfunctions_state.machines.reset()
                     }
@@ -1493,6 +1506,7 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
+                            "AcmCertificates" => Service::AcmCertificates,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
@@ -3138,6 +3152,7 @@ impl App {
                     parts.push(machine.name.clone());
                 }
             }
+            Service::AcmCertificates => parts.extend(["ACM".into(), "Certificates".into()]),
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()]);
                 if let Some(secret) = &self.secretsmanager_state.detail.source {
@@ -3234,6 +3249,7 @@ impl App {
             Service::SnsTopics => crate::sns::actions::console_url(self),
             Service::StepFunctionsStateMachines => crate::stepfunctions::actions::console_url(self),
             Service::SecretsManagerSecrets => crate::secretsmanager::actions::console_url(self),
+            Service::AcmCertificates => crate::acm::actions::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -3951,6 +3967,10 @@ impl App {
             crate::secretsmanager::actions::go_to_page(self, page);
             return;
         }
+        if self.current_service == Service::AcmCertificates {
+            crate::acm::actions::go_to_page(self, page);
+            return;
+        }
         if page == 0 {
             return;
         }
@@ -4245,6 +4265,7 @@ impl App {
                     "SNS › Topics" => Service::SnsTopics,
                     "Step Functions › State machines" => Service::StepFunctionsStateMachines,
                     "Secrets Manager › Secrets" => Service::SecretsManagerSecrets,
+                    "ACM › Certificates" => Service::AcmCertificates,
                     "SQS › Queues" => Service::SqsQueues,
                     _ => return,
                 };
@@ -4333,6 +4354,7 @@ impl App {
                             "SqsQueues" => Service::SqsQueues,
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
+                            "AcmCertificates" => Service::AcmCertificates,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             _ => Service::CloudWatchLogGroups,
                         },
@@ -5756,6 +5778,7 @@ impl ServicePickerState {
             filter_active: false,
             selected: 0,
             services: vec![
+                "ACM › Certificates",
                 "API Gateway › APIs",
                 "CloudWatch › Log Groups",
                 "CloudWatch › Logs Insights",

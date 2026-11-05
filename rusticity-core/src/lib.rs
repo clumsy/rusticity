@@ -1,3 +1,4 @@
+pub mod acm;
 pub mod alarms;
 pub mod apig;
 pub mod cfn;
@@ -25,6 +26,7 @@ pub mod stepfunctions;
 pub mod types;
 pub mod vpc;
 
+pub use acm::{AcmClient, Certificate};
 pub use alarms::{AlarmData, AlarmsClient, MetricStatsRequest, SubMetric};
 pub use apig::ApiGatewayClient;
 pub use cfn::CloudFormationClient;

@@ -39,7 +39,9 @@ pub fn selected(app: &App) -> Option<Resource> {
     let region = app.config.region.as_str();
 
     match app.current_service {
-        Service::CliOutput(_) => None,
+        // Certificates have no resource view, so they are never a bookmark,
+        // finder or related-resource target.
+        Service::CliOutput(_) | Service::AcmCertificates => None,
         // ── Services with explicit detail parent tracking ──
         Service::DynamoDbTables => {
             if let Some(name) = &app.dynamodb_state.current_table {

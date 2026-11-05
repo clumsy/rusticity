@@ -1,3 +1,4 @@
+pub mod acm;
 pub mod apig;
 pub mod app;
 mod async_read;
@@ -75,6 +76,7 @@ pub fn init() {
     s3::init(&mut i18n);
     cw::init(&mut i18n);
     secretsmanager::init(&mut i18n);
+    acm::init(&mut i18n);
     stepfunctions::init(&mut i18n);
     sns::init(&mut i18n);
     sqs::init(&mut i18n);

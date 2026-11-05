@@ -28,6 +28,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 
 ## Supported Services
 
+- 📜 **ACM**: Read-only certificate inventory (domain, status, type, in use, renewal eligibility, key algorithm, validity dates); no certificate bodies or private keys
 - 🌐 **API Gateway**: REST APIs, HTTP APIs, and WebSocket APIs
 - 📊 **CloudWatch Logs**: Log groups, log streams, log events
 - 🔍 **CloudWatch Logs Insights**: Query and analyze logs

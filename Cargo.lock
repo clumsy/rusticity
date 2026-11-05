@@ -206,6 +206,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-acm"
+version = "1.126.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc6e07aa86098fba8f6a3acaa74d2742685207bf247f35594205f25fda039c7c"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "fastrand",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-apigateway"
 version = "1.125.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3547,6 +3570,7 @@ version = "0.1.12"
 dependencies = [
  "anyhow",
  "aws-config",
+ "aws-sdk-acm",
  "aws-sdk-apigateway",
  "aws-sdk-apigatewayv2",
  "aws-sdk-cloudformation",

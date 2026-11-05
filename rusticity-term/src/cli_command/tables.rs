@@ -65,6 +65,8 @@ pub(super) fn target(app: &App) -> Result<Option<Target>, String> {
         Service::SqsQueues => sqs(app),
         Service::SnsTopics => sns(app),
         Service::SecretsManagerSecrets => secrets(app),
+        // A flat inventory: always the Region's certificate list, never a row.
+        Service::AcmCertificates => Ok(Some(view("acm list-certificates", json!({}), None, None))),
         Service::RdsInstances => rds(app),
         Service::VpcVpcs => vpc(app),
         Service::Ec2Instances => ec2(app),

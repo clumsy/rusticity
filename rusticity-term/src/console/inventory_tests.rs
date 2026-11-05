@@ -125,6 +125,9 @@ fn expected_list_url(service: Service, region: &str) -> String {
         Service::SecretsManagerSecrets => format!(
             "https://{region}.console.aws.amazon.com/secretsmanager/listsecrets?region={region}"
         ),
+        Service::AcmCertificates => format!(
+            "https://{region}.console.aws.amazon.com/acm/home?region={region}#/certificates/list"
+        ),
         Service::SqsQueues => format!(
             "https://{region}.console.aws.amazon.com/sqs/v3/home?region={region}#/queues"
         ),
@@ -556,6 +559,7 @@ fn simple_inventories_route_to_list_in_both_regions() {
         Service::IamUsers,
         Service::IamRoles,
         Service::IamUserGroups,
+        Service::AcmCertificates,
     ];
     for service in services {
         for region in [R1, R2] {
@@ -631,6 +635,7 @@ fn list_route_matrix_covers_every_service_picker_entry() {
     // Keep this match exhaustive above and this roster checked against the
     // picker: a newly added service cannot silently escape routing coverage.
     let services = [
+        Service::AcmCertificates,
         Service::ApiGatewayApis,
         Service::CloudWatchLogGroups,
         Service::CloudWatchInsights,

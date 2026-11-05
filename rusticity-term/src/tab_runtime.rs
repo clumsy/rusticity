@@ -71,6 +71,7 @@ enum Snapshot {
     S3Buckets(Box<crate::app::S3State>, ViewMode),
     SnsTopics(Box<crate::app::SnsState>, ViewMode),
     SecretsManagerSecrets(Box<crate::app::SecretsManagerState>, ViewMode),
+    AcmCertificates(Box<crate::app::AcmState>, ViewMode),
     StepFunctionsStateMachines(Box<crate::ui::stepfunctions::State>, ViewMode),
     SqsQueues(Box<crate::app::SqsState>, ViewMode),
     VpcVpcs(Box<crate::app::VpcState>, ViewMode),
@@ -103,6 +104,7 @@ impl Snapshot {
             Snapshot::S3Buckets(..) => Service::S3Buckets,
             Snapshot::SnsTopics(..) => Service::SnsTopics,
             Snapshot::SecretsManagerSecrets(..) => Service::SecretsManagerSecrets,
+            Snapshot::AcmCertificates(..) => Service::AcmCertificates,
             Snapshot::StepFunctionsStateMachines(..) => Service::StepFunctionsStateMachines,
             Snapshot::SqsQueues(..) => Service::SqsQueues,
             Snapshot::VpcVpcs(..) => Service::VpcVpcs,
@@ -165,6 +167,9 @@ fn take_live(app: &mut App, service: Service) -> Option<Snapshot> {
         }
         Service::SnsTopics => {
             Snapshot::SnsTopics(Box::new(std::mem::take(&mut app.sns_state)), view_mode)
+        }
+        Service::AcmCertificates => {
+            Snapshot::AcmCertificates(Box::new(std::mem::take(&mut app.acm_state)), view_mode)
         }
         Service::SecretsManagerSecrets => Snapshot::SecretsManagerSecrets(
             Box::new(std::mem::take(&mut app.secretsmanager_state)),
@@ -255,6 +260,10 @@ fn hydrate(app: &mut App, snap: Snapshot) {
         }
         Snapshot::SnsTopics(s, vm) => {
             app.sns_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::AcmCertificates(s, vm) => {
+            app.acm_state = *s;
             app.view_mode = vm;
         }
         Snapshot::SecretsManagerSecrets(s, vm) => {
@@ -465,6 +474,7 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::SnsTopics => crate::sns::inventory::request(app),
         Service::StepFunctionsStateMachines => crate::stepfunctions::inventory::request(app),
         Service::KmsKeys => crate::kms::inventory::request(app),
+        Service::AcmCertificates => crate::acm::inventory::request(app),
         _ => {}
     }
 }
@@ -550,6 +560,7 @@ fn is_managed(service: Service) -> bool {
             | Service::StepFunctionsStateMachines
             | Service::KmsKeys
             | Service::SecretsManagerSecrets
+            | Service::AcmCertificates
     )
 }
 
@@ -587,6 +598,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::StepFunctionsStateMachines => app.stepfunctions_state.load_status(),
         Service::KmsKeys => app.kms_state.load_status(),
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
+        Service::AcmCertificates => app.acm_state.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -599,6 +611,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::StepFunctionsStateMachines(s, _) => s.load_status(),
         Snapshot::KmsKeys(s, _) => s.load_status(),
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
+        Snapshot::AcmCertificates(s, _) => s.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -625,6 +638,7 @@ pub fn handle_action(app: &mut App, action: &crate::keymap::Action) -> bool {
             crate::stepfunctions::inventory::handle_action(app, action)
         }
         Service::KmsKeys => crate::kms::inventory::handle_action(app, action),
+        Service::AcmCertificates => crate::acm::inventory::handle_action(app, action),
         _ => false,
     }
 }
@@ -751,6 +765,7 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         }
         // The inventory keeps its legacy loader; only the entered detail is owned.
         Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
+        Service::AcmCertificates => crate::acm::inventory::poll(app).await,
         _ => false,
     }
 }

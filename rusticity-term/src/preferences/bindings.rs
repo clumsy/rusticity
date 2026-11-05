@@ -39,6 +39,7 @@ enum Source {
     SfnExecutions,
     SecretsManagerSecrets,
     SecretsManagerSecretDetails,
+    AcmCertificates,
 }
 
 fn columns(
@@ -157,6 +158,7 @@ impl Source {
                 Self::SecretsManagerSecretDetails
             }
             Service::SecretsManagerSecrets => Self::SecretsManagerSecrets,
+            Service::AcmCertificates => Self::AcmCertificates,
             _ => return None,
         })
     }
@@ -322,6 +324,12 @@ impl Source {
                 |id| crate::secretsmanager::columns::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
+            Self::AcmCertificates => columns(
+                &app.acm_state.column_ids,
+                &app.acm_state.visible_column_ids,
+                |id| crate::acm::columns::Column::from_id(id).map(|c| c.name()),
+                None,
+            ),
             Self::SecretsManagerSecretDetails => {
                 let view = secret_detail(app);
                 // Summary panes carry no columns and leak no inventory preferences.
@@ -410,6 +418,7 @@ impl Source {
             Self::SfnStateMachines => app.stepfunctions_state.machines.page_size,
             Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.page_size,
             Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
+            Self::AcmCertificates => app.acm_state.certificates.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -462,6 +471,7 @@ impl Source {
             Self::SecretsManagerSecretDetails => {
                 secret_detail_mut(app).data_mut().table.set_page_size(size)
             }
+            Self::AcmCertificates => app.acm_state.certificates.set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -507,6 +517,7 @@ impl Source {
             Self::SecretsManagerSecretDetails => {
                 &mut secret_detail_mut(app).data_mut().visible_column_ids
             }
+            Self::AcmCertificates => &mut app.acm_state.visible_column_ids,
             _ => return None,
         })
     }

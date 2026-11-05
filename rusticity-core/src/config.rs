@@ -217,6 +217,10 @@ impl AwsConfig {
     // All factories reuse self.sdk_config — credentials are already resolved,
     // so these are instantaneous (no network calls).
 
+    pub fn acm_client(&self) -> aws_sdk_acm::Client {
+        aws_sdk_acm::Client::new(&self.sdk_config)
+    }
+
     pub fn s3_client(&self) -> aws_sdk_s3::Client {
         aws_sdk_s3::Client::new(&self.sdk_config)
     }

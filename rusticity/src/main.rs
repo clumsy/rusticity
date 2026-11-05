@@ -225,7 +225,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates);
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
                             && !((items_view || inventory_view) && app.mode == rusticity_term::keymap::Mode::Normal);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)

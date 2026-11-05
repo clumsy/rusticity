@@ -242,7 +242,8 @@ fn finder_prefix_terms_use_resource_explorer_wildcards_without_quotes() {
 fn finder_syntax_bearing_terms_stay_literal_without_standalone_wildcards() {
     for (input, literal) in [
         ("service:iam", "\"service:iam\""),
-        ("region:us-west-2", "\"region:us-west-2\""),
+        ("resourcetype:iam:role", "\"resourcetype:iam:role\""),
+        ("tag:env", "\"tag:env\""),
         ("-orders", "\"-orders\""),
         ("fsx*", "\"fsx*\""),
         ("name,other", "\"name,other\""),
@@ -256,6 +257,23 @@ fn finder_syntax_bearing_terms_stay_literal_without_standalone_wildcards() {
             format!("{literal} resourcetype:lambda:function region:us-east-1,global")
         );
     }
+}
+
+#[test]
+fn finder_region_qualifier_selects_regions_and_never_reaches_the_index_as_text() {
+    let query = SearchQuery::parse("@lambda orders region:us-west-2").unwrap();
+    assert_eq!(
+        query.regions,
+        crate::finder::RegionScope::List(vec!["us-west-2".into()])
+    );
+    // The index query is always built for the Region it runs in.
+    assert_eq!(
+        query.index_query("us-west-2"),
+        "orders* resourcetype:lambda:function region:us-west-2,global"
+    );
+    // A malformed qualifier is an error, not a filter smuggled into the index.
+    assert!(SearchQuery::parse("@lambda orders region:us-west-2,global").is_err());
+    assert!(SearchQuery::parse("@lambda orders region:\"x\"").is_err());
 }
 
 #[test]

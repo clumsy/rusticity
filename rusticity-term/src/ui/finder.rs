@@ -10,7 +10,7 @@ use ratatui::{
 use rusticity_core::finder::{Resource, ResourceKind};
 
 pub const FILTER_PLACEHOLDER: &str =
-    "Type at least 3 search characters; @s3, @dynamodb, @ec2, @rds, @iam, @lambda limit services";
+    "Type at least 3 search characters; @s3, @dynamodb, @ec2, @rds, @iam, @lambda limit services; region:all or region:eu-west-1,us-east-2 searches more Regions";
 
 enum FinderColumn {
     Service,

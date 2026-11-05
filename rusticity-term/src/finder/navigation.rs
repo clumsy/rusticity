@@ -106,7 +106,7 @@ pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -
         )
     {
         bail!(
-            "Resource is in {}; switch Region before opening it",
+            "Resource is in {}; switch Region (Space, r) to open it, or bookmark it (Ctrl+B) to open it in its Region later",
             resource.region
         );
     }

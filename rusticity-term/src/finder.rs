@@ -2,18 +2,13 @@
 use crate::app::App;
 use crate::keymap::{Action, Mode};
 use rusticity_core::finder::{
-    self, Resource, ResourceKind, SearchCache, SearchQuery, SearchUpdate, SharedSearchCache,
-    RESULT_LIMIT,
+    self, Resource, ResourceKind, SearchQuery, SearchUpdate, SharedRegionCaches, RESULT_LIMIT,
 };
 use std::{
     collections::HashSet,
-    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{
-    sync::{mpsc, Mutex},
-    task::JoinHandle,
-};
+use tokio::{sync::mpsc, task::JoinHandle};
 
 pub mod navigation;
 pub(crate) mod related;
@@ -74,7 +69,8 @@ pub struct State {
     started: bool,
     running: Option<RunningSearch>,
     scope: String,
-    cache: SharedSearchCache,
+    /// One inventory cache per searched Region.
+    cache: SharedRegionCaches,
     seen: HashSet<(finder::ResourceKind, String, String)>,
 }
 
@@ -100,7 +96,7 @@ impl Default for State {
             started: false,
             running: None,
             scope: String::new(),
-            cache: Arc::new(Mutex::new(SearchCache::default())),
+            cache: SharedRegionCaches::default(),
             seen: HashSet::new(),
         }
     }
@@ -408,7 +404,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
                     .retain(|entry| Some(&entry.source) != finder.related_source.as_ref());
                 finder.restart_related();
             } else {
-                finder.cache = Arc::new(Mutex::new(SearchCache::default()));
+                finder.cache = SharedRegionCaches::default();
                 finder.changed();
             }
         }
@@ -491,7 +487,7 @@ pub fn poll(app: &mut App) {
             let (tx, receiver) = mpsc::channel(32);
             let config = app.config.clone();
             let cache = finder.cache.clone();
-            let task = tokio::spawn(finder::search(config, query, cache, tx));
+            let task = tokio::spawn(finder::search_regions(config, query, cache, tx));
             finder.running = Some(RunningSearch {
                 task,
                 receiver,

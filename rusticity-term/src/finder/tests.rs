@@ -3,6 +3,7 @@ use crate::app::{Service, ViewMode};
 use crate::keymap::handle_key;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rusticity_core::finder::ResourceKind;
+use std::sync::Arc;
 
 fn app() -> App {
     App::new_without_client("test".into(), Some("us-east-2".into()))
@@ -639,4 +640,88 @@ fn related_identity_includes_account_and_invalid_filter_can_recover() {
     assert!(app.resource_finder.message().contains("Unknown service"));
     app.handle_action(Action::FilterBackspace);
     assert_eq!(app.resource_finder.rows.len(), 2);
+}
+
+#[test]
+fn multi_region_results_keep_their_region_and_never_collapse_across_regions() {
+    let mut app = app();
+    open(&mut app);
+    let finder = &mut app.resource_finder;
+    let generation = finder.generation;
+    let topic = |region: &str| Resource {
+        kind: ResourceKind::Topic,
+        id: "orders".into(),
+        name: "orders".into(),
+        arn: format!("arn:aws:sns:{region}:123456789012:orders"),
+        region: region.into(),
+    };
+    finder.accept(
+        generation,
+        SearchUpdate::Results(vec![topic("us-east-2"), topic("eu-west-1")]),
+    );
+    // The same Region again (for example a global row) is still one row.
+    finder.accept(generation, SearchUpdate::Results(vec![topic("eu-west-1")]));
+    assert_eq!(finder.rows.len(), 2);
+    finder.accept(
+        generation,
+        SearchUpdate::Warning("ap-south-1: AccessDenied".into()),
+    );
+    assert_eq!(finder.rows.len(), 2, "a failing Region hides nothing");
+    assert!(finder.message().contains("ap-south-1: AccessDenied"));
+    let text = {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut t = Terminal::new(TestBackend::new(160, 30)).unwrap();
+        t.draw(|f| crate::ui::render(f, &app)).unwrap();
+        t.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    };
+    assert!(text.contains("Region") && text.contains("eu-west-1") && text.contains("us-east-2"));
+}
+
+#[test]
+fn a_result_from_another_region_explains_how_to_open_it() {
+    let mut app = app();
+    app.config.account_id = "123456789012".into();
+    let other = Resource {
+        kind: ResourceKind::Topic,
+        id: "orders".into(),
+        name: "orders".into(),
+        arn: "arn:aws:sns:eu-west-1:123456789012:orders".into(),
+        region: "eu-west-1".into(),
+    };
+    let error = navigation::validate_scope(&app.config, &other)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("eu-west-1") && error.contains("Space, r") && error.contains("Ctrl+B"));
+}
+
+#[test]
+fn region_qualifier_errors_show_in_the_finder_instead_of_searching() {
+    let mut app = app();
+    open(&mut app);
+    for c in "orders region:nowhere".chars() {
+        app.handle_action(Action::FilterInput(c));
+    }
+    assert!(app.resource_finder.query.is_none());
+    assert!(app.resource_finder.message().contains("Unknown Region"));
+}
+
+#[test]
+fn a_result_from_another_region_can_be_bookmarked() {
+    let mut app = app();
+    app.config.account_id = "123456789012".into();
+    open(&mut app);
+    app.resource_finder.rows = vec![Resource {
+        kind: ResourceKind::Topic,
+        id: "orders".into(),
+        name: "orders".into(),
+        arn: "arn:aws:sns:eu-west-1:123456789012:orders".into(),
+        region: "eu-west-1".into(),
+    }];
+    app.resource_finder.focus = Focus::Table;
+    assert!(crate::bookmarks::available(&app));
 }

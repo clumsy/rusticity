@@ -225,6 +225,21 @@ impl AwsConfig {
         aws_sdk_s3::Client::new(&self.sdk_config)
     }
 
+    /// The same credentials and identity, pointed at another Region.
+    pub fn for_region(&self, region: &str) -> Self {
+        Self {
+            region: region.to_string(),
+            account_id: self.account_id.clone(),
+            role_arn: self.role_arn.clone(),
+            region_auto_detected: false,
+            sdk_config: self
+                .sdk_config
+                .to_builder()
+                .region(aws_config::Region::new(region.to_string()))
+                .build(),
+        }
+    }
+
     pub async fn s3_client_with_region(&self, region: &str) -> aws_sdk_s3::Client {
         // Needs a different region — build a new config with the same credentials.
         let config = self

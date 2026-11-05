@@ -10,6 +10,8 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 
 mod inventory;
+mod regions;
+pub use regions::{search_regions, RegionScope, SharedRegionCaches};
 
 pub const RESULT_LIMIT: usize = 1000;
 const CACHE_TTL: Duration = Duration::from_secs(60);
@@ -146,6 +148,13 @@ impl ResourceKind {
             Self::StateMachine => "states:stateMachine",
             Self::Reference => "",
         }
+    }
+    /// One account-wide inventory, the same from every Region: searched once.
+    pub fn is_global(self) -> bool {
+        matches!(
+            self,
+            Self::User | Self::Role | Self::Group | Self::Bucket | Self::PublicRepository
+        )
     }
     fn accepts_qualifier(self, qualifier: &str) -> bool {
         if self == Self::Reference {
@@ -326,14 +335,26 @@ impl Resource {
 pub struct SearchQuery {
     pub text: String,
     pub kinds: Vec<ResourceKind>,
+    /// `region:` qualifier; the active Region when absent.
+    pub regions: RegionScope,
+    /// Whether the indexed search also asks for global resources. Only the
+    /// first Region of a multi-Region search does, so they appear once.
+    pub(crate) include_global: bool,
 }
 
 impl SearchQuery {
     pub fn parse(input: &str) -> Result<Self> {
         let mut qualifiers = Vec::new();
         let mut words = Vec::new();
+        let mut regions = RegionScope::Current;
         for word in input.split_whitespace() {
-            if let Some(service) = word.strip_prefix('@') {
+            if let Some(list) = word
+                .get(..7)
+                .filter(|key| key.eq_ignore_ascii_case("region:"))
+                .map(|_| &word[7..])
+            {
+                regions = RegionScope::parse(list)?;
+            } else if let Some(service) = word.strip_prefix('@') {
                 let service = service.to_ascii_lowercase();
                 if !ResourceKind::ALL
                     .iter()
@@ -355,7 +376,12 @@ impl SearchQuery {
                 qualifiers.is_empty() || qualifiers.iter().any(|q| kind.accepts_qualifier(q))
             })
             .collect();
-        Ok(Self { text, kinds })
+        Ok(Self {
+            text,
+            kinds,
+            regions,
+            include_global: true,
+        })
     }
     pub fn ready(&self) -> bool {
         self.text.chars().filter(|c| !c.is_whitespace()).count() >= 3
@@ -404,7 +430,11 @@ impl SearchQuery {
             .map(|k| k.resource_types())
             .collect::<Vec<_>>()
             .join(",");
-        format!("{terms} resourcetype:{types} region:{region},global")
+        if self.include_global {
+            format!("{terms} resourcetype:{types} region:{region},global")
+        } else {
+            format!("{terms} resourcetype:{types} region:{region}")
+        }
     }
 }
 

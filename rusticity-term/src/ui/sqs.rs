@@ -93,6 +93,8 @@ impl CyclicEnum for QueueDetailTab {
 #[derive(Debug, Clone)]
 pub struct State {
     pub queues: TableState<Queue>,
+    /// Tab-owned background read backing `queues`.
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<Queue>,
     pub triggers: TableState<LambdaTrigger>,
     pub trigger_visible_column_ids: Vec<String>,
     pub trigger_column_ids: Vec<String>,
@@ -132,6 +134,12 @@ impl Default for State {
 }
 
 impl State {
+    /// Tab indicator status: the root inventory read, which stays the
+    /// owner of the rows an entered detail is opened from.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.queues)
+    }
+
     pub fn new() -> Self {
         let trigger_column_ids: Vec<String> = TriggerColumn::ids()
             .into_iter()
@@ -151,6 +159,7 @@ impl State {
             .collect();
         Self {
             queues: TableState::new(),
+            inventory: Default::default(),
             triggers: TableState::new(),
             trigger_visible_column_ids: trigger_column_ids.clone(),
             trigger_column_ids,
@@ -287,7 +296,14 @@ pub fn filtered_eventbridge_pipes(app: &App) -> Vec<&EventBridgePipe> {
 
 pub async fn load_sqs_queues(app: &mut App) -> anyhow::Result<()> {
     let queues = app.sqs_client.list_queues("").await?;
-    app.sqs_state.queues.items = queues
+    app.sqs_state.queues.items = queue_rows(queues);
+    Ok(())
+}
+
+/// Map the core queue list onto table rows; shared by the in-line and the
+/// tab-owned background read.
+pub(crate) fn queue_rows(queues: Vec<rusticity_core::sqs::SqsQueue>) -> Vec<Queue> {
+    queues
         .into_iter()
         .map(|q| Queue {
             name: q.name,
@@ -317,8 +333,7 @@ pub async fn load_sqs_queues(app: &mut App) -> anyhow::Result<()> {
             redrive_task_percent: q.redrive_task_percent,
             redrive_task_destination: q.redrive_task_destination,
         })
-        .collect();
-    Ok(())
+        .collect()
 }
 
 pub async fn load_lambda_triggers(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
@@ -1235,7 +1250,17 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
         is_active: app.mode != Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    crate::ui::loading::render_table(
+        frame,
+        config,
+        app.sqs_state.load_status(),
+        "Queues",
+        app.sqs_state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No queues in this Region.",
+            has_unfiltered_items: !app.sqs_state.queues.items.is_empty(),
+        },
+    );
 }
 
 #[cfg(test)]

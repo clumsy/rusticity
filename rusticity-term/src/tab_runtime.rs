@@ -475,6 +475,9 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::StepFunctionsStateMachines => crate::stepfunctions::inventory::request(app),
         Service::KmsKeys => crate::kms::inventory::request(app),
         Service::AcmCertificates => crate::acm::inventory::request(app),
+        Service::SqsQueues => crate::sqs::inventory::request(app),
+        Service::LambdaFunctions => crate::lambda::inventory::request(app),
+        Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
         _ => {}
     }
 }
@@ -561,6 +564,9 @@ fn is_managed(service: Service) -> bool {
             | Service::KmsKeys
             | Service::SecretsManagerSecrets
             | Service::AcmCertificates
+            | Service::SqsQueues
+            | Service::LambdaFunctions
+            | Service::DynamoDbTables
     )
 }
 
@@ -599,6 +605,9 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::KmsKeys => app.kms_state.load_status(),
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         Service::AcmCertificates => app.acm_state.load_status(),
+        Service::SqsQueues => app.sqs_state.load_status(),
+        Service::LambdaFunctions => app.lambda_state.load_status(),
+        Service::DynamoDbTables => app.dynamodb_state.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -612,6 +621,9 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::KmsKeys(s, _) => s.load_status(),
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         Snapshot::AcmCertificates(s, _) => s.load_status(),
+        Snapshot::SqsQueues(s, _) => s.load_status(),
+        Snapshot::LambdaFunctions(s, _) => s.load_status(),
+        Snapshot::DynamoDbTables(s, _) => s.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -639,6 +651,9 @@ pub fn handle_action(app: &mut App, action: &crate::keymap::Action) -> bool {
         }
         Service::KmsKeys => crate::kms::inventory::handle_action(app, action),
         Service::AcmCertificates => crate::acm::inventory::handle_action(app, action),
+        Service::SqsQueues => crate::sqs::inventory::handle_action(app, action),
+        Service::LambdaFunctions => crate::lambda::inventory::handle_action(app, action),
+        Service::DynamoDbTables => crate::dynamodb::inventory::handle_action(app, action),
         _ => false,
     }
 }
@@ -766,6 +781,9 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         // The inventory keeps its legacy loader; only the entered detail is owned.
         Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
+        Service::SqsQueues => crate::sqs::inventory::poll(app).await,
+        Service::LambdaFunctions => crate::lambda::inventory::poll(app).await,
+        Service::DynamoDbTables => crate::dynamodb::inventory::poll(app).await,
         _ => false,
     }
 }

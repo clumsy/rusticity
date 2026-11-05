@@ -26,6 +26,8 @@ pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pa
 
 pub struct State {
     pub table: TableState<LambdaFunction>,
+    /// Tab-owned background read backing `table`.
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<LambdaFunction>,
     pub current_function: Option<String>,
     pub current_version: Option<String>,
     pub current_alias: Option<String>,
@@ -74,9 +76,16 @@ impl Default for State {
 }
 
 impl State {
+    /// Tab indicator status: the root inventory read, which stays the
+    /// owner of the rows an entered detail is opened from.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.table)
+    }
+
     pub fn new() -> Self {
         Self {
             table: TableState::new(),
+            inventory: Default::default(),
             current_function: None,
             current_version: None,
             current_alias: None,
@@ -385,7 +394,17 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
         is_active: app.mode != Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    crate::ui::loading::render_table(
+        frame,
+        config,
+        app.lambda_state.load_status(),
+        "Lambda functions",
+        app.lambda_state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No functions in this Region.",
+            has_unfiltered_items: !app.lambda_state.table.items.is_empty(),
+        },
+    );
 }
 
 pub fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
@@ -1331,7 +1350,15 @@ pub fn filtered_lambda_applications(app: &App) -> Vec<&LambdaApplication> {
 
 pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {
     let functions = app.lambda_client.list_functions().await?;
+    app.lambda_state.table.items = function_rows(functions);
+    Ok(())
+}
 
+/// Map the core function list onto table rows, newest first; shared by the
+/// in-line and the tab-owned background read.
+pub(crate) fn function_rows(
+    functions: Vec<rusticity_core::lambda::LambdaFunction>,
+) -> Vec<LambdaFunction> {
     let mut functions: Vec<LambdaFunction> = functions
         .into_iter()
         .map(|f| LambdaFunction {
@@ -1368,10 +1395,7 @@ pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {
 
     // Sort by last_modified DESC
     functions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
-
-    app.lambda_state.table.items = functions;
-
-    Ok(())
+    functions
 }
 
 pub async fn load_lambda_applications(app: &mut App) -> anyhow::Result<()> {

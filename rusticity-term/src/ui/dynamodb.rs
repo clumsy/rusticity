@@ -180,6 +180,8 @@ impl DetailTab {
 
 pub struct State {
     pub tables: TableState<DdbTable>,
+    /// Tab-owned background read backing `tables`.
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<DdbTable>,
     pub input_focus: InputFocus,
     pub current_table: Option<String>,
     pub detail_tab: DetailTab,
@@ -252,9 +254,16 @@ impl Default for State {
 }
 
 impl State {
+    /// Tab indicator status: the root inventory read, which stays the
+    /// owner of the rows an entered detail is opened from.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.tables)
+    }
+
     pub fn new() -> Self {
         Self {
             tables: TableState::new(),
+            inventory: Default::default(),
             input_focus: InputFocus::Filter,
             current_table: None,
             detail_tab: DetailTab::Items,
@@ -1331,7 +1340,17 @@ pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {
         is_active: app.mode != crate::keymap::Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    crate::ui::loading::render_table(
+        frame,
+        config,
+        app.dynamodb_state.load_status(),
+        "Tables",
+        app.dynamodb_state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No tables in this Region.",
+            has_unfiltered_items: !app.dynamodb_state.tables.items.is_empty(),
+        },
+    );
 }
 
 #[cfg(test)]

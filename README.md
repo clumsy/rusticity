@@ -141,8 +141,9 @@ contain sensitive AWS metadata and are discarded on close or AWS context change.
 
 ## Loading and freshness
 
-Tab-owned asynchronous loading currently covers SNS, Step Functions, KMS, and CLI
-output. The indicator to the right of each tab is a spinner while loading, `✓`
+Tab-owned asynchronous loading currently covers SNS, Step Functions, KMS, Secrets
+Manager details, ACM, the SQS queues, Lambda functions and DynamoDB tables lists,
+and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
 after a successful read (including an empty result), or `!` after a failure.
 Indicators use the same text color as their tab label, including on the selected
 background. Filters and table headers remain visible while loading; the table body

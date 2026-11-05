@@ -126,6 +126,15 @@ impl<T> AsyncRead<T> {
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
     }
+    /// The view's data was just read in-line for `scope` (a finder or bookmark
+    /// navigation awaits its loader before entering). Drop any queued or
+    /// running read so it cannot replace that fresh, isolated result.
+    pub(crate) fn mark_loaded(&mut self, scope: ReadScope) {
+        self.running = None;
+        self.pending = false;
+        self.scope = Some(scope);
+        self.status = ReadStatus::Ready;
+    }
     /// Cancel work while retaining the scope of any cached view data.
     pub(crate) fn cancel(&mut self) {
         self.running = None;

@@ -111,6 +111,9 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             "secret details"
         }
         Service::AcmCertificates => "certificates",
+        Service::SqsQueues => "SQS queues",
+        Service::LambdaFunctions => "Lambda functions",
+        Service::DynamoDbTables => "DynamoDB tables",
         Service::CliOutput(_) => "CLI JSON",
         _ => return None,
     };

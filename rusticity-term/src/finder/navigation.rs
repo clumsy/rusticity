@@ -220,6 +220,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
         ResourceKind::Table => {
             app.dynamodb_state = ui::dynamodb::State::new();
             app.load_dynamodb_tables().await?;
+            crate::dynamodb::inventory::mark_loaded(app);
             focus!(app.dynamodb_state.tables, name, table_arn);
             app.dynamodb_state.tables.selected = ui::dynamodb::filtered_dynamodb_tables(app)
                 .iter()
@@ -302,6 +303,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
         ResourceKind::Function => {
             app.lambda_state.current_function = None;
             ui::lambda::load_lambda_functions(app).await?;
+            crate::lambda::inventory::mark_loaded(app);
             focus!(app.lambda_state.table, name);
             app.lambda_state.table.selected = ui::lambda::filtered_lambda_functions(app)
                 .iter()
@@ -327,6 +329,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
         ResourceKind::Queue => {
             app.sqs_state.current_queue = None;
             ui::sqs::load_sqs_queues(app).await?;
+            crate::sqs::inventory::mark_loaded(app);
             focus!(app.sqs_state.queues, name);
             app.sqs_state.queues.selected =
                 ui::sqs::filtered_queues(&app.sqs_state.queues.items, &resource.id)

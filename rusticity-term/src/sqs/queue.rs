@@ -13,7 +13,7 @@ pub fn init(i18n: &mut HashMap<String, String>) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Queue {
     pub name: String,
     pub url: String,

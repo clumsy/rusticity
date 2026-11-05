@@ -225,7 +225,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates | Service::SqsQueues | Service::LambdaFunctions | Service::DynamoDbTables);
                         let should_refresh = matches!(action, rusticity_term::keymap::Action::Refresh)
                             && !((items_view || inventory_view) && app.mode == rusticity_term::keymap::Mode::Normal);
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
@@ -290,19 +290,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.s3_state.buckets.loading = false;
                         }
 
-                        // Load SQS queues when service is switched to and empty
-                        if app.service_selected && app.current_service == Service::SqsQueues
-                            && (!prev_service_selected || opened_new_tab || prev_service != Service::SqsQueues)
-                            && app.sqs_state.queues.items.is_empty() {
-                            app.sqs_state.queues.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = rusticity_term::ui::sqs::load_sqs_queues(&mut app).await {
-                                app.error_message = Some(format!("Failed to load SQS queues: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.sqs_state.queues.loading = false;
-                        }
+                        // SQS queues load as a tab-owned background read (tab_runtime).
 
                         // Load Lambda triggers when viewing queue detail on triggers tab
                         if app.current_service == Service::SqsQueues
@@ -786,20 +774,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                         }
 
-                        // Load DynamoDB tables when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::DynamoDbTables
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::DynamoDbTables)
-                                || app.dynamodb_state.tables.loading) {
-                            app.dynamodb_state.tables.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_dynamodb_tables().await {
-                                app.error_message = Some(format!("Failed to load DynamoDB tables: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.dynamodb_state.tables.loading = false;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // DynamoDB tables load as a tab-owned background read (tab_runtime).
 
                         // Load DynamoDB backups when viewing the Backups detail tab
                         if app.current_service == Service::DynamoDbTables
@@ -950,19 +925,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.apig_state.apis.loading = false;
                         }
 
-                        // Load Lambda functions
-                        if app.service_selected && app.current_service == Service::LambdaFunctions
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::LambdaFunctions)
-                                || app.lambda_state.table.loading) {
-                            app.lambda_state.table.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = rusticity_term::ui::lambda::load_lambda_functions(&mut app).await {
-                                app.error_message = Some(format!("Failed to load Lambda functions: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.lambda_state.table.loading = false;
-                        }
+                        // Lambda functions load as a tab-owned background read (tab_runtime).
 
                         // Load Lambda applications
                         if app.service_selected && app.current_service == Service::LambdaApplications
@@ -1452,12 +1415,6 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                             }
                                             rusticity_term::app::Service::FsxFileSystems => {
                                                 new_app.fsx_state.file_systems.loading = true;
-                                            }
-                                            rusticity_term::app::Service::DynamoDbTables => {
-                                                new_app.dynamodb_state.tables.loading = true;
-                                            }
-                                            rusticity_term::app::Service::LambdaFunctions => {
-                                                new_app.lambda_state.table.loading = true;
                                             }
                                             rusticity_term::app::Service::LambdaApplications => {
                                                 new_app.lambda_application_state.table.loading = true;

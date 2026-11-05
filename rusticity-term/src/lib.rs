@@ -21,6 +21,7 @@ pub mod finder;
 pub mod fsx;
 pub mod iam;
 pub mod inventory;
+mod inventory_read;
 pub mod keymap;
 pub mod kms;
 pub mod lambda;

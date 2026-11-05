@@ -539,9 +539,9 @@ pub fn prev_detail_tab(app: &mut App) {
     }
 }
 
-pub fn refresh(app: &mut App) {
-    app.lambda_state.table.loading = true;
-}
+/// Root inventory refresh is owned by `lambda::inventory`; an entered
+/// function has no list to reload, so this never leaves a spinner running.
+pub fn refresh(_app: &mut App) {}
 
 pub fn yank(app: &App) {
     let filtered = filtered_lambda_functions(app);

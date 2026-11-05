@@ -19,6 +19,15 @@ pub struct InventoryInput<'a, T> {
     pub clipboard: &'a ClipboardState,
 }
 
+/// Leave the error modal before a retry from it queues a fresh read.
+pub(crate) fn dismiss_error(app: &mut crate::app::App) {
+    if app.mode == crate::keymap::Mode::ErrorModal {
+        app.error_message = None;
+        app.error_scroll = 0;
+        app.mode = crate::keymap::Mode::Normal;
+    }
+}
+
 pub fn go_to_page<T>(table: &mut TableState<T>, page: usize, count: usize) {
     if page == 0 {
         return;

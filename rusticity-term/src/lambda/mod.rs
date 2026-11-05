@@ -1,5 +1,6 @@
 pub mod applications;
 pub mod functions;
+pub mod inventory;
 
 use crate::common::{format_bytes, translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::console::{component, ConsoleUrl};

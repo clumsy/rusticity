@@ -9,7 +9,6 @@ use crate::{
         self,
         filter::{render_filter_bar, FilterConfig, FilterControl},
         loading::render_table,
-        render_json_highlighted,
         table::{Column, TableConfig},
         Summary,
     },
@@ -230,7 +229,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 None,
             );
         }
-        Tab::Policy => render_policy(frame, view, loading, body),
+        Tab::Policy => render_policy(frame, app, view, loading, body),
         Tab::Aliases | Tab::Tags => render_results(frame, app, view, loading, body),
     }
     true
@@ -257,7 +256,13 @@ fn render_summary_pane(
 
 /// Read-only key policy: shared JSON renderer, plain fallback when the document
 /// is not JSON-shaped, scrollable, no editor and no writes.
-fn render_policy(frame: &mut Frame, view: &View, loading: Option<ReadStatus>, area: Rect) {
+fn render_policy(
+    frame: &mut Frame,
+    app: &App,
+    view: &View,
+    loading: Option<ReadStatus>,
+    area: Rect,
+) {
     // Loading/failure/idle consume the pane; the previous policy is never shown
     // during a reload or after a failed one. Only Ready renders the JSON.
     if ui::loading::render(
@@ -270,9 +275,16 @@ fn render_policy(frame: &mut Frame, view: &View, loading: Option<ReadStatus>, ar
         return;
     }
     match view.policy() {
-        Some(policy) => {
-            render_json_highlighted(frame, area, policy, view.policy_scroll, "Key policy", true)
-        }
+        Some(policy) => crate::text_viewer::render(
+            frame,
+            app,
+            area,
+            policy,
+            view.policy_scroll,
+            "Key policy",
+            true,
+            ui::Highlight::Json,
+        ),
         // Ready with no policy document: AWS returned none for this key.
         None => frame.render_widget(
             Paragraph::new("No key policy returned by AWS.")

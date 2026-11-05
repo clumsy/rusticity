@@ -1319,6 +1319,10 @@ fn render_help_modal(frame: &mut Frame, area: Rect) {
             Span::raw("  Ctrl+d (page down)"),
         ]),
         Line::from(vec![
+            Span::styled("/  ", red_text()),
+            Span::raw("  / (search a JSON/text viewer; n/N next/prev, ←→ scroll)"),
+        ]),
+        Line::from(vec![
             Span::styled("[] ", red_text()),
             Span::raw("  [ and ] (switch tabs)"),
         ]),
@@ -1628,6 +1632,44 @@ fn highlight_yaml_scalar(value: &str) -> Vec<Span<'static>> {
     spans
 }
 
+/// Syntax highlighter for the shared text viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Highlight {
+    Json,
+    /// JSON when the text starts with `{` or `[`, otherwise YAML.
+    Template,
+    Plain,
+}
+
+impl Highlight {
+    pub(crate) fn line_fn(self, text: &str) -> for<'a> fn(&'a str) -> Vec<Span<'a>> {
+        fn yaml(line: &str) -> Vec<Span<'_>> {
+            highlight_yaml_line(line)
+        }
+        fn plain(line: &str) -> Vec<Span<'_>> {
+            vec![Span::raw(line)]
+        }
+        match self {
+            Self::Json => highlight_json_line,
+            Self::Template if text.trim_start().starts_with(['{', '[']) => highlight_json_line,
+            Self::Template => yaml,
+            Self::Plain => plain,
+        }
+    }
+}
+
+/// Search and horizontal-scroll state drawn over a text viewer.
+pub(crate) struct ViewerOverlay<'a> {
+    pub matches: &'a [crate::text_viewer::Match],
+    pub current: Option<usize>,
+    pub hscroll: usize,
+    /// Bottom-border text, e.g. ` /policy  2 of 5 `.
+    pub footer: String,
+    /// The viewer records its content width and height here so key handling
+    /// can keep a jumped-to match visible.
+    pub viewport: &'a std::cell::Cell<(u16, u16)>,
+}
+
 /// Shared line-numbered text browser. Only visible lines are highlighted.
 fn render_text_lines(
     frame: &mut Frame,
@@ -1638,8 +1680,65 @@ fn render_text_lines(
     is_active: bool,
     highlight: fn(&str) -> Vec<Span<'_>>,
 ) {
+    render_text_viewer_with(
+        frame,
+        area,
+        text,
+        scroll_offset,
+        title,
+        is_active,
+        highlight,
+        None,
+    );
+}
+
+/// The text viewer with an optional search/scroll overlay. Syntax colors are
+/// kept: match highlighting only adds a background to the covered characters.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_text_viewer(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+    highlight: Highlight,
+    overlay: Option<&ViewerOverlay<'_>>,
+) {
+    render_text_viewer_with(
+        frame,
+        area,
+        text,
+        scroll_offset,
+        title,
+        is_active,
+        highlight.line_fn(text),
+        overlay,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_text_viewer_with(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll_offset: usize,
+    title: &str,
+    is_active: bool,
+    highlight: fn(&str) -> Vec<Span<'_>>,
+    overlay: Option<&ViewerOverlay<'_>>,
+) {
     let total_lines = text.lines().count();
     let line_num_width = total_lines.to_string().len().max(2);
+    let gutter = line_num_width as u16 + 3;
+    if let Some(overlay) = overlay {
+        overlay.viewport.set((
+            area.width.saturating_sub(2 + gutter).max(1),
+            area.height.saturating_sub(2).max(1),
+        ));
+    }
+    let match_style = Style::default().bg(Color::DarkGray);
+    let current_style = Style::default().bg(Color::Yellow).fg(Color::Black);
     let lines: Vec<Line> = text
         .lines()
         .enumerate()
@@ -1650,15 +1749,37 @@ fn render_text_lines(
                 format!("{:>width$} │ ", index + 1, width = line_num_width),
                 Style::default().fg(Color::DarkGray),
             )];
-            spans.extend(highlight(line));
+            let mut body = highlight(line);
+            if let Some(overlay) = overlay {
+                let marks: Vec<_> = overlay
+                    .matches
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| m.line == index)
+                    .map(|(i, m)| {
+                        let style = if Some(i) == overlay.current {
+                            current_style
+                        } else {
+                            match_style
+                        };
+                        (m.start, m.start + m.len, style)
+                    })
+                    .collect();
+                body = mark_spans(body, &marks);
+                body = skip_chars(body, overlay.hscroll);
+            }
+            spans.extend(body);
             Line::from(spans)
         })
         .collect();
-    let block = titled_block(title).border_style(if is_active {
+    let mut block = titled_block(title).border_style(if is_active {
         active_border()
     } else {
         Style::default()
     });
+    if let Some(overlay) = overlay.filter(|o| !o.footer.is_empty()) {
+        block = block.title_bottom(Line::from(overlay.footer.clone()).right_aligned());
+    }
     frame.render_widget(Paragraph::new(lines).block(block), area);
     if total_lines > 0 {
         render_scrollbar(
@@ -1738,6 +1859,70 @@ pub fn render_json_highlighted(
         is_active,
         highlight_json_line,
     );
+}
+
+/// Split spans at character ranges and patch each range's style on top of the
+/// span's own style, so a match keeps its syntax color.
+fn mark_spans<'a>(spans: Vec<Span<'a>>, marks: &[(usize, usize, Style)]) -> Vec<Span<'a>> {
+    if marks.is_empty() {
+        return spans;
+    }
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for span in spans {
+        let chars: Vec<char> = span.content.chars().collect();
+        let end = pos + chars.len();
+        let mut cut = pos;
+        while cut < end {
+            let style_at = |c: usize| marks.iter().find(|(s, e, _)| c >= *s && c < *e);
+            let mark = style_at(cut);
+            let mut next = cut + 1;
+            while next < end && style_at(next).map(|m| m.0) == mark.map(|m| m.0) {
+                next += 1;
+            }
+            let piece: String = chars[cut - pos..next - pos].iter().collect();
+            let style = match mark {
+                Some((_, _, patch)) => span.style.patch(*patch),
+                None => span.style,
+            };
+            out.push(Span::styled(piece, style));
+            cut = next;
+        }
+        pos = end;
+    }
+    out
+}
+
+#[cfg(test)]
+pub(crate) fn mark_spans_for_test<'a>(
+    spans: Vec<Span<'a>>,
+    marks: &[(usize, usize, Style)],
+) -> Vec<Span<'a>> {
+    mark_spans(spans, marks)
+}
+
+#[cfg(test)]
+pub(crate) fn skip_chars_for_test(spans: Vec<Span<'_>>, n: usize) -> Vec<Span<'_>> {
+    skip_chars(spans, n)
+}
+
+/// Drop the first `n` characters across spans (horizontal scroll).
+fn skip_chars(spans: Vec<Span<'_>>, mut n: usize) -> Vec<Span<'_>> {
+    if n == 0 {
+        return spans;
+    }
+    let mut out = Vec::new();
+    for span in spans {
+        let len = span.content.chars().count();
+        if n >= len {
+            n -= len;
+            continue;
+        }
+        let rest: String = span.content.chars().skip(n).collect();
+        n = 0;
+        out.push(Span::styled(rest, span.style));
+    }
+    out
 }
 
 fn highlight_json_line(line: &str) -> Vec<Span<'_>> {

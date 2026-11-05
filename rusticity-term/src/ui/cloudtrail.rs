@@ -177,7 +177,7 @@ pub fn render_events(frame: &mut Frame, app: &App, area: Rect) {
 fn render_event_detail(frame: &mut Frame, app: &App, area: Rect) {
     use crate::ui::{
         calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
-        render_json_highlighted, rounded_block,
+        rounded_block,
     };
     use ratatui::layout::{Direction, Layout};
 
@@ -283,13 +283,15 @@ fn render_event_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     let is_json_active = app.cloudtrail_state.detail_focus == CloudTrailDetailFocus::EventRecord;
 
-    render_json_highlighted(
+    crate::text_viewer::render(
         frame,
+        app,
         chunks[2],
         &event.cloud_trail_event_json,
         app.cloudtrail_state.event_json_scroll,
         "Event record",
         is_json_active,
+        crate::ui::Highlight::Json,
     );
 }
 

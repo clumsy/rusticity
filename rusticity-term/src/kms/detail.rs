@@ -314,6 +314,15 @@ impl State {
         self.view.as_mut()
     }
 
+    /// Fixture: finish the entered key's read with only a policy document.
+    #[cfg(test)]
+    pub(crate) fn finish_with_policy_for_test(&mut self, policy: &str) {
+        self.read.cancel();
+        let view = self.view.as_mut().expect("an entered key");
+        view.policy = Some(policy.into());
+        view.policy_loaded = true;
+    }
+
     /// Select a tab. Tab selection, per-tab filters and column preferences are
     /// retained; a refresh clears ALL section data immediately so nothing stale
     /// is shown during or after the reload.

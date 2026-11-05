@@ -128,7 +128,9 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
 
 pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let is_insert = match app.mode {
-        Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput => true,
+        Mode::FilterInput | Mode::EventFilterInput | Mode::InsightsInput | Mode::ViewerSearch => {
+            true
+        }
         Mode::ResourceFinder => app.resource_finder.focus == FinderFocus::Filter,
         Mode::ServicePicker | Mode::SpaceMenu => app.service_picker.filter_active,
         Mode::RegionPicker => app.region_filter_active,
@@ -262,6 +264,12 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(hint("^l", "measure latency"));
         hints.extend(hint("⎋", "close"));
         hints.extend(last_hint("q", "quit"));
+        hints
+    } else if app.mode == Mode::ViewerSearch {
+        let mut hints = vec![];
+        hints.extend(first_hint("⏎", "keep search"));
+        hints.extend(hint("⎋", "cancel"));
+        hints.extend(last_hint("^w", "delete word"));
         hints
     } else if app.mode == Mode::FilterInput {
         let mut hints = vec![];

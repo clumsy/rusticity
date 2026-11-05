@@ -10,7 +10,7 @@ use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
     calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
-    render_json_highlighted, render_tabs, render_template_highlighted, titled_block,
+    render_json_highlighted, render_tabs, titled_block,
 };
 use ratatui::{prelude::*, widgets::*};
 use rusticity_core::cfn::{StackChangeSet, StackEvent, StackOutput, StackParameter, StackResource};
@@ -630,13 +630,15 @@ pub fn render_cloudformation_stack_detail(frame: &mut Frame, app: &App, area: Re
             render_git_sync(frame, app, stack, chunks[1]);
         }
         DetailTab::Template => {
-            render_template_highlighted(
+            crate::text_viewer::render(
                 frame,
+                app,
                 chunks[1],
                 &app.cfn_state.template_body,
                 app.cfn_state.template_scroll,
                 " Template ",
                 true,
+                crate::ui::Highlight::Template,
             );
         }
         DetailTab::Parameters => {

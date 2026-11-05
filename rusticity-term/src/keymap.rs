@@ -19,6 +19,8 @@ pub enum Mode {
     BookmarkPicker,
     SessionPicker,
     QuitConfirm,
+    /// Typing a search query for the focused JSON/text viewer.
+    ViewerSearch,
 }
 
 pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
@@ -81,6 +83,11 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('[') => Some(Action::PrevTab),
             KeyCode::Char(']') => Some(Action::NextTab),
             KeyCode::Char('?') => Some(Action::ShowHelp),
+            KeyCode::Char('/') => Some(Action::ViewerSearch),
+            KeyCode::Char('n') if key.modifiers.is_empty() => Some(Action::ViewerNextMatch),
+            KeyCode::Char('N') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::ViewerPrevMatch)
+            }
             KeyCode::Char('N')
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.modifiers.contains(KeyModifiers::SHIFT) =>
@@ -95,6 +102,23 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             }
             KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::FilterInput(c)),
             KeyCode::Char('P') => Some(Action::ApplyFilter),
+            _ => None,
+        },
+        Mode::ViewerSearch => match key.code {
+            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Enter => Some(Action::Select),
+            KeyCode::Backspace => Some(Action::FilterBackspace),
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::CONTROL => {
+                Some(Action::DeleteWord)
+            }
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => Some(Action::CloseMenu),
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                Some(Action::FilterInput(c))
+            }
             _ => None,
         },
         Mode::SpaceMenu => match key.code {
@@ -408,6 +432,10 @@ pub enum Action {
     OpenCliOutput,
     EnterFilterMode,
     ExitFilterMode,
+    /// Start typing a search in the focused JSON/text viewer.
+    ViewerSearch,
+    ViewerNextMatch,
+    ViewerPrevMatch,
     Noop,
 }
 

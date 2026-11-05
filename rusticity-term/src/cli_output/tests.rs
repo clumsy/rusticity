@@ -404,3 +404,33 @@ async fn switching_focus_to_another_tab_never_invalidates_a_cli_tab() {
         crate::async_read::ReadStatus::Idle
     );
 }
+
+#[tokio::test]
+async fn output_tab_search_jumps_scrolls_sideways_and_esc_clears_before_closing() {
+    let mut app = app();
+    let id = open(&mut app);
+    let values: Vec<String> = (0..120).map(|i| format!("item-{i}")).collect();
+    let text = serde_json::to_string_pretty(&serde_json::json!({ "values": values })).unwrap();
+    finish(&mut app, id, Ok(text)).await;
+    screen(&app, 180, 35);
+    press(&mut app, KeyCode::Char('/'), KeyModifiers::NONE);
+    assert_eq!(app.mode, Mode::ViewerSearch);
+    for c in "item-100".chars() {
+        press(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+    }
+    press(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(app.mode, Mode::Normal);
+    let top = view(&app).scroll;
+    assert!(
+        top <= 102 && 102 < top + 33,
+        "jumped to the match, scroll {top}"
+    );
+    assert!(screen(&app, 180, 35).0.contains("/item-100  1 of 1"));
+    press(&mut app, KeyCode::Right, KeyModifiers::NONE);
+    assert!(app.text_viewer_hscroll_for_test() > 0);
+    press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(active(&app), "the first Esc clears the search");
+    assert!(!screen(&app, 180, 35).0.contains("/item-100"));
+    press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!active(&app), "the second Esc closes the output tab");
+}

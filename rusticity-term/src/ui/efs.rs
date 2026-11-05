@@ -589,13 +589,15 @@ fn render_file_system_policy_tab(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(msg, inner);
         return;
     }
-    crate::ui::render_json_highlighted(
+    crate::text_viewer::render(
         frame,
+        app,
         area,
         policy,
         app.efs_state.policy_scroll,
         "File system policy",
         app.mode != crate::keymap::Mode::FilterInput,
+        crate::ui::Highlight::Json,
     );
 }
 

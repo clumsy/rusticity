@@ -21,7 +21,7 @@ use crate::ui::monitoring::{render_monitoring_tab, MetricChart, MonitoringState}
 use crate::ui::table::{expanded_from_columns, render_table, Column, TableConfig};
 use crate::ui::{
     calculate_dynamic_height, format_title, labeled_field, render_fields_with_dynamic_columns,
-    render_json_highlighted, render_pagination_text, render_tabs, titled_block,
+    render_pagination_text, render_tabs, titled_block,
 };
 use ratatui::widgets::*;
 
@@ -713,13 +713,15 @@ fn render_queue_policies_tab(frame: &mut ratatui::Frame, app: &App, area: ratatu
         .split(area);
 
     // Access policy JSON using common JSON renderer
-    render_json_highlighted(
+    crate::text_viewer::render(
         frame,
+        app,
         chunks[0],
         &app.sqs_state.policy_document,
         app.sqs_state.policy_scroll,
         "Access policy",
         true,
+        crate::ui::Highlight::Json,
     );
 }
 

@@ -716,13 +716,15 @@ pub fn render_role_detail(frame: &mut Frame, app: &App, area: Rect) {
             );
         }
         RoleTab::TrustRelationships => {
-            render_json_highlighted(
+            crate::text_viewer::render(
                 frame,
+                app,
                 chunks[2],
                 &app.iam_state.trust_policy_document,
                 app.iam_state.trust_policy_scroll,
                 "Trust Policy",
                 true,
+                crate::ui::Highlight::Json,
             );
         }
         RoleTab::Tags => {
@@ -866,13 +868,15 @@ pub fn render_permissions_tab(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_policy_view(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
 
-    render_json_highlighted(
+    crate::text_viewer::render(
         frame,
+        app,
         area,
         &app.iam_state.policy_document,
         app.iam_state.policy_scroll,
         " Policy Document ",
         true,
+        crate::ui::Highlight::Json,
     );
 }
 

@@ -81,6 +81,21 @@ fn active_id(app: &App) -> Option<u64> {
         _ => None,
     }
 }
+/// The text the output tab shows once its read is no longer running (JSON
+/// output or the error text), for the shared viewer search.
+pub(crate) fn viewer_text(app: &App, id: u64) -> Option<&str> {
+    app.cli_output
+        .views
+        .get(&id)
+        .filter(|view| view.failed || !view.read.is_busy())
+        .map(|view| view.text.as_str())
+}
+pub(crate) fn viewer_scroll_mut(app: &mut App, id: u64) -> Option<&mut usize> {
+    app.cli_output
+        .views
+        .get_mut(&id)
+        .map(|view| &mut view.scroll)
+}
 /// AWS-identity fingerprint for a CLI output tab, pinned to the tab that OWNS
 /// it rather than the currently-focused tab. A CLI tab is scoped to the
 /// invocation it captured on open (empty resource), so AWS identity plus this
@@ -146,6 +161,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         return false;
     }
     if let Some(action) = crate::keymap::handle_key(key, Mode::Normal) {
+        // Search and sideways scroll come first, as in every other viewer.
+        if crate::text_viewer::handle_action(app, &action) {
+            return true;
+        }
         if !handle_action(app, &action) {
             app.handle_action(action);
         }
@@ -329,15 +348,26 @@ pub fn render(frame: &mut Frame, app: &App, id: u64, area: Rect) {
         panels[0],
     );
     if view.failed {
-        ui::render_plain_text(frame, panels[1], &view.text, view.scroll, "CLI error", true);
-    } else if !view.read.is_busy() {
-        ui::render_json_highlighted(
+        crate::text_viewer::render(
             frame,
+            app,
+            panels[1],
+            &view.text,
+            view.scroll,
+            "CLI error",
+            true,
+            ui::Highlight::Plain,
+        );
+    } else if !view.read.is_busy() {
+        crate::text_viewer::render(
+            frame,
+            app,
             panels[1],
             &view.text,
             view.scroll,
             "CLI output · JSON",
             true,
+            ui::Highlight::Json,
         );
     }
 }

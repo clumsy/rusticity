@@ -270,6 +270,8 @@ pub struct App {
     pub clipboard: ClipboardState,
     pub bookmarks: crate::bookmarks::State,
     pub cli_output: crate::cli_output::State,
+    /// Search and sideways scroll for the focused JSON/text viewer.
+    pub text_viewer: crate::text_viewer::State,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -907,6 +909,7 @@ impl App {
             clipboard: ClipboardState::default(),
             bookmarks: crate::bookmarks::State::default(),
             cli_output: crate::cli_output::State::default(),
+            text_viewer: crate::text_viewer::State::default(),
         })
     }
 
@@ -1151,6 +1154,7 @@ impl App {
             clipboard: ClipboardState::default(),
             bookmarks: crate::bookmarks::State::default(),
             cli_output: crate::cli_output::State::default(),
+            text_viewer: crate::text_viewer::State::default(),
         }
     }
 
@@ -1176,6 +1180,10 @@ impl App {
     }
 
     fn handle_action_inner(&mut self, action: Action) {
+        // Search and sideways scroll in the focused JSON/text viewer.
+        if crate::text_viewer::handle_action(self, &action) {
+            return;
+        }
         if crate::cli_output::handle_action(self, &action) {
             return;
         }
@@ -1220,7 +1228,11 @@ impl App {
             | Action::OpenResourceFinder
             | Action::OpenRelatedResources
             | Action::CopyCliCommand
-            | Action::OpenCliOutput => {}
+            | Action::OpenCliOutput
+            // Viewer keys outside a focused JSON/text viewer do nothing.
+            | Action::ViewerSearch
+            | Action::ViewerNextMatch
+            | Action::ViewerPrevMatch => {}
             Action::EnterFilterMode => match self.mode {
                 Mode::ServicePicker => self.service_picker.filter_active = true,
                 Mode::RegionPicker => self.region_filter_active = true,

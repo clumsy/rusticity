@@ -36,6 +36,7 @@ pub mod stepfunctions;
 pub mod tab_runtime;
 pub mod table;
 pub mod tags;
+pub mod text_viewer;
 pub mod ui;
 pub mod vpc;
 

@@ -292,7 +292,7 @@ fn bookmarking_and_status_hint_require_a_dedicated_view() {
             arn: String::new(),
             region: "us-east-1".into(),
         }];
-        let expected = !matches!(kind, ResourceKind::Vpc | ResourceKind::Database);
+        let expected = kind != ResourceKind::Vpc;
         assert_eq!(available(&app), expected, "{kind:?}");
         assert_eq!(
             screen(&app, 160, 30).contains("^b bookmark"),

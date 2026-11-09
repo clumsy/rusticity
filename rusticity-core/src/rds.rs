@@ -3,6 +3,7 @@ use anyhow::Result;
 use aws_sdk_rds::types::{DbInstance, PendingModifiedValues};
 use aws_smithy_types::{date_time::Format, DateTime};
 
+pub mod detail;
 mod enrichment;
 pub use enrichment::InventoryOptions;
 
@@ -83,6 +84,11 @@ impl RdsClient {
         self.enrich(&mut instances, options).await;
         Ok(instances)
     }
+
+    /// Read-only detail for one DB instance, identified by its full ARN.
+    pub async fn instance_details(&self, arn: &str) -> Result<detail::RdsInstanceDetail> {
+        detail::instance_details(&self.config, arn).await
+    }
 }
 
 fn timestamp(value: Option<&DateTime>) -> String {
@@ -139,7 +145,7 @@ fn pending_changes(values: Option<&PendingModifiedValues>) -> String {
 }
 
 impl RdsInstance {
-    fn from_sdk(instance: &DbInstance, region: &str) -> Self {
+    pub(crate) fn from_sdk(instance: &DbInstance, region: &str) -> Self {
         let is_replica = instance
             .read_replica_source_db_instance_identifier()
             .is_some()

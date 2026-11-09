@@ -9,8 +9,9 @@ use rusticity_core::LogGroup;
 /// Only kinds with a dedicated resource view can be bookmarked.
 pub fn has_detail(kind: ResourceKind) -> bool {
     match kind {
-        ResourceKind::Vpc | ResourceKind::Database | ResourceKind::Reference => false,
-        ResourceKind::Secret
+        ResourceKind::Vpc | ResourceKind::Reference => false,
+        ResourceKind::Database
+        | ResourceKind::Secret
         | ResourceKind::Api
         | ResourceKind::Stack
         | ResourceKind::Alarm
@@ -256,6 +257,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
                 .unwrap_or(0);
         }
         ResourceKind::Database => {
+            app.rds_state.detail.close();
             app.load_rds_instances().await?;
             focus!(app.rds_state.instances, identifier);
             app.rds_state.instances.selected = ui::rds::filtered_instances(app)

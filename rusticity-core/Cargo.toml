@@ -17,6 +17,7 @@ aws-sdk-apigateway = { workspace = true }
 aws-sdk-apigatewayv2 = { workspace = true }
 aws-sdk-cloudformation = { workspace = true }
 aws-sdk-cloudtrail = { workspace = true }
+aws-sdk-databasemigration = { workspace = true }
 aws-sdk-dynamodb = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 aws-sdk-ecr = { workspace = true }

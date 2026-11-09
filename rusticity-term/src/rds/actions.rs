@@ -5,7 +5,10 @@ use crate::rds;
 use crate::ui::rds::filtered_instances;
 
 pub fn console_url(app: &App) -> String {
-    rds::console_url_instances(&app.config.region)
+    match &app.rds_state.detail.source {
+        Some(instance) => rds::console_url_instance(&app.config.region, &instance.identifier),
+        None => rds::console_url_instances(&app.config.region),
+    }
 }
 
 pub fn selected_arn(app: &App) -> Option<String> {

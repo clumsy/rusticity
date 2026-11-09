@@ -14,6 +14,7 @@ use rusticity_core::rds::RdsInstance;
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 pub struct State {
+    pub detail: crate::rds::detail::State,
     pub instances: TableState<RdsInstance>,
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
@@ -23,11 +24,20 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            detail: crate::rds::detail::State::default(),
             instances: TableState::new(),
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
         }
+    }
+}
+
+impl State {
+    /// Tab indicator status. Only the entered detail is tracked; the list
+    /// still uses its legacy loader and reports Idle.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.detail.read_status()
     }
 }
 
@@ -57,6 +67,10 @@ pub fn filtered_instances(app: &App) -> Vec<&RdsInstance> {
 }
 
 pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
+    if crate::rds::detail::active(app) {
+        crate::rds::detail::render(frame, app, area);
+        return;
+    }
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.rds_state;
     let view = state

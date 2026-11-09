@@ -274,6 +274,7 @@ fn view_targets() -> Vec<Target> {
             "sqs list-message-move-tasks" => json!({"SourceArn":"arn:aws:sqs:us-east-1:123456789012:orders"}),
             "lambda list-event-source-mappings" => json!({"EventSourceArn":"arn:aws:sqs:us-east-1:123456789012:orders"}),
             "kms list-aliases" | "kms list-resource-tags" => json!({"KeyId":"arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"}),
+            "rds list-tags-for-resource" => json!({"ResourceName":"arn:aws:rds:us-east-1:123456789012:db:orders"}),
             "secretsmanager describe-secret" | "secretsmanager list-secret-version-ids" => json!({"SecretId":"arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf"}),
             "efs describe-access-points" | "efs describe-mount-targets" => json!({"FileSystemId":"fs-0123456789abcdef0"}),
             "efs list-tags-for-resource" => json!({"ResourceId":"fs-0123456789abcdef0"}),

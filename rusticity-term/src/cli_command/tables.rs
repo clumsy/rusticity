@@ -186,8 +186,33 @@ fn secrets(app: &App) -> Result<Option<Target>, String> {
 
 // ── RDS ────────────────────────────────────────────────────────────────────────
 // Databases table → describe-db-instances with no DBInstanceIdentifier (the whole
-// collection). No entered table.
-fn rds(_app: &App) -> Result<Option<Target>, String> {
+// collection). Entered database: the Tags tab → list-tags-for-resource scoped by
+// the full ARN; the summary tabs → None (the row command describes the instance).
+fn rds(app: &App) -> Result<Option<Target>, String> {
+    use crate::rds::detail::Tab;
+    let detail = &app.rds_state.detail;
+    if let Some(instance) = &detail.source {
+        if detail.view().map(|v| v.tab) != Some(Tab::Tags) {
+            return Ok(None);
+        }
+        let region = instance
+            .arn
+            .split(':')
+            .nth(3)
+            .unwrap_or_default()
+            .to_string();
+        return Ok(Some(view(
+            "rds list-tags-for-resource",
+            json!({ "ResourceName": instance.arn }),
+            None,
+            Some(scope_resource(
+                ResourceKind::Database,
+                &instance.identifier,
+                &instance.arn,
+                &region,
+            )),
+        )));
+    }
     Ok(Some(view(
         "rds describe-db-instances",
         json!({}),

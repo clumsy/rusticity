@@ -248,8 +248,12 @@ pub fn selected(app: &App) -> Option<Resource> {
 
         // ── Services with list-only (no detail parent) ──
         Service::RdsInstances => {
+            // An entered detail is the selection, independent of the highlight.
             let filtered = crate::ui::rds::filtered_instances(app);
-            let db = filtered.get(app.rds_state.instances.selected)?;
+            let db = match &app.rds_state.detail.source {
+                Some(entered) => entered,
+                None => filtered.get(app.rds_state.instances.selected)?,
+            };
             Some(Resource {
                 kind: ResourceKind::Database,
                 id: db.identifier.clone(),

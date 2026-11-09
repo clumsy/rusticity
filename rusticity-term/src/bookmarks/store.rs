@@ -795,12 +795,12 @@ mod tests {
             .filter(|kind| crate::finder::navigation::has_detail(*kind))
             .map(sample)
             .collect();
-        assert_eq!(all.len(), 20);
+        assert_eq!(all.len(), 21);
         for bookmark in &all {
             assert!(toggle(&file, bookmark).unwrap(), "first toggle should add");
         }
         let loaded = load(&file).unwrap();
-        assert_eq!(loaded.len(), 20);
+        assert_eq!(loaded.len(), 21);
         // Order-independent set equality.
         for bookmark in &all {
             assert!(

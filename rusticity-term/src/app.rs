@@ -1202,7 +1202,10 @@ impl App {
         if crate::finder::handle_action(self, &action) {
             return;
         }
-        if vpc_actions::handle_action(self, &action) || rds_actions::handle_action(self, &action) {
+        if vpc_actions::handle_action(self, &action)
+            || crate::rds::detail::handle_action(self, &action)
+            || rds_actions::handle_action(self, &action)
+        {
             return;
         }
         if crate::kms::detail::handle_action(self, &action) {
@@ -1232,7 +1235,10 @@ impl App {
             // Viewer keys outside a focused JSON/text viewer do nothing.
             | Action::ViewerSearch
             | Action::ViewerNextMatch
-            | Action::ViewerPrevMatch => {}
+            | Action::ViewerPrevMatch
+            // Only tabs that stack several tables move table focus.
+            | Action::NextTableFocus
+            | Action::PrevTableFocus => {}
             Action::EnterFilterMode => match self.mode {
                 Mode::ServicePicker => self.service_picker.filter_active = true,
                 Mode::RegionPicker => self.region_filter_active = true,
@@ -3150,7 +3156,12 @@ impl App {
             Service::EfsFileSystems => {
                 parts.extend(crate::efs::actions::breadcrumb(self));
             }
-            Service::RdsInstances => parts.extend(["RDS".into(), "Databases".into()]),
+            Service::RdsInstances => {
+                parts.extend(["RDS".into(), "Databases".into()]);
+                if let Some(instance) = &self.rds_state.detail.source {
+                    parts.push(instance.identifier.clone());
+                }
+            }
             Service::VpcVpcs => parts.extend(["VPC".into(), "VPCs".into()]),
             Service::SnsTopics => {
                 parts.extend(["SNS".into(), "Topics".into()]);
@@ -4302,6 +4313,7 @@ impl App {
                     self.vpc_state.vpcs.loading = true;
                 }
                 if new_service == Service::RdsInstances {
+                    self.rds_state.detail.close();
                     self.rds_state.instances.reset();
                     self.rds_state.instances.loading = true;
                 }

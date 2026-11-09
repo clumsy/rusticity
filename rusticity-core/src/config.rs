@@ -290,6 +290,10 @@ impl AwsConfig {
         aws_sdk_rds::Client::new(&self.sdk_config)
     }
 
+    pub fn dms_client(&self) -> aws_sdk_databasemigration::Client {
+        aws_sdk_databasemigration::Client::new(&self.sdk_config)
+    }
+
     pub fn fsx_client(&self) -> aws_sdk_fsx::Client {
         aws_sdk_fsx::Client::new(&self.sdk_config)
     }

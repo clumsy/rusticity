@@ -40,6 +40,7 @@ enum Source {
     SecretsManagerSecrets,
     SecretsManagerSecretDetails,
     AcmCertificates,
+    RdsInstanceDetails,
 }
 
 fn columns(
@@ -142,6 +143,7 @@ impl Source {
             }
             Service::KmsKeys if crate::kms::detail::active(app) => Self::KmsKeyDetails,
             Service::KmsKeys => Self::KmsKeys,
+            Service::RdsInstances if crate::rds::detail::active(app) => Self::RdsInstanceDetails,
             Service::RdsInstances => Self::RdsInstances,
             Service::VpcVpcs => Self::VpcVpcs,
             Service::SnsTopics if app.sns_state.subscriptions.topic.is_some() => {
@@ -324,6 +326,20 @@ impl Source {
                 |id| crate::secretsmanager::columns::Column::from_id(id).map(|c| c.name()),
                 None,
             ),
+            Self::RdsInstanceDetails => {
+                let view = rds_detail(app);
+                // Summary panes carry no columns and leak no inventory preferences.
+                if !view.tab.is_table() {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                }
+                let ids: Vec<_> = view.active_columns().iter().map(|(id, _)| *id).collect();
+                columns(
+                    &ids,
+                    &view.active_table().visible_column_ids,
+                    |id| Some(id.into()),
+                    None,
+                )
+            }
             Self::AcmCertificates => columns(
                 &app.acm_state.column_ids,
                 &app.acm_state.visible_column_ids,
@@ -419,6 +435,7 @@ impl Source {
             Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.page_size,
             Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
             Self::AcmCertificates => app.acm_state.certificates.page_size,
+            Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -472,6 +489,10 @@ impl Source {
                 secret_detail_mut(app).data_mut().table.set_page_size(size)
             }
             Self::AcmCertificates => app.acm_state.certificates.set_page_size(size),
+            Self::RdsInstanceDetails => rds_detail_mut(app)
+                .active_table_mut()
+                .rows
+                .set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -518,9 +539,20 @@ impl Source {
                 &mut secret_detail_mut(app).data_mut().visible_column_ids
             }
             Self::AcmCertificates => &mut app.acm_state.visible_column_ids,
+            Self::RdsInstanceDetails => {
+                &mut rds_detail_mut(app).active_table_mut().visible_column_ids
+            }
             _ => return None,
         })
     }
+}
+
+fn rds_detail(app: &App) -> &crate::rds::detail::View {
+    app.rds_state.detail.view().expect("rds detail source")
+}
+
+fn rds_detail_mut(app: &mut App) -> &mut crate::rds::detail::View {
+    app.rds_state.detail.view_mut().expect("rds detail source")
 }
 
 fn secret_detail(app: &App) -> &crate::secretsmanager::detail::View {

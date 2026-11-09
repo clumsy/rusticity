@@ -181,6 +181,7 @@ const VIEW_OPERATIONS: &[&str] = &[
     "secretsmanager list-secret-version-ids",
     "acm list-certificates",
     "rds describe-db-instances",
+    "rds list-tags-for-resource",
     "ec2 describe-vpcs",
     "ec2 describe-instances",
     "ec2 describe-tags",

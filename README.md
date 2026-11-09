@@ -163,7 +163,7 @@ not yet been migrated to this loading lifecycle.
 `Ctrl+B` toggles a bookmark for the selected resource (or the supported parent
 resource in a nested view), only when it has a dedicated resource view. It also
 works on a selected finder result. The status bar shows the shortcut only for
-eligible selections. VPC, RDS, and unsupported references cannot be bookmarked
+eligible selections. VPC and unsupported references cannot be bookmarked
 until dedicated views exist. `Space`,
 then `k`, opens the bookmark picker: `i`/Tab filters, arrows select, Right/Left
 show/hide the identity, Enter opens, Delete removes, and `Ctrl+R` reloads the file.

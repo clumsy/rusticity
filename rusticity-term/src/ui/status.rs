@@ -111,6 +111,7 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             "secret details"
         }
         Service::AcmCertificates => "certificates",
+        Service::RdsInstances if app.rds_state.detail.source.is_some() => "database details",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
         Service::DynamoDbTables => "DynamoDB tables",
@@ -287,9 +288,14 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         // Service-specific Items hints must precede the legacy ViewMode branches.
         dynamodb_items_hotkeys(app)
     } else if app.mode == Mode::Normal
-        && (crate::kms::detail::active(app) || crate::secretsmanager::detail::active(app))
+        && (crate::kms::detail::active(app)
+            || crate::secretsmanager::detail::active(app)
+            || crate::rds::detail::active(app))
     {
         let mut hints = first_hint("⇤⇥", "tabs");
+        if let Some(label) = crate::rds::detail::table_focus_hint(app) {
+            hints.extend(hint("f/F", label));
+        }
         hints.extend(hint("↑↓", "scroll / select"));
         hints.extend(hint("i", "filter table"));
         hints.extend(hint("p", "preferences"));
@@ -339,6 +345,9 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::SnsTopics {
             hints.extend(hint("⏎", "subscriptions"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::RdsInstances {
+            hints.extend(hint("⏎", "database details"));
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::SecretsManagerSecrets {
             hints.extend(hint("⏎", "secret details"));

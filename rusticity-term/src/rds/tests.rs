@@ -93,7 +93,8 @@ fn rds_filters_and_navigates_without_legacy_cloudwatch_fallthrough() {
             actions::selected_arn(&app).unwrap(),
             "arn:aws:rds:us-east-2:123456789012:db:database-01"
         );
-        app.handle_action(Action::Select);
+        // Enter opens database details; → toggles the inventory row.
+        app.handle_action(Action::ExpandRow);
         assert_eq!(app.rds_state.instances.expanded_item, Some(1));
         app.handle_action(Action::PageDown);
         assert_eq!(app.rds_state.instances.selected, 11);

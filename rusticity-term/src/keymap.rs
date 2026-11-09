@@ -102,6 +102,10 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             }
             KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::FilterInput(c)),
             KeyCode::Char('P') => Some(Action::ApplyFilter),
+            KeyCode::Char('f') if key.modifiers.is_empty() => Some(Action::NextTableFocus),
+            KeyCode::Char('F') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::PrevTableFocus)
+            }
             _ => None,
         },
         Mode::ViewerSearch => match key.code {
@@ -436,6 +440,9 @@ pub enum Action {
     ViewerSearch,
     ViewerNextMatch,
     ViewerPrevMatch,
+    /// Move focus to the next or previous table of a tab that stacks several.
+    NextTableFocus,
+    PrevTableFocus,
     Noop,
 }
 

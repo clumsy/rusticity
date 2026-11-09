@@ -564,6 +564,7 @@ fn is_managed(service: Service) -> bool {
             | Service::KmsKeys
             | Service::SecretsManagerSecrets
             | Service::AcmCertificates
+            | Service::RdsInstances
             | Service::SqsQueues
             | Service::LambdaFunctions
             | Service::DynamoDbTables
@@ -605,6 +606,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::KmsKeys => app.kms_state.load_status(),
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         Service::AcmCertificates => app.acm_state.load_status(),
+        Service::RdsInstances => app.rds_state.load_status(),
         Service::SqsQueues => app.sqs_state.load_status(),
         Service::LambdaFunctions => app.lambda_state.load_status(),
         Service::DynamoDbTables => app.dynamodb_state.load_status(),
@@ -621,6 +623,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::KmsKeys(s, _) => s.load_status(),
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         Snapshot::AcmCertificates(s, _) => s.load_status(),
+        Snapshot::RdsInstances(s, _) => s.load_status(),
         Snapshot::SqsQueues(s, _) => s.load_status(),
         Snapshot::LambdaFunctions(s, _) => s.load_status(),
         Snapshot::DynamoDbTables(s, _) => s.load_status(),
@@ -781,6 +784,8 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         // The inventory keeps its legacy loader; only the entered detail is owned.
         Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
+        // The list keeps its legacy loader; only the entered detail is owned.
+        Service::RdsInstances => crate::rds::detail::poll(app).await,
         Service::SqsQueues => crate::sqs::inventory::poll(app).await,
         Service::LambdaFunctions => crate::lambda::inventory::poll(app).await,
         Service::DynamoDbTables => crate::dynamodb::inventory::poll(app).await,

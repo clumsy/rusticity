@@ -278,19 +278,12 @@ where
     }
     let replacing = app.profile != entry.profile || app.config.region != entry.region;
     if replacing {
-        let mut next = tokio::time::timeout(
-            Duration::from_secs(30),
+        crate::finder::navigation::switch_context(
+            app,
             connect(entry.profile.clone(), entry.region.clone()),
+            |next| validate_open(next, &entry),
         )
-        .await
-        .map_err(|_| anyhow::anyhow!("Connecting to bookmark profile timed out after 30s"))??;
-        validate_open(&next, &entry)?;
-        next.tabs = app.tabs.clone();
-        next.current_tab = app.current_tab;
-        next.current_service = app.current_service;
-        next.service_selected = app.service_selected;
-        next.bookmarks = std::mem::take(&mut app.bookmarks);
-        *app = next;
+        .await?;
     } else {
         validate_open(app, &entry)?;
     }

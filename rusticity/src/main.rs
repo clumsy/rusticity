@@ -157,7 +157,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             }
                             let mut enter_resource = false;
                             if let Some(resource) = app.resource_finder.pending_open.take() {
-                                match finder::navigation::open_resource(&mut app, resource).await {
+                                match finder::navigation::open_from_finder(&mut app, resource).await {
                                     Ok(enter) => enter_resource = enter,
                                     Err(error) => {
                                         app.error_message = Some(format!("Failed to open resource: {error:#}"));

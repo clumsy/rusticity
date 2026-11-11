@@ -725,3 +725,137 @@ fn a_result_from_another_region_can_be_bookmarked() {
     app.resource_finder.focus = Focus::Table;
     assert!(crate::bookmarks::available(&app));
 }
+
+mod open_in_its_region {
+    use super::*;
+
+    fn other() -> Resource {
+        Resource {
+            kind: ResourceKind::Topic,
+            id: "orders".into(),
+            name: "orders".into(),
+            arn: "arn:aws:sns:eu-west-1:123456789012:orders".into(),
+            region: "eu-west-1".into(),
+        }
+    }
+
+    fn finder_on(app: &mut App, row: Resource) {
+        app.config.account_id = "123456789012".into();
+        open(app);
+        app.resource_finder.rows = vec![row];
+        app.resource_finder.focus = Focus::Table;
+    }
+
+    #[test]
+    fn the_first_enter_asks_and_the_second_queues_the_open() {
+        let mut app = app();
+        finder_on(&mut app, other());
+        app.handle_action(Action::Select);
+        assert!(
+            app.resource_finder.pending_open.is_none(),
+            "nothing opens yet"
+        );
+        let message = app.resource_finder.message();
+        assert!(
+            message.contains("eu-west-1")
+                && message.contains("switches all tabs")
+                && message.contains("us-east-2"),
+            "{message}"
+        );
+        app.handle_action(Action::Select);
+        assert_eq!(app.resource_finder.pending_open, Some(other()));
+        assert_eq!(app.config.region, "us-east-2", "the switch happens on open");
+    }
+
+    #[test]
+    fn esc_or_moving_cancels_the_question_and_keeps_the_finder() {
+        let mut app = app();
+        finder_on(&mut app, other());
+        app.handle_action(Action::Select);
+        app.handle_action(Action::GoBack);
+        assert_eq!(
+            app.mode,
+            Mode::ResourceFinder,
+            "Esc only cancels the question"
+        );
+        assert!(app.resource_finder.confirm_region.is_none());
+        app.handle_action(Action::Select);
+        app.handle_action(Action::NextItem);
+        app.handle_action(Action::Select);
+        assert!(app.resource_finder.pending_open.is_none(), "asked again");
+    }
+
+    #[test]
+    fn another_account_is_refused_without_asking() {
+        let mut app = app();
+        let mut foreign = other();
+        foreign.arn = "arn:aws:sns:eu-west-1:999999999999:orders".into();
+        finder_on(&mut app, foreign);
+        app.handle_action(Action::Select);
+        assert!(app.resource_finder.confirm_region.is_none());
+        assert!(app
+            .resource_finder
+            .message()
+            .contains("account 999999999999"));
+    }
+
+    #[tokio::test]
+    async fn the_open_switches_every_tab_to_the_resource_region() {
+        let mut app = app();
+        app.config.account_id = "123456789012".into();
+        let tabs = app.tabs.len();
+        let enter =
+            navigation::open_from_finder_with(&mut app, other(), |profile, region| async move {
+                assert_eq!((profile.as_str(), region.as_str()), ("test", "eu-west-1"));
+                let mut next = App::new_without_client(profile, Some(region));
+                next.config.account_id = "123456789012".into();
+                Ok(next)
+            })
+            .await
+            .unwrap();
+        assert!(!enter, "the topic opens on completion of its read");
+        assert_eq!(app.config.region, "eu-west-1");
+        assert_eq!(app.current_service, Service::SnsTopics);
+        assert_eq!(app.tabs.len(), tabs + 1, "old tabs kept, one opened");
+    }
+
+    #[tokio::test]
+    async fn a_different_account_or_failed_sign_in_keeps_the_current_app() {
+        for fail in [false, true] {
+            let mut app = app();
+            app.config.account_id = "123456789012".into();
+            let service = app.current_service;
+            let result = navigation::open_from_finder_with(
+                &mut app,
+                other(),
+                |profile, region| async move {
+                    if fail {
+                        anyhow::bail!("ExpiredToken");
+                    }
+                    let mut next = App::new_without_client(profile, Some(region));
+                    next.config.account_id = "210987654321".into();
+                    Ok(next)
+                },
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(app.config.region, "us-east-2");
+            assert_eq!(app.current_service, service);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_current_region_result_opens_without_reconnecting() {
+        let mut app = app();
+        app.config.account_id = "123456789012".into();
+        let mut here = other();
+        here.region = "us-east-2".into();
+        here.arn = "arn:aws:sns:us-east-2:123456789012:orders".into();
+        navigation::open_from_finder_with(&mut app, here, |_, _| async {
+            panic!("no reconnect for the current Region")
+        })
+        .await
+        .unwrap();
+        assert_eq!(app.current_service, Service::SnsTopics);
+    }
+}

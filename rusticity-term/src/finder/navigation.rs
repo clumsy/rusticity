@@ -90,7 +90,25 @@ pub fn service(kind: ResourceKind) -> Service {
     }
 }
 
-pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -> Result<()> {
+/// The Region a resource must be opened in, when it is not the current one.
+/// Global resources, S3 buckets and public ECR repositories open anywhere.
+pub fn other_region<'a>(
+    config: &rusticity_core::AwsConfig,
+    resource: &'a Resource,
+) -> Option<&'a str> {
+    (resource.region != config.region
+        && resource.region != "global"
+        && !resource.region.is_empty()
+        && !matches!(
+            resource.kind,
+            ResourceKind::Bucket | ResourceKind::PublicRepository
+        ))
+    .then_some(resource.region.as_str())
+}
+
+/// Everything `validate_scope` checks except the Region: what must hold
+/// before switching the app to the resource Region.
+pub fn validate_account(config: &rusticity_core::AwsConfig, resource: &Resource) -> Result<()> {
     if resource.kind == ResourceKind::Reference {
         bail!("This resource type has no Rusticity view yet");
     }
@@ -104,21 +122,81 @@ pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -
             bail!("Resource is in account {account}; switch profile before opening it");
         }
     }
-    // The finder never silently switches credentials or the regional client set.
-    if resource.region != config.region
-        && resource.region != "global"
-        && !resource.region.is_empty()
-        && !matches!(
-            resource.kind,
-            ResourceKind::Bucket | ResourceKind::PublicRepository
-        )
-    {
+    Ok(())
+}
+
+pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -> Result<()> {
+    validate_account(config, resource)?;
+    // Opening never silently switches credentials or the regional client set;
+    // `open_from_finder` switches only after the user confirmed it.
+    if let Some(region) = other_region(config, resource) {
         bail!(
-            "Resource is in {}; switch Region (Space, r) to open it, or bookmark it (Ctrl+B) to open it in its Region later",
-            resource.region
+            "Resource is in {region}; switch Region (Space, r) to open it, or bookmark it (Ctrl+B) to open it in its Region later"
         );
     }
     Ok(())
+}
+
+/// Replace the AWS context of every tab: connect off-screen (bounded by
+/// 30s), check the new context with `check`, and only then swap it in, so a
+/// failed sign-in or a wrong account leaves the current app untouched. Tabs
+/// and the bookmark store carry over; every tab reloads in the new context.
+pub async fn switch_context<Fut>(
+    app: &mut App,
+    connect: Fut,
+    check: impl FnOnce(&App) -> Result<()>,
+) -> Result<()>
+where
+    Fut: std::future::Future<Output = Result<App>>,
+{
+    let mut next = tokio::time::timeout(std::time::Duration::from_secs(30), connect)
+        .await
+        .map_err(|_| anyhow::anyhow!("Connecting to the new Region timed out after 30s"))??;
+    check(&next)?;
+    next.tabs = app.tabs.clone();
+    next.current_tab = app.current_tab;
+    next.current_service = app.current_service;
+    next.service_selected = app.service_selected;
+    next.bookmarks = std::mem::take(&mut app.bookmarks);
+    *app = next;
+    Ok(())
+}
+
+/// Enter on a finder result. A result from another Region, confirmed in the
+/// finder, first switches the whole app to that Region with the same profile
+/// and must resolve to the same account.
+pub async fn open_from_finder(app: &mut App, resource: Resource) -> Result<bool> {
+    open_from_finder_with(app, resource, |profile, region| {
+        App::new(Some(profile), Some(region))
+    })
+    .await
+}
+
+pub(crate) async fn open_from_finder_with<F, Fut>(
+    app: &mut App,
+    resource: Resource,
+    connect: F,
+) -> Result<bool>
+where
+    F: FnOnce(String, String) -> Fut,
+    Fut: std::future::Future<Output = Result<App>>,
+{
+    if let Some(region) = other_region(&app.config, &resource) {
+        validate_account(&app.config, &resource)?;
+        let account = app.config.account_id.clone();
+        switch_context(app, connect(app.profile.clone(), region.to_string()), |next| {
+            if next.config.account_id != account {
+                bail!(
+                    "Profile {} resolved to account {} in {region}, not {account}. No resource was opened.",
+                    next.profile,
+                    next.config.account_id
+                );
+            }
+            validate_scope(&next.config, &resource)
+        })
+        .await?;
+    }
+    open_resource(app, resource).await
 }
 
 fn isolate_resource<T>(

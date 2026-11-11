@@ -60,6 +60,9 @@ pub struct State {
     pub provider: String,
     pub warnings: Vec<String>,
     pub pending_open: Option<Resource>,
+    /// A result from another Region waiting for a second Enter, with the
+    /// Region the app is in now.
+    pub confirm_region: Option<(Resource, String)>,
     pub related_source: Option<Resource>,
     related_rows: Vec<Resource>,
     related_cache: Vec<RelatedCache>,
@@ -87,6 +90,7 @@ impl Default for State {
             provider: String::new(),
             warnings: vec![],
             pending_open: None,
+            confirm_region: None,
             related_source: None,
             related_rows: vec![],
             related_cache: vec![],
@@ -237,6 +241,12 @@ impl State {
         if self.opening {
             return "Opening resource...".into();
         }
+        if let Some((resource, current)) = &self.confirm_region {
+            return format!(
+                "{} is in {}. Enter switches all tabs to {} and opens it; Esc stays in {current}.",
+                resource.name, resource.region, resource.region
+            );
+        }
         if !self.warnings.is_empty() {
             return format!(
                 "{} warning(s): {}",
@@ -349,6 +359,11 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
         return false;
     }
     let finder = &mut app.resource_finder;
+    // A pending Region switch is confirmed by Enter on the same row only.
+    let confirm = finder.confirm_region.take();
+    if confirm.is_some() && matches!(action, Action::CloseMenu | Action::GoBack) {
+        return true;
+    }
     match action {
         Action::CloseMenu | Action::GoBack => {
             finder.cancel();
@@ -431,7 +446,20 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
                     }
                     return true;
                 }
-                if let Err(error) = navigation::validate_scope(&app.config, &resource) {
+                let confirmed = confirm.is_some_and(|(pending, _)| pending == resource);
+                if !confirmed
+                    && navigation::validate_account(&app.config, &resource).is_ok()
+                    && navigation::other_region(&app.config, &resource).is_some()
+                {
+                    finder.confirm_region = Some((resource, app.config.region.clone()));
+                    return true;
+                }
+                let check = if confirmed {
+                    navigation::validate_account(&app.config, &resource)
+                } else {
+                    navigation::validate_scope(&app.config, &resource)
+                };
+                if let Err(error) = check {
                     let warning = error.to_string();
                     if !finder.warnings.contains(&warning) {
                         finder.warnings.push(warning);

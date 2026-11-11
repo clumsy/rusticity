@@ -128,6 +128,9 @@ fn expected_list_url(service: Service, region: &str) -> String {
         Service::AcmCertificates => format!(
             "https://{region}.console.aws.amazon.com/acm/home?region={region}#/certificates/list"
         ),
+        Service::EventBridgeEventBuses => format!(
+            "https://{region}.console.aws.amazon.com/events/home?region={region}#/eventbuses"
+        ),
         Service::SqsQueues => format!(
             "https://{region}.console.aws.amazon.com/sqs/v3/home?region={region}#/queues"
         ),
@@ -560,6 +563,7 @@ fn simple_inventories_route_to_list_in_both_regions() {
         Service::IamRoles,
         Service::IamUserGroups,
         Service::AcmCertificates,
+        Service::EventBridgeEventBuses,
     ];
     for service in services {
         for region in [R1, R2] {
@@ -637,6 +641,7 @@ fn list_route_matrix_covers_every_service_picker_entry() {
     let services = [
         Service::AcmCertificates,
         Service::ApiGatewayApis,
+        Service::EventBridgeEventBuses,
         Service::CloudWatchLogGroups,
         Service::CloudWatchInsights,
         Service::CloudWatchAlarms,

@@ -41,6 +41,7 @@ enum Source {
     SecretsManagerSecretDetails,
     AcmCertificates,
     RdsInstanceDetails,
+    EventBridge,
 }
 
 fn columns(
@@ -161,6 +162,7 @@ impl Source {
             }
             Service::SecretsManagerSecrets => Self::SecretsManagerSecrets,
             Service::AcmCertificates => Self::AcmCertificates,
+            Service::EventBridgeEventBuses => Self::EventBridge,
             _ => return None,
         })
     }
@@ -340,6 +342,14 @@ impl Source {
                     None,
                 )
             }
+            Self::EventBridge => {
+                // Summary tabs carry no columns.
+                if !crate::eventbridge::is_table(app) {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                }
+                let (ids, visible) = crate::eventbridge::columns(app);
+                columns(&ids, &visible, |id| Some(id.into()), None)
+            }
             Self::AcmCertificates => columns(
                 &app.acm_state.column_ids,
                 &app.acm_state.visible_column_ids,
@@ -435,6 +445,7 @@ impl Source {
             Self::SecretsManagerSecrets => app.secretsmanager_state.secrets.page_size,
             Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
             Self::AcmCertificates => app.acm_state.certificates.page_size,
+            Self::EventBridge => crate::eventbridge::page_size(app),
             Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
@@ -489,6 +500,7 @@ impl Source {
                 secret_detail_mut(app).data_mut().table.set_page_size(size)
             }
             Self::AcmCertificates => app.acm_state.certificates.set_page_size(size),
+            Self::EventBridge => crate::eventbridge::set_page_size(app, size),
             Self::RdsInstanceDetails => rds_detail_mut(app)
                 .active_table_mut()
                 .rows
@@ -539,6 +551,7 @@ impl Source {
                 &mut secret_detail_mut(app).data_mut().visible_column_ids
             }
             Self::AcmCertificates => &mut app.acm_state.visible_column_ids,
+            Self::EventBridge => crate::eventbridge::visible_mut(app),
             Self::RdsInstanceDetails => {
                 &mut rds_detail_mut(app).active_table_mut().visible_column_ids
             }

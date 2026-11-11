@@ -72,6 +72,7 @@ enum Snapshot {
     SnsTopics(Box<crate::app::SnsState>, ViewMode),
     SecretsManagerSecrets(Box<crate::app::SecretsManagerState>, ViewMode),
     AcmCertificates(Box<crate::app::AcmState>, ViewMode),
+    EventBridgeEventBuses(Box<crate::eventbridge::State>, ViewMode),
     StepFunctionsStateMachines(Box<crate::ui::stepfunctions::State>, ViewMode),
     SqsQueues(Box<crate::app::SqsState>, ViewMode),
     VpcVpcs(Box<crate::app::VpcState>, ViewMode),
@@ -105,6 +106,7 @@ impl Snapshot {
             Snapshot::SnsTopics(..) => Service::SnsTopics,
             Snapshot::SecretsManagerSecrets(..) => Service::SecretsManagerSecrets,
             Snapshot::AcmCertificates(..) => Service::AcmCertificates,
+            Snapshot::EventBridgeEventBuses(..) => Service::EventBridgeEventBuses,
             Snapshot::StepFunctionsStateMachines(..) => Service::StepFunctionsStateMachines,
             Snapshot::SqsQueues(..) => Service::SqsQueues,
             Snapshot::VpcVpcs(..) => Service::VpcVpcs,
@@ -171,6 +173,10 @@ fn take_live(app: &mut App, service: Service) -> Option<Snapshot> {
         Service::AcmCertificates => {
             Snapshot::AcmCertificates(Box::new(std::mem::take(&mut app.acm_state)), view_mode)
         }
+        Service::EventBridgeEventBuses => Snapshot::EventBridgeEventBuses(
+            Box::new(std::mem::take(&mut app.eventbridge_state)),
+            view_mode,
+        ),
         Service::SecretsManagerSecrets => Snapshot::SecretsManagerSecrets(
             Box::new(std::mem::take(&mut app.secretsmanager_state)),
             view_mode,
@@ -264,6 +270,10 @@ fn hydrate(app: &mut App, snap: Snapshot) {
         }
         Snapshot::AcmCertificates(s, vm) => {
             app.acm_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::EventBridgeEventBuses(s, vm) => {
+            app.eventbridge_state = *s;
             app.view_mode = vm;
         }
         Snapshot::SecretsManagerSecrets(s, vm) => {
@@ -475,6 +485,7 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::StepFunctionsStateMachines => crate::stepfunctions::inventory::request(app),
         Service::KmsKeys => crate::kms::inventory::request(app),
         Service::AcmCertificates => crate::acm::inventory::request(app),
+        Service::EventBridgeEventBuses => crate::eventbridge::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
         Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
@@ -564,6 +575,7 @@ fn is_managed(service: Service) -> bool {
             | Service::KmsKeys
             | Service::SecretsManagerSecrets
             | Service::AcmCertificates
+            | Service::EventBridgeEventBuses
             | Service::RdsInstances
             | Service::SqsQueues
             | Service::LambdaFunctions
@@ -606,6 +618,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::KmsKeys => app.kms_state.load_status(),
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         Service::AcmCertificates => app.acm_state.load_status(),
+        Service::EventBridgeEventBuses => app.eventbridge_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
         Service::SqsQueues => app.sqs_state.load_status(),
         Service::LambdaFunctions => app.lambda_state.load_status(),
@@ -623,6 +636,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::KmsKeys(s, _) => s.load_status(),
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         Snapshot::AcmCertificates(s, _) => s.load_status(),
+        Snapshot::EventBridgeEventBuses(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
         Snapshot::SqsQueues(s, _) => s.load_status(),
         Snapshot::LambdaFunctions(s, _) => s.load_status(),
@@ -784,6 +798,7 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         // The inventory keeps its legacy loader; only the entered detail is owned.
         Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
+        Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
         // The list keeps its legacy loader; only the entered detail is owned.
         Service::RdsInstances => crate::rds::detail::poll(app).await,
         Service::SqsQueues => crate::sqs::inventory::poll(app).await,

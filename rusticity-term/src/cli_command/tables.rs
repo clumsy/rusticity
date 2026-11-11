@@ -67,6 +67,7 @@ pub(super) fn target(app: &App) -> Result<Option<Target>, String> {
         Service::SecretsManagerSecrets => secrets(app),
         // A flat inventory: always the Region's certificate list, never a row.
         Service::AcmCertificates => Ok(Some(view("acm list-certificates", json!({}), None, None))),
+        Service::EventBridgeEventBuses => Ok(Some(eventbridge(app))),
         Service::RdsInstances => rds(app),
         Service::VpcVpcs => vpc(app),
         Service::Ec2Instances => ec2(app),
@@ -219,6 +220,49 @@ fn rds(app: &App) -> Result<Option<Target>, String> {
         None,
         None,
     )))
+}
+
+// ── EventBridge ───────────────────────────────────────────────────────────────
+// Event buses table → list-event-buses. Entered bus: its rules table →
+// list-rules for that bus. Entered rule: Targets → list-targets-by-rule, Tags →
+// list-tags-for-resource by rule ARN, other tabs → describe-rule.
+fn eventbridge(app: &App) -> Target {
+    use crate::eventbridge::{BusView, Tab};
+    match &app.eventbridge_state.bus {
+        None => view("events list-event-buses", json!({}), None, None),
+        Some(BusView {
+            bus, rule: None, ..
+        }) => view(
+            "events list-rules",
+            json!({ "EventBusName": bus.name }),
+            None,
+            None,
+        ),
+        Some(BusView {
+            bus,
+            rule: Some(rule),
+            ..
+        }) => match rule.tab {
+            Tab::Targets => view(
+                "events list-targets-by-rule",
+                json!({ "Rule": rule.source.name, "EventBusName": bus.name }),
+                None,
+                None,
+            ),
+            Tab::Tags => view(
+                "events list-tags-for-resource",
+                json!({ "ResourceARN": rule.source.arn }),
+                None,
+                None,
+            ),
+            _ => view(
+                "events describe-rule",
+                json!({ "Name": rule.source.name, "EventBusName": bus.name }),
+                None,
+                None,
+            ),
+        },
+    }
 }
 
 // ── VPC ────────────────────────────────────────────────────────────────────────

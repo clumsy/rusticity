@@ -163,6 +163,7 @@ pub struct App {
     pub sns_state: SnsState,
     pub secretsmanager_state: SecretsManagerState,
     pub acm_state: AcmState,
+    pub eventbridge_state: crate::eventbridge::State,
     pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
@@ -384,6 +385,7 @@ pub enum Service {
     /// Ephemeral output tab, not an AWS service picker entry.
     CliOutput(u64),
     AcmCertificates,
+    EventBridgeEventBuses,
     ApiGatewayApis,
     CloudWatchLogGroups,
     CloudWatchInsights,
@@ -415,6 +417,7 @@ impl Service {
         match self {
             Service::CliOutput(_) => "CLI output",
             Service::AcmCertificates => "ACM › Certificates",
+            Service::EventBridgeEventBuses => "EventBridge › Event buses",
             Service::ApiGatewayApis => "API Gateway › APIs",
             Service::CloudWatchLogGroups => "CloudWatch › Log Groups",
             Service::CloudWatchInsights => "CloudWatch › Logs Insights",
@@ -718,6 +721,7 @@ impl App {
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
             acm_state: AcmState::default(),
+            eventbridge_state: crate::eventbridge::State::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -963,6 +967,7 @@ impl App {
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
             acm_state: AcmState::default(),
+            eventbridge_state: crate::eventbridge::State::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -1220,6 +1225,7 @@ impl App {
         if crate::secretsmanager::detail::handle_action(self, &action)
             || crate::secretsmanager::actions::handle_action(self, &action)
             || crate::acm::actions::handle_action(self, &action)
+            || crate::eventbridge::handle_action(self, &action)
         {
             return;
         }
@@ -1525,6 +1531,7 @@ impl App {
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
                             "AcmCertificates" => Service::AcmCertificates,
+                            "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             "Ec2Instances" => Service::Ec2Instances,
                             "EcrRepositories" => Service::EcrRepositories,
@@ -3176,6 +3183,7 @@ impl App {
                 }
             }
             Service::AcmCertificates => parts.extend(["ACM".into(), "Certificates".into()]),
+            Service::EventBridgeEventBuses => parts.extend(crate::eventbridge::breadcrumb(self)),
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()]);
                 if let Some(secret) = &self.secretsmanager_state.detail.source {
@@ -3273,6 +3281,7 @@ impl App {
             Service::StepFunctionsStateMachines => crate::stepfunctions::actions::console_url(self),
             Service::SecretsManagerSecrets => crate::secretsmanager::actions::console_url(self),
             Service::AcmCertificates => crate::acm::actions::console_url(self),
+            Service::EventBridgeEventBuses => crate::eventbridge::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4289,6 +4298,7 @@ impl App {
                     "Step Functions › State machines" => Service::StepFunctionsStateMachines,
                     "Secrets Manager › Secrets" => Service::SecretsManagerSecrets,
                     "ACM › Certificates" => Service::AcmCertificates,
+                    "EventBridge › Event buses" => Service::EventBridgeEventBuses,
                     "SQS › Queues" => Service::SqsQueues,
                     _ => return,
                 };
@@ -4379,6 +4389,7 @@ impl App {
                             "SnsTopics" => Service::SnsTopics,
                             "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
                             "AcmCertificates" => Service::AcmCertificates,
+                            "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             _ => Service::CloudWatchLogGroups,
                         },
@@ -5804,6 +5815,7 @@ impl ServicePickerState {
             services: vec![
                 "ACM › Certificates",
                 "API Gateway › APIs",
+                "EventBridge › Event buses",
                 "CloudWatch › Log Groups",
                 "CloudWatch › Logs Insights",
                 "CloudWatch › Alarms",

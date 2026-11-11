@@ -17,6 +17,7 @@ pub mod ec2;
 pub mod ecr;
 pub mod efs;
 pub mod event;
+pub mod eventbridge;
 pub mod finder;
 pub mod fsx;
 pub mod iam;

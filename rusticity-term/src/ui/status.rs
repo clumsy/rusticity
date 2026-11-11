@@ -111,6 +111,11 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             "secret details"
         }
         Service::AcmCertificates => "certificates",
+        Service::EventBridgeEventBuses => match crate::eventbridge::level(app) {
+            crate::eventbridge::Level::Buses => "event buses",
+            crate::eventbridge::Level::Rules => "rules",
+            crate::eventbridge::Level::Rule(_) => "rule",
+        },
         Service::RdsInstances if app.rds_state.detail.source.is_some() => "database details",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
@@ -333,10 +338,21 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::AcmCertificates
                 | Service::StepFunctionsStateMachines
                 | Service::KmsKeys
+                | Service::EventBridgeEventBuses
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
-        if app.current_service == Service::KmsKeys {
+        if app.current_service == Service::EventBridgeEventBuses {
+            match crate::eventbridge::level(app) {
+                crate::eventbridge::Level::Buses => hints.extend(hint("⏎", "rules")),
+                crate::eventbridge::Level::Rules => hints.extend(hint("⏎", "rule details")),
+                crate::eventbridge::Level::Rule(_) => {
+                    hints.extend(hint("⇤⇥", "tabs"));
+                    hints.extend(hint("⎋", "back"));
+                }
+            }
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::KmsKeys {
             hints.extend(hint("⏎", "key details"));
             hints.extend(hint("⇤⇥", "tabs"));
             hints.extend(hint("←→", "toggle"));

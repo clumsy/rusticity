@@ -23,6 +23,8 @@ pub struct State {
     pub(crate) inventory: crate::list_read::ListRead<RdsInstance>,
     /// ARN or identifier to enter once the list read completes.
     pub(crate) pending_focus: Option<String>,
+    /// Chosen in Preferences; see `crate::sort`.
+    pub sort: crate::sort::SortOrder,
 }
 
 impl Default for State {
@@ -35,8 +37,25 @@ impl Default for State {
             visible_column_ids: Column::default_visible_ids(),
             inventory: Default::default(),
             pending_focus: None,
+            sort: default_sort(),
         }
     }
+}
+
+/// The table default order.
+pub fn default_sort() -> crate::sort::SortOrder {
+    crate::sort::SortOrder::new(Column::Identifier.id(), SortDirection::Asc)
+}
+
+/// Header name and direction of the order in effect.
+fn sort_header(state: &State) -> (String, SortDirection) {
+    let order = state
+        .sort
+        .effective(default_sort(), &state.visible_column_ids);
+    let name = Column::from_id(order.column)
+        .map(|c| c.name())
+        .unwrap_or_default();
+    (name, order.direction)
 }
 
 impl State {
@@ -73,6 +92,15 @@ pub fn filtered_instances(app: &App) -> Vec<&RdsInstance> {
         },
     );
     instances.sort_by(|a, b| a.identifier.cmp(&b.identifier));
+    let order = app
+        .rds_state
+        .sort
+        .effective(default_sort(), &app.rds_state.visible_column_ids);
+    crate::sort::apply(&mut instances, order, |row, id| {
+        Column::from_id(id)
+            .map(|c| c.render(row).0)
+            .unwrap_or_default()
+    });
     instances
 }
 
@@ -83,6 +111,7 @@ pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
     }
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.rds_state;
+    let sort_header = sort_header(state);
     let view = state
         .instances
         .prepare_view(filtered_instances(app), TableWindow::SelectedPage);
@@ -112,8 +141,8 @@ pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
             selected_index: view.selected_index,
             expanded_index: view.expanded_index,
             columns: &columns,
-            sort_column: &Column::Identifier.name(),
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_header.0,
+            sort_direction: sort_header.1,
             title: format_title(&format!("Databases ({})", view.total_items)),
             area: chunks[1],
             get_expanded_content: Some(Box::new(|instance| {

@@ -33,6 +33,7 @@ pub mod s3;
 pub mod secretsmanager;
 pub mod session;
 pub mod sns;
+pub mod sort;
 pub mod sqs;
 pub mod stepfunctions;
 pub mod tab_runtime;
@@ -157,3 +158,6 @@ mod config_tests {
         assert!("[columns\nname =".parse::<toml::Table>().is_err());
     }
 }
+
+#[cfg(test)]
+mod sort_tests;

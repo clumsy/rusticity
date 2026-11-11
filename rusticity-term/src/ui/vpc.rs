@@ -20,7 +20,25 @@ pub struct State {
     pub(crate) inventory: crate::list_read::ListRead<Vpc>,
     /// VPC ID to filter to once the list read completes.
     pub(crate) pending_focus: Option<String>,
+    /// Chosen in Preferences; see `crate::sort`.
+    pub sort: crate::sort::SortOrder,
 }
+/// The table default order.
+pub fn default_sort() -> crate::sort::SortOrder {
+    crate::sort::SortOrder::new(Column::VpcId.id(), SortDirection::Asc)
+}
+
+/// Header name and direction of the order in effect.
+fn sort_header(state: &State) -> (String, SortDirection) {
+    let order = state
+        .sort
+        .effective(default_sort(), &state.visible_column_ids);
+    let name = Column::from_id(order.column)
+        .map(|c| c.name())
+        .unwrap_or_default();
+    (name, order.direction)
+}
+
 impl State {
     pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
         self.inventory.status()
@@ -35,6 +53,7 @@ impl Default for State {
             visible_column_ids: Column::default_visible_ids(),
             inventory: Default::default(),
             pending_focus: None,
+            sort: default_sort(),
         }
     }
 }
@@ -64,12 +83,22 @@ pub fn filtered_vpcs(app: &App) -> Vec<&Vpc> {
         },
     );
     vpcs.sort_by(|a, b| a.vpc_id.cmp(&b.vpc_id));
+    let order = app
+        .vpc_state
+        .sort
+        .effective(default_sort(), &app.vpc_state.visible_column_ids);
+    crate::sort::apply(&mut vpcs, order, |row, id| {
+        Column::from_id(id)
+            .map(|c| c.render(row).0)
+            .unwrap_or_default()
+    });
     vpcs
 }
 
 pub fn render_vpcs(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.vpc_state;
+    let sort_header = sort_header(state);
     let view = state
         .vpcs
         .prepare_view(filtered_vpcs(app), TableWindow::SelectedPage);
@@ -103,8 +132,8 @@ pub fn render_vpcs(frame: &mut Frame, app: &App, area: Rect) {
             selected_index: view.selected_index,
             expanded_index: view.expanded_index,
             columns: &columns,
-            sort_column: &Column::VpcId.name(),
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_header.0,
+            sort_direction: sort_header.1,
             title: format_title(&format!("VPCs ({})", view.total_items)),
             area: chunks[1],
             get_expanded_content: Some(Box::new(|vpc| {

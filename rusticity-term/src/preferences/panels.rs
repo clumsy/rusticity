@@ -464,6 +464,21 @@ impl Panel {
             };
             model = model.with_page_sizes(self.page_size(app), sizes);
         }
+        if matches!(self, Self::Ec2) {
+            let order = app
+                .ec2_state
+                .sort
+                .effective(crate::ui::ec2::default_sort(), &app.ec2_visible_column_ids);
+            // Column order, not visibility order.
+            let choices: Vec<_> = app
+                .ec2_column_ids
+                .iter()
+                .filter(|id| app.ec2_visible_column_ids.contains(id))
+                .filter_map(|id| crate::ec2::Column::from_id(id))
+                .map(|c| (c.id(), c.default_name()))
+                .collect();
+            model = crate::sort::with_sort(model, &choices, order);
+        }
         if matches!(self, Self::Alarms) {
             model = model.toggle(
                 "alarm-wrap",
@@ -657,6 +672,11 @@ impl Panel {
                 } else {
                     AlarmViewMode::Table
                 };
+            }
+            Some(PreferenceAction::SetRadio { group, value }) if matches!(self, Self::Ec2) => {
+                if app.ec2_state.sort.choose(group, value) {
+                    app.ec2_state.table.reset();
+                }
             }
             Some(PreferenceAction::SetToggle {
                 id: "alarm-wrap",

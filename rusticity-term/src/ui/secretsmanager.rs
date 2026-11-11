@@ -23,7 +23,25 @@ pub struct State {
     pub(crate) inventory: crate::list_read::ListRead<SecretMetadata>,
     /// Secret ARN to enter once the list read completes.
     pub(crate) pending_focus: Option<String>,
+    /// Chosen in Preferences; see `crate::sort`.
+    pub sort: crate::sort::SortOrder,
 }
+/// The table default order.
+pub fn default_sort() -> crate::sort::SortOrder {
+    crate::sort::SortOrder::new(Column::Name.id(), SortDirection::Asc)
+}
+
+/// Header name and direction of the order in effect.
+fn sort_header(state: &State) -> (String, SortDirection) {
+    let order = state
+        .sort
+        .effective(default_sort(), &state.visible_column_ids);
+    let name = Column::from_id(order.column)
+        .map(|c| c.name())
+        .unwrap_or_default();
+    (name, order.direction)
+}
+
 impl State {
     /// Tab indicator status of the view on screen: the entered secret, else
     /// the list.
@@ -45,6 +63,7 @@ impl Default for State {
             visible_column_ids: Column::default_visible_ids(),
             inventory: Default::default(),
             pending_focus: None,
+            sort: default_sort(),
         }
     }
 }
@@ -75,6 +94,15 @@ pub fn filtered_secrets(app: &App) -> Vec<&SecretMetadata> {
         },
     );
     rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arn.cmp(&b.arn)));
+    let order = app
+        .secretsmanager_state
+        .sort
+        .effective(default_sort(), &app.secretsmanager_state.visible_column_ids);
+    crate::sort::apply(&mut rows, order, |row, id| {
+        Column::from_id(id)
+            .map(|c| c.render(row).0)
+            .unwrap_or_default()
+    });
     rows
 }
 pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
@@ -84,6 +112,7 @@ pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
     }
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.secretsmanager_state;
+    let sort_header = sort_header(state);
     let view = state
         .secrets
         .prepare_view(filtered_secrets(app), TableWindow::SelectedPage);
@@ -117,8 +146,8 @@ pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
             selected_index: view.selected_index,
             expanded_index: view.expanded_index,
             columns: &columns,
-            sort_column: &Column::Name.name(),
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_header.0,
+            sort_direction: sort_header.1,
             title: format_title(&format!("Secrets ({})", view.total_items)),
             area: chunks[1],
             get_expanded_content: Some(Box::new(|s| expanded_from_columns(&expanded, s))),

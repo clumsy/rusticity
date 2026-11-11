@@ -15566,10 +15566,16 @@ mod lambda_version_tab_tests {
         app.mode = Mode::ColumnSelector;
         app.column_selector_index = 0;
 
+        // Columns, Page size, Sort by, Sort direction, then back to the top.
         let page_size_idx = app.ec2_column_ids.len() + 2;
+        let sort_by_idx = page_size_idx + crate::preferences::PAGE_SIZE_OPTIONS.len() + 2;
+        let visible = app.ec2_visible_column_ids.len();
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
-
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx + visible + 2);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }

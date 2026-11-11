@@ -133,8 +133,8 @@ impl DetailTab {
 pub struct State {
     pub table: TableState<Instance>,
     pub state_filter: StateFilter,
-    pub sort_column: Column,
-    pub sort_direction: SortDirection,
+    /// Chosen in Preferences; see `crate::sort`.
+    pub sort: crate::sort::SortOrder,
     pub input_focus: InputFocus,
     pub current_instance: Option<String>,
     pub detail_tab: DetailTab,
@@ -172,8 +172,7 @@ impl Default for State {
         Self {
             table: TableState::default(),
             state_filter: StateFilter::default(),
-            sort_column: Column::LaunchTime,
-            sort_direction: SortDirection::Desc,
+            sort: default_sort(),
             input_focus: InputFocus::Filter,
             current_instance: None,
             detail_tab: DetailTab::Details,
@@ -234,29 +233,17 @@ pub fn render_instances(
     use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
     use crate::ui::loading::render_table;
 
+    let sort_order = state.sort.effective(default_sort(), visible_columns);
+    let sort_name = Column::from_id(sort_order.column)
+        .map(|c| c.name())
+        .unwrap_or_default();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    let filtered_items: Vec<&Instance> = state
-        .table
-        .items
-        .iter()
-        .filter(|i| state.state_filter.matches(&i.state))
-        .filter(|i| {
-            if state.table.filter.is_empty() {
-                return true;
-            }
-            i.name.contains(&state.table.filter)
-                || i.instance_id.contains(&state.table.filter)
-                || i.state.contains(&state.table.filter)
-                || i.instance_type.contains(&state.table.filter)
-                || i.availability_zone.contains(&state.table.filter)
-                || i.security_groups.contains(&state.table.filter)
-                || i.key_name.contains(&state.table.filter)
-        })
-        .collect();
+    // The same rows and order that selection, copy and paging use.
+    let filtered_items = filtered_rows(state, visible_columns);
 
     let page_size = state.table.page_size.value();
     let filtered_count = filtered_items.len();
@@ -300,8 +287,8 @@ pub fn render_instances(
             selected_index: state.table.selected,
             expanded_index: state.table.expanded_item,
             columns: &columns,
-            sort_column: "",
-            sort_direction: state.sort_direction,
+            sort_column: &sort_name,
+            sort_direction: sort_order.direction,
             title,
             area: chunks[1],
             get_expanded_content: Some(Box::new(|instance: &Instance| {
@@ -337,28 +324,47 @@ pub fn render_instances(
 }
 
 pub fn filtered_ec2_instances(app: &crate::app::App) -> Vec<&Instance> {
-    let filtered: Vec<&Instance> = if app.ec2_state.table.filter.is_empty() {
-        app.ec2_state.table.items.iter().collect()
-    } else {
-        app.ec2_state
-            .table
-            .items
-            .iter()
-            .filter(|i| {
-                i.instance_id.contains(&app.ec2_state.table.filter)
-                    || i.name.contains(&app.ec2_state.table.filter)
-                    || i.state.contains(&app.ec2_state.table.filter)
-                    || i.instance_type.contains(&app.ec2_state.table.filter)
-                    || i.public_ipv4_address.contains(&app.ec2_state.table.filter)
-                    || i.private_ip_address.contains(&app.ec2_state.table.filter)
-            })
-            .collect()
-    };
+    filtered_rows(&app.ec2_state, &app.ec2_visible_column_ids)
+}
 
-    filtered
-        .into_iter()
-        .filter(|i| app.ec2_state.state_filter.matches(&i.state))
-        .collect()
+/// The table default order: newest launch first.
+pub fn default_sort() -> crate::sort::SortOrder {
+    crate::sort::SortOrder::new(Column::LaunchTime.id(), SortDirection::Desc)
+}
+
+/// Text and state filters, then the chosen order. The table, selection,
+/// copy and paging all read this one list.
+pub(crate) fn filtered_rows<'a>(state: &'a State, visible: &[&str]) -> Vec<&'a Instance> {
+    let filter = &state.table.filter;
+    let mut rows: Vec<&Instance> = state
+        .table
+        .items
+        .iter()
+        .filter(|i| state.state_filter.matches(&i.state))
+        .filter(|i| {
+            filter.is_empty()
+                || [
+                    &i.instance_id,
+                    &i.name,
+                    &i.state,
+                    &i.instance_type,
+                    &i.availability_zone,
+                    &i.public_ipv4_address,
+                    &i.private_ip_address,
+                    &i.security_groups,
+                    &i.key_name,
+                ]
+                .iter()
+                .any(|field| field.contains(filter.as_str()))
+        })
+        .collect();
+    let order = state.sort.effective(default_sort(), visible);
+    crate::sort::apply(&mut rows, order, |row, id| {
+        Column::from_id(id)
+            .map(|c| c.to_column().render(row).0)
+            .unwrap_or_default()
+    });
+    rows
 }
 
 pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::App) {
@@ -916,8 +922,7 @@ mod tests {
         assert!(!state.table.loading);
         assert_eq!(state.table.filter, "");
         assert_eq!(state.state_filter, StateFilter::AllStates);
-        assert_eq!(state.sort_column, Column::LaunchTime);
-        assert_eq!(state.sort_direction, SortDirection::Desc);
+        assert_eq!(state.sort, default_sort());
         assert!(!state.metrics_loading);
         assert!(state.metric_data_cpu.is_empty());
         assert!(state.metric_data_network_in.is_empty());

@@ -23,6 +23,13 @@ pub struct State {
     pub(crate) inventory: AsyncRead<Vec<Certificate>>,
     /// Inline error from the latest read; never an ErrorModal focus steal.
     pub(crate) error: Option<String>,
+    /// Chosen in Preferences; see `crate::sort`.
+    pub sort: crate::sort::SortOrder,
+}
+
+/// The table default order.
+pub fn default_sort() -> crate::sort::SortOrder {
+    crate::sort::SortOrder::new(Column::DomainName.id(), SortDirection::Asc)
 }
 
 impl Default for State {
@@ -34,6 +41,7 @@ impl Default for State {
             visible_column_ids: Column::default_visible_ids(),
             inventory: AsyncRead::default(),
             error: None,
+            sort: default_sort(),
         }
     }
 }
@@ -67,12 +75,27 @@ pub fn filtered_certificates(app: &App) -> Vec<&Certificate> {
             .cmp(&b.domain_name)
             .then_with(|| a.arn.cmp(&b.arn))
     });
+    let state = &app.acm_state;
+    let order = state
+        .sort
+        .effective(default_sort(), &state.visible_column_ids);
+    crate::sort::apply(&mut rows, order, |cert, id| {
+        Column::from_id(id)
+            .map(|c| c.text(cert))
+            .unwrap_or_default()
+    });
     rows
 }
 
 pub fn render_certificates(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let state = &app.acm_state;
+    let sort_order = state
+        .sort
+        .effective(default_sort(), &state.visible_column_ids);
+    let sort_name = Column::from_id(sort_order.column)
+        .map(|c| c.name())
+        .unwrap_or_default();
     let view = state
         .certificates
         .prepare_view(filtered_certificates(app), TableWindow::SelectedPage);
@@ -106,8 +129,8 @@ pub fn render_certificates(frame: &mut Frame, app: &App, area: Rect) {
             selected_index: view.selected_index,
             expanded_index: view.expanded_index,
             columns: &columns,
-            sort_column: &Column::DomainName.name(),
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_name,
+            sort_direction: sort_order.direction,
             title: format_title(&format!("Certificates ({})", view.total_items)),
             area: chunks[1],
             get_expanded_content: Some(Box::new(|cert| expanded_from_columns(&expanded, cert))),

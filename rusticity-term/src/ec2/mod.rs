@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod inventory;
 
 use crate::common::{translate_column, ColumnId, UTC_TIMESTAMP_WIDTH};
 use crate::ui::table::Column as TableColumn;
@@ -681,3 +682,6 @@ mod tests {
         assert_eq!(UTC_TIMESTAMP_WIDTH, 27);
     }
 }
+
+#[cfg(test)]
+mod inventory_tests;

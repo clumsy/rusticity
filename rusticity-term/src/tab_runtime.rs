@@ -487,6 +487,7 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::AcmCertificates => crate::acm::inventory::request(app),
         Service::RdsInstances => crate::rds::inventory::request(app),
         Service::VpcVpcs => crate::vpc::inventory::request(app),
+        Service::Ec2Instances => crate::ec2::inventory::request(app),
         Service::SecretsManagerSecrets => crate::secretsmanager::inventory::request(app),
         Service::EventBridgeEventBuses => crate::eventbridge::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
@@ -581,6 +582,7 @@ fn is_managed(service: Service) -> bool {
             | Service::EventBridgeEventBuses
             | Service::RdsInstances
             | Service::VpcVpcs
+            | Service::Ec2Instances
             | Service::SqsQueues
             | Service::LambdaFunctions
             | Service::DynamoDbTables
@@ -624,6 +626,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::AcmCertificates => app.acm_state.load_status(),
         Service::EventBridgeEventBuses => app.eventbridge_state.load_status(),
         Service::VpcVpcs => app.vpc_state.load_status(),
+        Service::Ec2Instances => app.ec2_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
         Service::SqsQueues => app.sqs_state.load_status(),
         Service::LambdaFunctions => app.lambda_state.load_status(),
@@ -643,6 +646,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::AcmCertificates(s, _) => s.load_status(),
         Snapshot::EventBridgeEventBuses(s, _) => s.load_status(),
         Snapshot::VpcVpcs(s, _) => s.load_status(),
+        Snapshot::Ec2Instances(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
         Snapshot::SqsQueues(s, _) => s.load_status(),
         Snapshot::LambdaFunctions(s, _) => s.load_status(),
@@ -676,6 +680,7 @@ pub fn handle_action(app: &mut App, action: &crate::keymap::Action) -> bool {
         Service::AcmCertificates => crate::acm::inventory::handle_action(app, action),
         Service::RdsInstances => crate::rds::inventory::handle_action(app, action),
         Service::VpcVpcs => crate::vpc::inventory::handle_action(app, action),
+        Service::Ec2Instances => crate::ec2::inventory::handle_action(app, action),
         Service::SecretsManagerSecrets => {
             crate::secretsmanager::inventory::handle_action(app, action)
         }
@@ -811,6 +816,7 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
             crate::secretsmanager::detail::poll(app).await || inventory
         }
         Service::VpcVpcs => crate::vpc::inventory::poll(app).await,
+        Service::Ec2Instances => crate::ec2::inventory::poll(app).await,
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
         Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
         Service::RdsInstances => {

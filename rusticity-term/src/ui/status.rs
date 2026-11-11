@@ -625,7 +625,6 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
         || app.ecr_state.repositories.loading
-        || app.ec2_state.table.loading
         || app.cfn_state.table.loading
         || app.lambda_state.table.loading
         || app.lambda_application_state.table.loading

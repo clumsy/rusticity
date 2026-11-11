@@ -56,6 +56,7 @@ pub(crate) fn enter_loaded(app: &mut App) {
         Service::SecretsManagerSecrets => {
             crate::secretsmanager::detail::handle_action(app, &crate::keymap::Action::Select);
         }
+        Service::Ec2Instances => crate::ec2::actions::select_item(app),
         _ => unreachable!("only managed inventory completions enter here"),
     }
     app.mode = mode;
@@ -270,8 +271,8 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
         ResourceKind::Instance => {
             app.ec2_state.current_instance = None;
             app.ec2_state.state_filter = ui::ec2::StateFilter::AllStates;
-            app.load_ec2_instances().await?;
-            focus!(app.ec2_state.table, instance_id);
+            crate::ec2::inventory::request(app);
+            app.ec2_state.pending_focus = Some(resource.id.clone());
         }
         ResourceKind::Repository | ResourceKind::PublicRepository => {
             app.ecr_state.current_repository = None;
@@ -410,6 +411,7 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
                 | ResourceKind::StateMachine
                 | ResourceKind::Database
                 | ResourceKind::Secret
+                | ResourceKind::Instance
         ))
 }
 

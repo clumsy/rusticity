@@ -5177,10 +5177,9 @@ impl App {
         Ok(())
     }
 
-    pub async fn load_ec2_instances(&mut self) -> anyhow::Result<()> {
-        let instances = self.ec2_client.list_instances().await?;
-
-        self.ec2_state.table.items = instances
+    /// Table rows from a DescribeInstances read, newest launch first.
+    pub(crate) fn ec2_rows(instances: Vec<rusticity_core::ec2::Instance>) -> Vec<Ec2Instance> {
+        let mut rows: Vec<Ec2Instance> = instances
             .into_iter()
             .map(|i| Ec2Instance {
                 instance_id: i.instance_id,
@@ -5237,13 +5236,8 @@ impl App {
                 operator: String::new(),
             })
             .collect();
-
-        // Sort by launch time descending by default
-        self.ec2_state
-            .table
-            .items
-            .sort_by(|a, b| b.launch_time.cmp(&a.launch_time));
-        Ok(())
+        rows.sort_by(|a, b| b.launch_time.cmp(&a.launch_time));
+        rows
     }
 
     pub async fn load_ecr_images(&mut self) -> anyhow::Result<()> {

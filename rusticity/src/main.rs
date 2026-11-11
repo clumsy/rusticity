@@ -82,7 +82,6 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.log_groups_state.loading
             || app.kms_state.keys.loading
             || app.ecr_state.repositories.loading
-            || app.ec2_state.table.loading
             || app.cfn_state.table.loading
             || app.lambda_state.table.loading
             || app.lambda_application_state.table.loading
@@ -222,7 +221,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates | Service::EventBridgeEventBuses | Service::SqsQueues | Service::LambdaFunctions | Service::DynamoDbTables);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates | Service::EventBridgeEventBuses | Service::Ec2Instances | Service::SqsQueues | Service::LambdaFunctions | Service::DynamoDbTables);
                         // This loader only refreshes CloudWatch Logs views. Every other
                         // service refreshes through its own handler; running this for
                         // them reloaded log groups (KMS Ctrl+R did that).
@@ -564,20 +563,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.cloudtrail_state.table.loading = false;
                         }
 
-                        // Load EC2 instances when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::Ec2Instances
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::Ec2Instances)
-                                || app.ec2_state.table.loading)
-                        {
-                            app.ec2_state.table.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_ec2_instances().await {
-                                app.error_message = Some(format!("Failed to load EC2 instances: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.ec2_state.table.loading = false;
-                        }
+                        // EC2 instances load as a tab-owned background read (tab_runtime).
 
                         // Load EC2 tags when tab is switched
                         if app.current_service == Service::Ec2Instances
@@ -1358,9 +1344,6 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                         // Set loading=true for the restored service so the load
                                         // condition triggers even though service didn't "change".
                                         match prev_service {
-                                            rusticity_term::app::Service::Ec2Instances => {
-                                                new_app.ec2_state.table.loading = true;
-                                            }
                                             rusticity_term::app::Service::EcrRepositories => {
                                                 new_app.ecr_state.repositories.loading = true;
                                             }

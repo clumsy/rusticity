@@ -149,6 +149,21 @@ pub struct State {
     pub metric_data_network_packets_in: Vec<(i64, f64)>,
     pub metric_data_network_packets_out: Vec<(i64, f64)>,
     pub metric_data_metadata_no_token: Vec<(i64, f64)>,
+    pub(crate) inventory: crate::list_read::ListRead<Instance>,
+    /// Instance ID to enter once the list read completes.
+    pub(crate) pending_focus: Option<String>,
+}
+
+impl State {
+    /// Tab indicator status: the list read. The entered instance has no
+    /// owned read yet.
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        if self.current_instance.is_some() {
+            crate::async_read::ReadStatus::Idle
+        } else {
+            self.inventory.status()
+        }
+    }
 }
 
 impl Default for State {
@@ -173,6 +188,8 @@ impl Default for State {
             metric_data_network_packets_in: Vec::new(),
             metric_data_network_packets_out: Vec::new(),
             metric_data_metadata_no_token: Vec::new(),
+            inventory: Default::default(),
+            pending_focus: None,
         }
     }
 }
@@ -215,7 +232,7 @@ pub fn render_instances(
 ) {
     use crate::common::render_dropdown;
     use crate::ui::filter::{render_filter_bar, FilterConfig, FilterControl};
-    use crate::ui::table::render_table;
+    use crate::ui::loading::render_table;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -291,6 +308,13 @@ pub fn render_instances(
                 expanded_from_columns(&columns, instance)
             })),
             is_active: mode == Mode::Normal,
+        },
+        state.inventory.status(),
+        "Instances",
+        state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No instances in this Region.",
+            has_unfiltered_items: !state.table.items.is_empty(),
         },
     );
 

@@ -80,7 +80,10 @@ impl RdsClient {
         &self,
         options: InventoryOptions,
     ) -> Result<Vec<RdsInstance>> {
-        let mut instances = self.list_instances().await?;
+        let limit = std::time::Duration::from_secs(30);
+        let mut instances = tokio::time::timeout(limit, self.list_instances())
+            .await
+            .map_err(|_| anyhow::anyhow!("RDS DescribeDBInstances timed out after {limit:?}"))??;
         self.enrich(&mut instances, options).await;
         Ok(instances)
     }

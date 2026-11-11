@@ -485,6 +485,9 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::StepFunctionsStateMachines => crate::stepfunctions::inventory::request(app),
         Service::KmsKeys => crate::kms::inventory::request(app),
         Service::AcmCertificates => crate::acm::inventory::request(app),
+        Service::RdsInstances => crate::rds::inventory::request(app),
+        Service::VpcVpcs => crate::vpc::inventory::request(app),
+        Service::SecretsManagerSecrets => crate::secretsmanager::inventory::request(app),
         Service::EventBridgeEventBuses => crate::eventbridge::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
@@ -577,6 +580,7 @@ fn is_managed(service: Service) -> bool {
             | Service::AcmCertificates
             | Service::EventBridgeEventBuses
             | Service::RdsInstances
+            | Service::VpcVpcs
             | Service::SqsQueues
             | Service::LambdaFunctions
             | Service::DynamoDbTables
@@ -619,6 +623,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         Service::AcmCertificates => app.acm_state.load_status(),
         Service::EventBridgeEventBuses => app.eventbridge_state.load_status(),
+        Service::VpcVpcs => app.vpc_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
         Service::SqsQueues => app.sqs_state.load_status(),
         Service::LambdaFunctions => app.lambda_state.load_status(),
@@ -637,6 +642,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         Snapshot::AcmCertificates(s, _) => s.load_status(),
         Snapshot::EventBridgeEventBuses(s, _) => s.load_status(),
+        Snapshot::VpcVpcs(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
         Snapshot::SqsQueues(s, _) => s.load_status(),
         Snapshot::LambdaFunctions(s, _) => s.load_status(),
@@ -668,6 +674,11 @@ pub fn handle_action(app: &mut App, action: &crate::keymap::Action) -> bool {
         }
         Service::KmsKeys => crate::kms::inventory::handle_action(app, action),
         Service::AcmCertificates => crate::acm::inventory::handle_action(app, action),
+        Service::RdsInstances => crate::rds::inventory::handle_action(app, action),
+        Service::VpcVpcs => crate::vpc::inventory::handle_action(app, action),
+        Service::SecretsManagerSecrets => {
+            crate::secretsmanager::inventory::handle_action(app, action)
+        }
         Service::SqsQueues => crate::sqs::inventory::handle_action(app, action),
         Service::LambdaFunctions => crate::lambda::inventory::handle_action(app, action),
         Service::DynamoDbTables => crate::dynamodb::inventory::handle_action(app, action),
@@ -795,12 +806,17 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
             let inventory = crate::kms::inventory::poll(app).await;
             crate::kms::detail::poll(app).await || inventory
         }
-        // The inventory keeps its legacy loader; only the entered detail is owned.
-        Service::SecretsManagerSecrets => crate::secretsmanager::detail::poll(app).await,
+        Service::SecretsManagerSecrets => {
+            let inventory = crate::secretsmanager::inventory::poll(app).await;
+            crate::secretsmanager::detail::poll(app).await || inventory
+        }
+        Service::VpcVpcs => crate::vpc::inventory::poll(app).await,
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
         Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
-        // The list keeps its legacy loader; only the entered detail is owned.
-        Service::RdsInstances => crate::rds::detail::poll(app).await,
+        Service::RdsInstances => {
+            let inventory = crate::rds::inventory::poll(app).await;
+            crate::rds::detail::poll(app).await || inventory
+        }
         Service::SqsQueues => crate::sqs::inventory::poll(app).await,
         Service::LambdaFunctions => crate::lambda::inventory::poll(app).await,
         Service::DynamoDbTables => crate::dynamodb::inventory::poll(app).await,

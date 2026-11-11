@@ -635,7 +635,7 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
                     && RdsColumn::inventory_options(&app.rds_state.visible_column_ids)
                         != previous_rds_options
                 {
-                    app.rds_state.instances.loading = true;
+                    crate::rds::inventory::request(app);
                 }
             }
         }

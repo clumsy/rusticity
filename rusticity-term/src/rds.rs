@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod detail;
 pub mod instance;
+pub mod inventory;
 
 use crate::console::{component, ConsoleUrl};
 use std::collections::HashMap;

@@ -7,11 +7,11 @@ use crate::{
     ui::{
         filter::{render_simple_filter, SimpleFilterConfig},
         format_title,
-        table::{expanded_from_columns, render_table, TableConfig},
-        titled_block,
+        loading::render_table,
+        table::{expanded_from_columns, TableConfig},
     },
 };
-use ratatui::{prelude::*, widgets::Paragraph};
+use ratatui::prelude::*;
 use rusticity_core::SecretMetadata;
 
 pub struct State {
@@ -20,12 +20,19 @@ pub struct State {
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
+    pub(crate) inventory: crate::list_read::ListRead<SecretMetadata>,
+    /// Secret ARN to enter once the list read completes.
+    pub(crate) pending_focus: Option<String>,
 }
 impl State {
-    /// Read status for the tab indicator. Only the entered detail is tracked;
-    /// the inventory still uses its legacy loader and reports Idle.
+    /// Tab indicator status of the view on screen: the entered secret, else
+    /// the list.
     pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
-        self.detail.read_status()
+        if self.detail.source.is_some() {
+            self.detail.read_status()
+        } else {
+            self.inventory.status()
+        }
     }
 }
 impl Default for State {
@@ -36,6 +43,8 @@ impl Default for State {
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
+            inventory: Default::default(),
+            pending_focus: None,
         }
     }
 }
@@ -91,15 +100,6 @@ pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: state.input_focus == InputFocus::Pagination,
         },
     );
-    if state.secrets.loading && state.secrets.items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("Loading secret metadata...")
-                .block(titled_block("Secrets"))
-                .alignment(Alignment::Center),
-            chunks[1],
-        );
-        return;
-    }
     let columns: Vec<_> = state
         .visible_column_ids
         .iter()
@@ -123,6 +123,13 @@ pub fn render_secrets(frame: &mut Frame, app: &App, area: Rect) {
             area: chunks[1],
             get_expanded_content: Some(Box::new(|s| expanded_from_columns(&expanded, s))),
             is_active: app.mode == Mode::Normal,
+        },
+        state.inventory.status(),
+        "Secrets",
+        state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No secrets in this Region.",
+            has_unfiltered_items: !state.secrets.items.is_empty(),
         },
     );
 }

@@ -6,9 +6,10 @@ use crate::keymap::Mode;
 use crate::rds::instance::Column;
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-use crate::ui::table::{expanded_from_columns, render_table, TableConfig};
-use crate::ui::{format_title, titled_block};
-use ratatui::{prelude::*, widgets::Paragraph};
+use crate::ui::format_title;
+use crate::ui::loading::render_table;
+use crate::ui::table::{expanded_from_columns, TableConfig};
+use ratatui::prelude::*;
 use rusticity_core::rds::RdsInstance;
 
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
@@ -19,6 +20,9 @@ pub struct State {
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
+    pub(crate) inventory: crate::list_read::ListRead<RdsInstance>,
+    /// ARN or identifier to enter once the list read completes.
+    pub(crate) pending_focus: Option<String>,
 }
 
 impl Default for State {
@@ -29,15 +33,21 @@ impl Default for State {
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
+            inventory: Default::default(),
+            pending_focus: None,
         }
     }
 }
 
 impl State {
-    /// Tab indicator status. Only the entered detail is tracked; the list
-    /// still uses its legacy loader and reports Idle.
+    /// Tab indicator status of the view on screen: the entered database, else
+    /// the list.
     pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
-        self.detail.read_status()
+        if self.detail.source.is_some() {
+            self.detail.read_status()
+        } else {
+            self.inventory.status()
+        }
     }
 }
 
@@ -89,15 +99,6 @@ pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: state.input_focus == InputFocus::Pagination,
         },
     );
-    if state.instances.loading && state.instances.items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("Loading databases...")
-                .block(titled_block("Databases"))
-                .alignment(Alignment::Center),
-            chunks[1],
-        );
-        return;
-    }
     let columns: Vec<_> = state
         .visible_column_ids
         .iter()
@@ -119,6 +120,13 @@ pub fn render_instances(frame: &mut Frame, app: &App, area: Rect) {
                 expanded_from_columns(&columns, instance)
             })),
             is_active: app.mode == Mode::Normal,
+        },
+        state.inventory.status(),
+        "Databases",
+        state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No databases in this Region.",
+            has_unfiltered_items: !state.instances.items.is_empty(),
         },
     );
 }

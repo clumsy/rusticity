@@ -7,6 +7,34 @@ use aws_sdk_cloudwatch::types::{
 use aws_sdk_rds::types::{DbCluster, DbRecommendation, ResourcePendingMaintenanceActions};
 use aws_smithy_types::DateTime;
 use std::collections::HashMap;
+use std::future::Future;
+use std::time::Duration;
+
+/// Bound on each optional column read.
+pub(super) const ENRICH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Run `read` only when `wanted`; a failure or timeout is logged and reported
+/// as `Err(())` so the caller marks its columns.
+async fn bounded<T>(
+    wanted: bool,
+    what: &str,
+    read: impl Future<Output = Result<Vec<T>>>,
+) -> Result<Vec<T>, ()> {
+    if !wanted {
+        return Ok(Vec::new());
+    }
+    match tokio::time::timeout(ENRICH_TIMEOUT, read).await {
+        Ok(Ok(rows)) => Ok(rows),
+        Ok(Err(error)) => {
+            tracing::warn!("RDS {what} unavailable: {error}");
+            Err(())
+        }
+        Err(_) => {
+            tracing::warn!("RDS {what} timed out after {ENRICH_TIMEOUT:?}");
+            Err(())
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InventoryOptions {
@@ -25,15 +53,29 @@ impl InventoryOptions {
 }
 
 impl RdsClient {
+    /// Optional column reads. Clusters, recommendations and maintenance run in
+    /// parallel, then metrics (replica lag needs the cluster roles). Each read
+    /// is bounded by `ENRICH_TIMEOUT`; a slow or failed read marks only its
+    /// own columns "Unavailable" and never hides the inventory.
     pub(super) async fn enrich(&self, instances: &mut [RdsInstance], options: InventoryOptions) {
         if instances.is_empty() {
             return;
         }
-        if options.clusters && instances.iter().any(|i| !i.cluster_identifier.is_empty()) {
-            match self.clusters().await {
+        let want_clusters =
+            options.clusters && instances.iter().any(|i| !i.cluster_identifier.is_empty());
+        let (clusters, recommendations, maintenance) = tokio::join!(
+            bounded(want_clusters, "cluster metadata", self.clusters()),
+            bounded(
+                options.recommendations,
+                "recommendations",
+                self.recommendations()
+            ),
+            bounded(options.maintenance, "maintenance", self.maintenance()),
+        );
+        if want_clusters {
+            match clusters {
                 Ok(clusters) => apply_clusters(instances, &clusters),
-                Err(error) => {
-                    tracing::warn!("RDS cluster metadata unavailable: {error}");
+                Err(()) => {
                     for instance in instances
                         .iter_mut()
                         .filter(|i| !i.cluster_identifier.is_empty())
@@ -45,10 +87,9 @@ impl RdsClient {
             }
         }
         if options.recommendations {
-            match self.recommendations().await {
+            match recommendations {
                 Ok(rows) => apply_recommendations(instances, &rows),
-                Err(error) => {
-                    tracing::warn!("RDS recommendations unavailable: {error}");
+                Err(()) => {
                     for instance in instances.iter_mut() {
                         instance.recommendations = "Unavailable".into();
                     }
@@ -56,10 +97,9 @@ impl RdsClient {
             }
         }
         if options.maintenance {
-            match self.maintenance().await {
+            match maintenance {
                 Ok(rows) => apply_maintenance(instances, &rows),
-                Err(error) => {
-                    tracing::warn!("RDS maintenance unavailable: {error}");
+                Err(()) => {
                     for instance in instances.iter_mut() {
                         instance.maintenance = "Unavailable".into();
                     }
@@ -69,8 +109,19 @@ impl RdsClient {
         if options.needs_metrics() {
             // At most 300 metrics per request (CloudWatch limit: 500).
             for chunk in instances.chunks_mut(100) {
-                if let Err(error) = self.metrics(chunk, options).await {
-                    tracing::warn!("RDS metrics unavailable: {error}");
+                let read = tokio::time::timeout(ENRICH_TIMEOUT, self.metrics(chunk, options)).await;
+                let failed = match read {
+                    Ok(Ok(())) => false,
+                    Ok(Err(error)) => {
+                        tracing::warn!("RDS metrics unavailable: {error}");
+                        true
+                    }
+                    Err(_) => {
+                        tracing::warn!("RDS metrics timed out after {ENRICH_TIMEOUT:?}");
+                        true
+                    }
+                };
+                if failed {
                     for instance in chunk {
                         if options.cpu {
                             instance.cpu = "Unavailable".into();

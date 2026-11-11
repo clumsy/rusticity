@@ -4318,14 +4318,10 @@ impl App {
                 // This also parks the old owner and (for managed services) queues
                 // the first inventory read.
                 crate::tab_runtime::sync_active(self);
-                if new_service == Service::VpcVpcs {
-                    self.vpc_state.vpcs.reset();
-                    self.vpc_state.vpcs.loading = true;
-                }
+                // VPC: sync_active queued the list read on the fresh state.
                 if new_service == Service::RdsInstances {
+                    // sync_active queued the list read on the fresh state.
                     self.rds_state.detail.close();
-                    self.rds_state.instances.reset();
-                    self.rds_state.instances.loading = true;
                 }
                 if new_service == Service::KmsKeys {
                     self.kms_state.detail.close();
@@ -4341,9 +4337,8 @@ impl App {
                     self.stepfunctions_state.machines.loading = true;
                 }
                 if new_service == Service::SecretsManagerSecrets {
+                    // sync_active queued the list read on the fresh state.
                     self.secretsmanager_state.detail.close();
-                    self.secretsmanager_state.secrets.reset();
-                    self.secretsmanager_state.secrets.loading = true;
                 }
                 self.view_mode = ViewMode::List;
                 self.service_selected = true;
@@ -5124,29 +5119,6 @@ impl App {
         Ok(())
     }
 
-    pub async fn load_vpcs(&mut self) -> anyhow::Result<()> {
-        self.vpc_state.vpcs.loading = true;
-        let result = self.vpc_client.list_vpcs_with_properties().await;
-        self.vpc_state.vpcs.loading = false;
-        // A failed later page must not discard the previous successful inventory.
-        self.vpc_state.vpcs.items = result?;
-        self.vpc_state.vpcs.reset();
-        Ok(())
-    }
-
-    pub async fn load_rds_instances(&mut self) -> anyhow::Result<()> {
-        self.rds_state.instances.loading = true;
-        let options =
-            crate::rds::instance::Column::inventory_options(&self.rds_state.visible_column_ids);
-        let result = self.rds_client.list_instances_with_options(options).await;
-        self.rds_state.instances.loading = false;
-        // Replace atomically: a failed page must not discard the prior inventory.
-        let instances = result?;
-        self.rds_state.instances.items = instances;
-        self.rds_state.instances.reset();
-        Ok(())
-    }
-
     pub async fn load_sns_topics(&mut self) -> anyhow::Result<()> {
         self.sns_state.topics.loading = true;
         let result = self.sns_client.list_topics().await;
@@ -5163,16 +5135,6 @@ impl App {
         self.stepfunctions_state.machines.loading = false;
         self.stepfunctions_state.machines.items = result?;
         self.stepfunctions_state.machines.reset();
-        Ok(())
-    }
-
-    pub async fn load_secrets(&mut self) -> anyhow::Result<()> {
-        self.secretsmanager_state.secrets.loading = true;
-        let result = self.secretsmanager_client.list_secrets().await;
-        self.secretsmanager_state.secrets.loading = false;
-        // Complete-or-fail: a failed read must not discard the prior inventory.
-        self.secretsmanager_state.secrets.items = result?;
-        self.secretsmanager_state.secrets.reset();
         Ok(())
     }
 

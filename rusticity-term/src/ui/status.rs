@@ -624,9 +624,6 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let is_loading = app.ecr_state.scan.busy()
         || app.s3_state.object_view.busy()
         || app.log_groups_state.loading
-        || app.vpc_state.vpcs.loading
-        || app.secretsmanager_state.secrets.loading
-        || app.rds_state.instances.loading
         || app.ecr_state.repositories.loading
         || app.ec2_state.table.loading
         || app.cfn_state.table.loading

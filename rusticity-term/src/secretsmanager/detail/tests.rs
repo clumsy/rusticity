@@ -27,6 +27,7 @@ fn app() -> App {
     app.service_selected = true;
     app.mode = Mode::Normal;
     app.secretsmanager_state.secrets.items = vec![row("prod/db", ARN), row("prod/db", TWIN)];
+    crate::secretsmanager::inventory::mark_loaded(&mut app);
     app
 }
 
@@ -582,6 +583,9 @@ async fn background_tab_keeps_loading_and_completes_without_focus() {
     });
     app.current_tab = 0;
     tab_runtime::sync_active(&mut app);
+    // The fresh tab queued its list read; complete it with the fixture rows.
+    app.secretsmanager_state.secrets.items = vec![row("prod/db", ARN), row("prod/db", TWIN)];
+    crate::secretsmanager::inventory::mark_loaded(&mut app);
     open_first(&mut app);
     let (tx, rx) = tokio::sync::oneshot::channel();
     assert!(app

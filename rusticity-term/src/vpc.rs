@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod columns;
+pub mod inventory;
 
 use crate::console::ConsoleUrl;
 use std::collections::HashMap;

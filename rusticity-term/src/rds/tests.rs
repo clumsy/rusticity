@@ -27,6 +27,7 @@ fn app() -> App {
             ..Default::default()
         })
         .collect();
+    inventory::mark_loaded(&mut app);
     app
 }
 
@@ -42,7 +43,10 @@ fn rds_service_registration_and_picker_selection() {
     assert_eq!(app.current_service, Service::RdsInstances);
     assert_eq!(app.mode, Mode::Normal);
     assert!(app.service_selected);
-    assert!(app.rds_state.instances.loading);
+    assert!(
+        app.rds_state.inventory.is_busy(),
+        "the new tab queued its list read"
+    );
     assert_eq!(app.tabs.last().unwrap().title, "RDS › Databases");
     assert!(app.breadcrumbs().contains("RDS"));
     assert_eq!(app.rds_state.column_ids, Column::ids());
@@ -122,16 +126,19 @@ fn rds_refresh_retry_and_out_of_range_navigation_are_safe() {
     actions::go_to_page(&mut app, usize::MAX);
     assert!(app.rds_state.instances.selected < 25);
     app.handle_action(Action::Refresh);
-    assert!(app.rds_state.instances.loading);
+    assert!(app.rds_state.inventory.is_busy());
+    assert!(
+        app.rds_state.instances.items.is_empty(),
+        "refresh clears old rows"
+    );
     assert!(!app.log_groups_state.loading);
-    app.rds_state.instances.loading = false;
+    inventory::mark_loaded(&mut app);
     app.mode = Mode::ErrorModal;
     app.error_message = Some("AccessDenied".into());
     app.handle_action(Action::RetryLoad);
     assert!(app.error_message.is_none());
     assert_eq!(app.mode, Mode::Normal);
-    assert!(app.rds_state.instances.loading);
-    assert_eq!(app.rds_state.instances.items.len(), 25);
+    assert!(app.rds_state.inventory.is_busy());
     assert!(!app.log_groups_state.loading);
 }
 
@@ -179,9 +186,9 @@ fn rds_renders_page_selection_expansion_and_empty_or_loading_views() {
 
     app.rds_state.instances.filter = "no-such-instance".into();
     assert!(screen(&app, 240, 45).contains("Databases (0)"));
-    app.rds_state.instances.items.clear();
-    app.rds_state.instances.loading = true;
-    assert!(screen(&app, 240, 45).contains("Loading databases..."));
+    inventory::request(&mut app);
+    let text = screen(&app, 240, 45);
+    assert!(text.contains("Loading…") && !text.contains("database-12"));
     for (width, height) in [(20, 4), (80, 15), (120, 25)] {
         screen(&app, width, height);
     }
@@ -245,7 +252,7 @@ fn rds_shared_preferences_toggle_last_column_guard_and_page_size_reset() {
     assert_eq!(app.rds_state.instances.selected, 0);
     assert_eq!(app.rds_state.instances.scroll_offset, 0);
     assert_eq!(app.rds_state.instances.expanded_item, None);
-    assert!(!app.rds_state.instances.loading);
+    assert!(!app.rds_state.inventory.is_busy());
 }
 
 #[test]
@@ -342,7 +349,7 @@ fn rds_print_hint_and_ctrl_p_use_the_shared_snapshot_action() {
             assert!(app.clipboard.snapshot_requested());
             assert_eq!(app.mode, Mode::Normal);
             assert_eq!(app.current_service, Service::RdsInstances);
-            assert!(!app.rds_state.instances.loading);
+            assert!(!app.rds_state.inventory.is_busy());
         }
     }
 }
@@ -496,7 +503,7 @@ fn rds_optional_enrichment_only_loads_for_enabled_columns() {
         Column::CloneGroupId,
         Column::ReplicaLag,
     ] {
-        app.rds_state.instances.loading = false;
+        inventory::mark_loaded(&mut app);
         let model = bindings::active(&app).unwrap();
         app.column_selector_index = model
             .rows()
@@ -508,14 +515,112 @@ fn rds_optional_enrichment_only_loads_for_enabled_columns() {
             .unwrap();
         app.handle_action(Action::ToggleColumn);
         assert!(
-            app.rds_state.instances.loading,
+            app.rds_state.inventory.is_busy(),
             "Enable {column:?} must schedule its read"
         );
-        app.rds_state.instances.loading = false;
+        inventory::mark_loaded(&mut app);
         app.handle_action(Action::ToggleColumn);
         assert!(
-            !app.rds_state.instances.loading,
+            !app.rds_state.inventory.is_busy(),
             "Hiding a column doesn't make extra API calls"
         );
+    }
+}
+
+mod tab_owned_list {
+    use super::*;
+    use crate::async_read::ReadStatus;
+
+    async fn finish(app: &mut App, result: Result<Vec<RdsInstance>, String>) {
+        assert!(app.rds_state.inventory.is_busy());
+        // Start the queued read with a canned result instead of AWS.
+        let scope = crate::async_read::ReadScope::from_app(app, "inventory:rds");
+        let state = &mut app.rds_state;
+        assert!(
+            state
+                .inventory
+                .drive(
+                    &mut state.instances,
+                    &scope,
+                    "RDS databases read failed",
+                    || async move { result }
+                )
+                .await
+        );
+        tokio::task::yield_now().await;
+        assert!(inventory::poll(app).await);
+    }
+
+    fn db(identifier: &str) -> RdsInstance {
+        RdsInstance {
+            identifier: identifier.into(),
+            arn: format!("arn:aws:rds:us-east-2:123456789012:db:{identifier}"),
+            status: "available".into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fresh_read_fills_the_list_and_a_failure_never_shows_old_rows() {
+        let mut app = app();
+        inventory::request(&mut app);
+        finish(&mut app, Ok(vec![db("orders")])).await;
+        assert_eq!(app.rds_state.load_status(), ReadStatus::Ready);
+        assert!(screen(&app, 240, 45).contains("Databases (1)"));
+        app.handle_action(Action::Refresh);
+        assert!(!screen(&app, 240, 45).contains("orders"), "cleared at once");
+        finish(
+            &mut app,
+            Err("AccessDenied: rds:DescribeDBInstances".into()),
+        )
+        .await;
+        let text = screen(&app, 240, 45);
+        assert!(text.contains("AccessDenied") && !text.contains("orders"));
+        assert_eq!(app.rds_state.load_status(), ReadStatus::Failed);
+        assert_ne!(app.mode, Mode::ErrorModal, "an inline error, no modal");
+    }
+
+    #[tokio::test]
+    async fn an_empty_region_says_so_only_after_success() {
+        let mut app = app();
+        inventory::request(&mut app);
+        assert!(!screen(&app, 240, 45).contains("No databases"));
+        finish(&mut app, Ok(vec![])).await;
+        assert!(screen(&app, 240, 45).contains("No databases in this Region."));
+    }
+
+    #[tokio::test]
+    async fn esc_cancels_the_read_and_context_change_drops_rows() {
+        let mut app = app();
+        inventory::request(&mut app);
+        app.handle_action(Action::GoBack);
+        assert!(!app.rds_state.inventory.is_busy());
+        assert!(screen(&app, 240, 45).contains("Cancelled"));
+        let mut app = super::app();
+        app.config.region = "eu-west-1".into();
+        assert!(inventory::poll(&mut app).await);
+        assert!(app.rds_state.instances.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_finder_open_enters_the_exact_database_after_the_read() {
+        let mut app = app();
+        inventory::request(&mut app);
+        app.rds_state.pending_focus = Some(db("orders").arn);
+        finish(&mut app, Ok(vec![db("orders-replica"), db("orders")])).await;
+        let source = app.rds_state.detail.source.as_ref().expect("entered");
+        assert_eq!(source.identifier, "orders");
+        assert!(app.rds_state.detail.busy(), "detail read queued");
+    }
+
+    #[tokio::test]
+    async fn a_finder_open_of_a_gone_database_is_an_error() {
+        let mut app = app();
+        inventory::request(&mut app);
+        app.rds_state.pending_focus = Some(db("gone").arn);
+        finish(&mut app, Ok(vec![db("orders")])).await;
+        assert!(app.rds_state.detail.source.is_none());
+        let text = screen(&app, 240, 45);
+        assert!(text.contains("Resource not found") && !text.contains("orders"));
     }
 }

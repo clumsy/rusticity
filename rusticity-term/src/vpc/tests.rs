@@ -31,6 +31,7 @@ fn app() -> App {
             ..Default::default()
         })
         .collect();
+    inventory::mark_loaded(&mut app);
     app
 }
 
@@ -57,7 +58,10 @@ fn vpc_registration_and_service_selection() {
     app.handle_action(Action::Select);
     assert_eq!(app.current_service, Service::VpcVpcs);
     assert_eq!(app.mode, Mode::Normal);
-    assert!(app.vpc_state.vpcs.loading);
+    assert!(
+        app.vpc_state.inventory.is_busy(),
+        "the new tab queued its read"
+    );
     assert_eq!(app.tabs[0].title, "VPC › VPCs");
     assert!(app.breadcrumbs().contains("VPC"));
     assert_eq!(app.vpc_state.column_ids, Column::ids());
@@ -236,7 +240,7 @@ fn vpc_preferences_and_print_use_common_components() {
     assert_eq!(app.vpc_state.vpcs.page_size, PageSize::Ten);
     assert_eq!(app.vpc_state.vpcs.selected, 0);
     assert_eq!(app.vpc_state.vpcs.expanded_item, None);
-    assert!(!app.vpc_state.vpcs.loading);
+    assert!(!app.vpc_state.inventory.is_busy());
 }
 
 #[test]
@@ -250,16 +254,19 @@ fn vpc_refresh_retry_and_page_input_stay_scoped_to_vpc() {
     actions::go_to_page(&mut app, usize::MAX);
     assert!(app.vpc_state.vpcs.selected < 25);
     app.handle_action(Action::Refresh);
-    assert!(app.vpc_state.vpcs.loading);
+    assert!(app.vpc_state.inventory.is_busy());
+    assert!(
+        app.vpc_state.vpcs.items.is_empty(),
+        "refresh clears old rows"
+    );
     assert!(!app.log_groups_state.loading);
-    app.vpc_state.vpcs.loading = false;
+    inventory::mark_loaded(&mut app);
     app.mode = Mode::ErrorModal;
     app.error_message = Some("AccessDenied".into());
     app.handle_action(Action::RetryLoad);
     assert!(app.error_message.is_none());
     assert_eq!(app.mode, Mode::Normal);
-    assert!(app.vpc_state.vpcs.loading);
-    assert_eq!(app.vpc_state.vpcs.items.len(), 25);
+    assert!(app.vpc_state.inventory.is_busy());
 }
 
 #[test]
@@ -289,9 +296,9 @@ fn vpc_rendering_has_green_tick_expansion_pagination_and_no_fake_optional_values
     assert!(ticks.iter().all(|c| c.fg == Color::Green));
     app.vpc_state.vpcs.filter = "nothing".into();
     assert!(screen(&app, 240, 45).contains("VPCs (0)"));
-    app.vpc_state.vpcs.items.clear();
-    app.vpc_state.vpcs.loading = true;
-    assert!(screen(&app, 240, 45).contains("Loading VPCs..."));
+    inventory::request(&mut app);
+    let text = screen(&app, 240, 45);
+    assert!(text.contains("Loading…") && !text.contains("vpc-012"));
     for (w, h) in [(20, 4), (80, 15)] {
         screen(&app, w, h);
     }
@@ -322,7 +329,10 @@ fn vpc_session_restoration_uses_both_entrypoints() {
         assert_eq!(app.current_service, Service::VpcVpcs);
         assert_eq!(app.tabs[0].service, Service::VpcVpcs);
         assert!(app.vpc_state.vpcs.items.is_empty());
-        assert!(screen(&app, 240, 45).contains("VPCs (0)"));
+        // A restored tab loads fresh; it never claims an empty Region first.
+        assert!(app.vpc_state.inventory.is_busy());
+        let text = screen(&app, 240, 45);
+        assert!(text.contains("Loading…") && !text.contains("No VPCs"));
     }
 }
 
@@ -536,5 +546,67 @@ fn vpc_block_public_access_uses_semantic_icons_and_colors_in_rows_and_details() 
         let expanded = expanded_from_columns(&[column], &vpc);
         assert_eq!(expanded[0].0, format!("Block Public Access: {expected}"));
         assert_eq!(expanded[0].1.fg, Some(color));
+    }
+}
+
+mod tab_owned_list {
+    use super::*;
+    use crate::async_read::{ReadScope, ReadStatus};
+
+    async fn finish(app: &mut App, result: Result<Vec<Vpc>, String>) {
+        let scope = ReadScope::from_app(app, "inventory:vpc");
+        let state = &mut app.vpc_state;
+        assert!(
+            state
+                .inventory
+                .drive(&mut state.vpcs, &scope, "VPCs read failed", || async move {
+                    result
+                })
+                .await
+        );
+        tokio::task::yield_now().await;
+        assert!(inventory::poll(app).await);
+    }
+
+    fn vpc(id: &str) -> Vpc {
+        Vpc {
+            vpc_id: id.into(),
+            state: "available".into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn failure_and_cancel_never_show_old_rows() {
+        let mut app = app();
+        inventory::request(&mut app);
+        finish(
+            &mut app,
+            Err("UnauthorizedOperation: ec2:DescribeVpcs".into()),
+        )
+        .await;
+        let text = screen(&app, 240, 45);
+        assert!(text.contains("UnauthorizedOperation") && !text.contains("vpc-012"));
+        assert_eq!(app.vpc_state.load_status(), ReadStatus::Failed);
+        app.handle_action(Action::Refresh);
+        app.handle_action(Action::GoBack);
+        assert!(screen(&app, 240, 45).contains("Cancelled"));
+    }
+
+    #[tokio::test]
+    async fn a_finder_open_filters_to_the_exact_vpc_or_says_it_is_gone() {
+        let mut app = app();
+        inventory::request(&mut app);
+        app.vpc_state.pending_focus = Some("vpc-b".into());
+        finish(&mut app, Ok(vec![vpc("vpc-a"), vpc("vpc-b")])).await;
+        assert_eq!(app.vpc_state.vpcs.filter, "vpc-b");
+        assert_eq!(
+            crate::ui::vpc::filtered_vpcs(&app)[app.vpc_state.vpcs.selected].vpc_id,
+            "vpc-b"
+        );
+        inventory::request(&mut app);
+        app.vpc_state.pending_focus = Some("vpc-gone".into());
+        finish(&mut app, Ok(vec![vpc("vpc-a")])).await;
+        assert!(screen(&app, 240, 45).contains("Resource not found"));
     }
 }

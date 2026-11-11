@@ -5,10 +5,11 @@ use crate::common::{
 use crate::keymap::Mode;
 use crate::table::{TableState, TableWindow};
 use crate::ui::filter::{render_simple_filter, SimpleFilterConfig};
-use crate::ui::table::{expanded_from_columns, render_table, TableConfig};
-use crate::ui::{format_title, titled_block};
+use crate::ui::format_title;
+use crate::ui::loading::render_table;
+use crate::ui::table::{expanded_from_columns, TableConfig};
 use crate::vpc::columns::Column;
-use ratatui::{prelude::*, widgets::Paragraph};
+use ratatui::prelude::*;
 use rusticity_core::vpc::Vpc;
 
 pub struct State {
@@ -16,6 +17,14 @@ pub struct State {
     pub input_focus: InputFocus,
     pub column_ids: Vec<ColumnId>,
     pub visible_column_ids: Vec<ColumnId>,
+    pub(crate) inventory: crate::list_read::ListRead<Vpc>,
+    /// VPC ID to filter to once the list read completes.
+    pub(crate) pending_focus: Option<String>,
+}
+impl State {
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status()
+    }
 }
 impl Default for State {
     fn default() -> Self {
@@ -24,6 +33,8 @@ impl Default for State {
             input_focus: InputFocus::Filter,
             column_ids: Column::ids(),
             visible_column_ids: Column::default_visible_ids(),
+            inventory: Default::default(),
+            pending_focus: None,
         }
     }
 }
@@ -75,15 +86,6 @@ pub fn render_vpcs(frame: &mut Frame, app: &App, area: Rect) {
             is_pagination_focused: state.input_focus == InputFocus::Pagination,
         },
     );
-    if state.vpcs.loading && state.vpcs.items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("Loading VPCs...")
-                .block(titled_block("VPCs"))
-                .alignment(Alignment::Center),
-            chunks[1],
-        );
-        return;
-    }
     let columns: Vec<_> = state
         .visible_column_ids
         .iter()
@@ -109,6 +111,13 @@ pub fn render_vpcs(frame: &mut Frame, app: &App, area: Rect) {
                 expanded_from_columns(&expanded_columns, vpc)
             })),
             is_active: app.mode == Mode::Normal,
+        },
+        state.inventory.status(),
+        "VPCs",
+        state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No VPCs in this Region.",
+            has_unfiltered_items: !state.vpcs.items.is_empty(),
         },
     );
 }

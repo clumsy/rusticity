@@ -24,6 +24,7 @@ fn app() -> App {
     app.service_selected = true;
     app.mode = Mode::Normal;
     app.rds_state.instances.items = vec![row("orders", ARN), row("orders-replica", TWIN)];
+    crate::rds::inventory::mark_loaded(&mut app);
     app
 }
 
@@ -396,6 +397,9 @@ async fn background_tab_keeps_loading_and_never_steals_focus() {
     });
     app.current_tab = 0;
     tab_runtime::sync_active(&mut app);
+    // The fresh tab queued its list read; complete it with the fixture rows.
+    app.rds_state.instances.items = vec![row("orders", ARN), row("orders-replica", TWIN)];
+    crate::rds::inventory::mark_loaded(&mut app);
     press(&mut app, KeyCode::Enter);
     let (tx, rx) = tokio::sync::oneshot::channel();
     assert!(app

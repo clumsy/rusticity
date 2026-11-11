@@ -50,6 +50,12 @@ pub(crate) fn enter_loaded(app: &mut App) {
         Service::StepFunctionsStateMachines => {
             crate::stepfunctions::executions::handle_action(app, &crate::keymap::Action::Select);
         }
+        Service::RdsInstances => {
+            crate::rds::detail::handle_action(app, &crate::keymap::Action::Select);
+        }
+        Service::SecretsManagerSecrets => {
+            crate::secretsmanager::detail::handle_action(app, &crate::keymap::Action::Select);
+        }
         _ => unreachable!("only managed inventory completions enter here"),
     }
     app.mode = mode;
@@ -249,21 +255,17 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
             app.load_s3_objects().await?;
         }
         ResourceKind::Vpc => {
-            app.load_vpcs().await?;
-            focus!(app.vpc_state.vpcs, vpc_id);
-            app.vpc_state.vpcs.selected = ui::vpc::filtered_vpcs(app)
-                .iter()
-                .position(|vpc| vpc.vpc_id == resource.id)
-                .unwrap_or(0);
+            crate::vpc::inventory::request(app);
+            app.vpc_state.pending_focus = Some(resource.id.clone());
         }
         ResourceKind::Database => {
             app.rds_state.detail.close();
-            app.load_rds_instances().await?;
-            focus!(app.rds_state.instances, identifier);
-            app.rds_state.instances.selected = ui::rds::filtered_instances(app)
-                .iter()
-                .position(|row| row.identifier == resource.id)
-                .unwrap_or(0);
+            crate::rds::inventory::request(app);
+            app.rds_state.pending_focus = Some(if resource.arn.is_empty() {
+                resource.id.clone()
+            } else {
+                resource.arn.clone()
+            });
         }
         ResourceKind::Instance => {
             app.ec2_state.current_instance = None;
@@ -365,12 +367,12 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
             // The id is the full ARN. Isolate that exact row so same-named
             // secrets stay distinct; the ordinary Enter path opens its detail.
             app.secretsmanager_state.detail.close();
-            app.load_secrets().await?;
-            focus!(app.secretsmanager_state.secrets, arn);
-            app.secretsmanager_state.secrets.selected = ui::secretsmanager::filtered_secrets(app)
-                .iter()
-                .position(|row| row.arn == resource.id)
-                .unwrap_or(0);
+            crate::secretsmanager::inventory::request(app);
+            app.secretsmanager_state.pending_focus = Some(if resource.arn.is_empty() {
+                resource.id.clone()
+            } else {
+                resource.arn.clone()
+            });
         }
         ResourceKind::User => {
             app.iam_state.current_user = None;
@@ -406,6 +408,8 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
                 | ResourceKind::Key
                 | ResourceKind::Topic
                 | ResourceKind::StateMachine
+                | ResourceKind::Database
+                | ResourceKind::Secret
         ))
 }
 

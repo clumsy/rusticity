@@ -26,6 +26,7 @@ mod inventory_read;
 pub mod keymap;
 pub mod kms;
 pub mod lambda;
+pub(crate) mod list_read;
 pub mod preferences;
 pub mod rds;
 pub mod s3;

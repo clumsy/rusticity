@@ -35,6 +35,7 @@ fn app() -> App {
     app.mode = Mode::Normal;
     app.config.account_id = "123456789012".into();
     app.secretsmanager_state.secrets.items = (0..25).rev().map(secret).collect();
+    inventory::mark_loaded(&mut app);
     app
 }
 fn press(app: &mut App, key: KeyCode, mods: KeyModifiers) {
@@ -76,7 +77,10 @@ fn service_picker_initialization_and_registration_are_complete() {
     app.service_picker.filter_active = false;
     app.handle_action(Action::Select);
     assert_eq!(app.current_service, Service::SecretsManagerSecrets);
-    assert!(app.secretsmanager_state.secrets.loading);
+    assert!(
+        app.secretsmanager_state.inventory.is_busy(),
+        "the new tab queued its read"
+    );
     assert_eq!(app.tabs[0].service, Service::SecretsManagerSecrets);
     assert!(app.breadcrumbs().contains("Secrets Manager"));
     assert_eq!(app.secretsmanager_state.column_ids, Column::ids());
@@ -160,7 +164,7 @@ fn filter_and_pagination_reuse_shared_input_and_never_start_value_requests() {
         press(&mut app, KeyCode::Char('3'), KeyModifiers::NONE);
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(app.secretsmanager_state.secrets.selected, 20);
-        assert!(!app.secretsmanager_state.secrets.loading);
+        assert!(!app.secretsmanager_state.inventory.is_busy());
         assert!(!app.log_groups_state.loading);
     }
 }
@@ -247,9 +251,9 @@ fn all_advertised_inventory_shortcuts_and_loading_state_render() {
     assert!(!text.contains("prod/secret-020"));
     press(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
     assert!(app.clipboard.snapshot_requested());
-    app.secretsmanager_state.secrets.items.clear();
-    app.secretsmanager_state.secrets.loading = true;
-    assert!(screen(&app, 200, 30).contains("Loading secret metadata"));
+    inventory::request(&mut app);
+    let text = screen(&app, 200, 30);
+    assert!(text.contains("Loading…") && !text.contains("prod/secret-012"));
     for (w, h) in [(25, 5), (80, 15)] {
         screen(&app, w, h);
     }
@@ -278,13 +282,13 @@ fn refresh_retry_and_sessions_remain_metadata_inventory() {
         assert_eq!(app.current_service, Service::SecretsManagerSecrets);
         app.mode = Mode::Normal;
         app.handle_action(Action::Refresh);
-        assert!(app.secretsmanager_state.secrets.loading);
+        assert!(app.secretsmanager_state.inventory.is_busy());
         assert!(!app.log_groups_state.loading);
-        app.secretsmanager_state.secrets.loading = false;
+        inventory::mark_loaded(&mut app);
         app.mode = Mode::ErrorModal;
         app.error_message = Some("AccessDeniedException".into());
         app.handle_action(Action::RetryLoad);
-        assert!(app.secretsmanager_state.secrets.loading);
+        assert!(app.secretsmanager_state.inventory.is_busy());
         assert!(app.error_message.is_none());
         assert!(app.secretsmanager_state.secrets.items.is_empty());
     }
@@ -385,4 +389,61 @@ fn added_metadata_columns_use_returned_fields_without_invented_defaults() {
     assert_eq!(Column::ReplicationType.render(&row).0, "-");
     assert_eq!(Column::ManagedBy.render(&row).0, "rds");
     assert_eq!(Column::Type.render(&row).0, "ConfluentCloudApiKey");
+}
+
+mod tab_owned_list {
+    use super::*;
+    use crate::async_read::{ReadScope, ReadStatus};
+
+    async fn finish(app: &mut App, result: Result<Vec<rusticity_core::SecretMetadata>, String>) {
+        let scope = ReadScope::from_app(app, "inventory:secretsmanager");
+        let state = &mut app.secretsmanager_state;
+        assert!(
+            state
+                .inventory
+                .drive(
+                    &mut state.secrets,
+                    &scope,
+                    "Secret metadata read failed",
+                    || async move { result }
+                )
+                .await
+        );
+        tokio::task::yield_now().await;
+        assert!(inventory::poll(app).await);
+    }
+
+    #[tokio::test]
+    async fn failure_shows_inline_and_never_old_rows() {
+        let mut app = app();
+        inventory::request(&mut app);
+        finish(&mut app, Err("AccessDeniedException".into())).await;
+        let text = screen(&app, 200, 30);
+        assert!(text.contains("AccessDeniedException") && !text.contains("prod/secret-012"));
+        assert_eq!(app.secretsmanager_state.load_status(), ReadStatus::Failed);
+        assert_ne!(app.mode, Mode::ErrorModal);
+    }
+
+    #[tokio::test]
+    async fn a_finder_open_enters_the_exact_secret_by_arn() {
+        let mut app = app();
+        inventory::request(&mut app);
+        let target = secret(7);
+        app.secretsmanager_state.pending_focus = Some(target.arn.clone());
+        finish(&mut app, Ok(vec![secret(6), secret(7), secret(8)])).await;
+        let source = app
+            .secretsmanager_state
+            .detail
+            .source
+            .as_ref()
+            .expect("entered");
+        assert_eq!(source.arn, target.arn);
+        inventory::request(&mut app);
+        app.secretsmanager_state.detail.close();
+        app.secretsmanager_state.pending_focus =
+            Some("arn:aws:secretsmanager:us-east-1:123456789012:secret:gone-AbCdEf".into());
+        finish(&mut app, Ok(vec![secret(6)])).await;
+        assert!(app.secretsmanager_state.detail.source.is_none());
+        assert!(screen(&app, 200, 30).contains("Resource not found"));
+    }
 }

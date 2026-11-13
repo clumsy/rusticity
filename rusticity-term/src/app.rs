@@ -164,6 +164,8 @@ pub struct App {
     pub secretsmanager_state: SecretsManagerState,
     pub acm_state: AcmState,
     pub eventbridge_state: crate::eventbridge::State,
+    pub load_balancers_state: crate::elb::load_balancers::State,
+    pub target_groups_state: crate::elb::target_groups::State,
     pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
@@ -399,6 +401,8 @@ pub enum Service {
     SqsQueues,
     VpcVpcs,
     Ec2Instances,
+    Ec2LoadBalancers,
+    Ec2TargetGroups,
     EcrRepositories,
     KmsKeys,
     EfsFileSystems,
@@ -431,6 +435,8 @@ impl Service {
             Service::SqsQueues => "SQS › Queues",
             Service::VpcVpcs => "VPC › VPCs",
             Service::Ec2Instances => "EC2 › Instances",
+            Service::Ec2LoadBalancers => "EC2 › Load balancers",
+            Service::Ec2TargetGroups => "EC2 › Target groups",
             Service::EcrRepositories => "ECR › Repositories",
             Service::KmsKeys => "KMS › Managed Keys",
             Service::EfsFileSystems => "EFS › File Systems",
@@ -722,6 +728,8 @@ impl App {
             secretsmanager_state: SecretsManagerState::default(),
             acm_state: AcmState::default(),
             eventbridge_state: crate::eventbridge::State::default(),
+            load_balancers_state: Default::default(),
+            target_groups_state: Default::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -968,6 +976,8 @@ impl App {
             secretsmanager_state: SecretsManagerState::default(),
             acm_state: AcmState::default(),
             eventbridge_state: crate::eventbridge::State::default(),
+            load_balancers_state: Default::default(),
+            target_groups_state: Default::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -1227,6 +1237,8 @@ impl App {
             || crate::secretsmanager::actions::handle_action(self, &action)
             || crate::acm::actions::handle_action(self, &action)
             || crate::eventbridge::handle_action(self, &action)
+            || crate::elb::load_balancers::handle_action(self, &action)
+            || crate::elb::target_groups::handle_action(self, &action)
         {
             return;
         }
@@ -1527,6 +1539,8 @@ impl App {
                             "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
                             "Ec2Instances" => Service::Ec2Instances,
+                            "Ec2LoadBalancers" => Service::Ec2LoadBalancers,
+                            "Ec2TargetGroups" => Service::Ec2TargetGroups,
                             "EcrRepositories" => Service::EcrRepositories,
                             "KmsKeys" => Service::KmsKeys,
                             "EfsFileSystems" => Service::EfsFileSystems,
@@ -3180,6 +3194,8 @@ impl App {
             }
             Service::AcmCertificates => parts.extend(["ACM".into(), "Certificates".into()]),
             Service::EventBridgeEventBuses => parts.extend(crate::eventbridge::breadcrumb(self)),
+            Service::Ec2LoadBalancers => parts.extend(crate::elb::load_balancers::breadcrumb(self)),
+            Service::Ec2TargetGroups => parts.extend(crate::elb::target_groups::breadcrumb(self)),
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()]);
                 if let Some(secret) = &self.secretsmanager_state.detail.source {
@@ -3278,6 +3294,8 @@ impl App {
             Service::SecretsManagerSecrets => crate::secretsmanager::actions::console_url(self),
             Service::AcmCertificates => crate::acm::actions::console_url(self),
             Service::EventBridgeEventBuses => crate::eventbridge::console_url(self),
+            Service::Ec2LoadBalancers => crate::elb::load_balancers::console_url(self),
+            Service::Ec2TargetGroups => crate::elb::target_groups::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4275,6 +4293,8 @@ impl App {
                     "CloudTrail › Event History" => Service::CloudTrailEvents,
                     "CloudFormation › Stacks" => Service::CloudFormationStacks,
                     "EC2 › Instances" => Service::Ec2Instances,
+                    "EC2 › Load balancers" => Service::Ec2LoadBalancers,
+                    "EC2 › Target groups" => Service::Ec2TargetGroups,
                     "ECR › Repositories" => Service::EcrRepositories,
                     "KMS › Managed Keys" => Service::KmsKeys,
                     "EFS › File Systems" => Service::EfsFileSystems,
@@ -4380,6 +4400,8 @@ impl App {
                             "AcmCertificates" => Service::AcmCertificates,
                             "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
                             "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
+                            "Ec2LoadBalancers" => Service::Ec2LoadBalancers,
+                            "Ec2TargetGroups" => Service::Ec2TargetGroups,
                             _ => Service::CloudWatchLogGroups,
                         },
                         title: if st.service == "RdsInstances" {
@@ -5772,6 +5794,8 @@ impl ServicePickerState {
                 "CloudTrail › Event History",
                 "CloudFormation › Stacks",
                 "EC2 › Instances",
+                "EC2 › Load balancers",
+                "EC2 › Target groups",
                 "ECR › Repositories",
                 "IAM › Users",
                 "IAM › Roles",

@@ -42,6 +42,8 @@ enum Source {
     AcmCertificates,
     RdsInstanceDetails,
     Ec2InstanceDetails,
+    Ec2LoadBalancers,
+    Ec2TargetGroups,
     EventBridge,
 }
 
@@ -165,6 +167,8 @@ impl Source {
             Service::SecretsManagerSecrets => Self::SecretsManagerSecrets,
             Service::AcmCertificates => Self::AcmCertificates,
             Service::EventBridgeEventBuses => Self::EventBridge,
+            Service::Ec2LoadBalancers => Self::Ec2LoadBalancers,
+            Service::Ec2TargetGroups => Self::Ec2TargetGroups,
             _ => return None,
         })
     }
@@ -357,6 +361,14 @@ impl Source {
                     None,
                 )
             }
+            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
+                // Panes carry no columns.
+                let Some(table) = elb_table(app, self) else {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                };
+                let (ids, visible) = table.columns();
+                columns(&ids, &visible, |id| Some(id.into()), None)
+            }
             Self::EventBridge => {
                 // Summary tabs carry no columns.
                 if !crate::eventbridge::is_table(app) {
@@ -462,6 +474,12 @@ impl Source {
             Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
             Self::AcmCertificates => app.acm_state.certificates.page_size,
             Self::EventBridge => crate::eventbridge::page_size(app),
+            Self::Ec2LoadBalancers => elb_table(app, self)
+                .map(|t| t.page_size())
+                .unwrap_or(app.load_balancers_state.list.rows.page_size),
+            Self::Ec2TargetGroups => elb_table(app, self)
+                .map(|t| t.page_size())
+                .unwrap_or(app.target_groups_state.list.rows.page_size),
             Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
             Self::Ec2InstanceDetails => ec2_detail(app).rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
@@ -518,6 +536,11 @@ impl Source {
             }
             Self::AcmCertificates => app.acm_state.certificates.set_page_size(size),
             Self::EventBridge => crate::eventbridge::set_page_size(app, size),
+            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
+                if let Some(table) = elb_table_mut(app, self) {
+                    table.set_page_size(size);
+                }
+            }
             Self::RdsInstanceDetails => rds_detail_mut(app)
                 .active_table_mut()
                 .rows
@@ -570,12 +593,29 @@ impl Source {
             }
             Self::AcmCertificates => &mut app.acm_state.visible_column_ids,
             Self::EventBridge => crate::eventbridge::visible_mut(app),
+            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
+                return elb_table_mut(app, self).map(|t| t.visible_mut())
+            }
             Self::RdsInstanceDetails => {
                 &mut rds_detail_mut(app).active_table_mut().visible_column_ids
             }
             Self::Ec2InstanceDetails => &mut ec2_detail_mut(app).visible_column_ids,
             _ => return None,
         })
+    }
+}
+
+fn elb_table(app: &App, source: Source) -> Option<&dyn crate::spec_table::AnyTable> {
+    match source {
+        Source::Ec2LoadBalancers => crate::elb::load_balancers::table(app),
+        _ => crate::elb::target_groups::table(app),
+    }
+}
+
+fn elb_table_mut(app: &mut App, source: Source) -> Option<&mut dyn crate::spec_table::AnyTable> {
+    match source {
+        Source::Ec2LoadBalancers => crate::elb::load_balancers::table_mut(app),
+        _ => crate::elb::target_groups::table_mut(app),
     }
 }
 

@@ -118,6 +118,14 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
         },
         Service::RdsInstances if app.rds_state.detail.source.is_some() => "database details",
         Service::Ec2Instances if app.ec2_state.current_instance.is_some() => "instance details",
+        Service::Ec2LoadBalancers if app.load_balancers_state.view.is_some() => {
+            "load balancer details"
+        }
+        Service::Ec2LoadBalancers => "load balancers",
+        Service::Ec2TargetGroups if app.target_groups_state.view.is_some() => {
+            "target group details"
+        }
+        Service::Ec2TargetGroups => "target groups",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
         Service::DynamoDbTables => "DynamoDB tables",
@@ -297,7 +305,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         && (crate::kms::detail::active(app)
             || crate::secretsmanager::detail::active(app)
             || crate::rds::detail::active(app)
-            || crate::ec2::detail::active(app))
+            || crate::ec2::detail::active(app)
+            || crate::elb::detail_active(app))
     {
         let mut hints = first_hint("⇤⇥", "tabs");
         if let Some(label) = crate::rds::detail::table_focus_hint(app)
@@ -348,6 +357,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::StepFunctionsStateMachines
                 | Service::KmsKeys
                 | Service::EventBridgeEventBuses
+                | Service::Ec2LoadBalancers
+                | Service::Ec2TargetGroups
         )
     {
         let mut hints = first_hint("↑↓", "scroll");
@@ -373,6 +384,12 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::RdsInstances {
             hints.extend(hint("⏎", "database details"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::Ec2LoadBalancers {
+            hints.extend(hint("⏎", "load balancer details"));
+            hints.extend(hint("←→", "toggle"));
+        } else if app.current_service == Service::Ec2TargetGroups {
+            hints.extend(hint("⏎", "target group details"));
             hints.extend(hint("←→", "toggle"));
         } else if app.current_service == Service::SecretsManagerSecrets {
             hints.extend(hint("⏎", "secret details"));

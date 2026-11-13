@@ -169,6 +169,8 @@ fn expected_list_url(service: Service, region: &str) -> String {
             "https://{region}.console.aws.amazon.com/iam/home?region={region}#/groups"
         ),
         Service::Ec2Instances => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#Instances:"),
+        Service::Ec2LoadBalancers => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#LoadBalancers:"),
+        Service::Ec2TargetGroups => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#TargetGroups:"),
         Service::CloudTrailEvents => format!("https://{region}.console.aws.amazon.com/cloudtrail/home?region={region}#/events"),
         Service::KmsKeys => format!("https://{region}.console.aws.amazon.com/kms/home?region={region}#/kms/keys"),
         Service::CliOutput(_) => String::new(),
@@ -564,6 +566,8 @@ fn simple_inventories_route_to_list_in_both_regions() {
         Service::IamUserGroups,
         Service::AcmCertificates,
         Service::EventBridgeEventBuses,
+        Service::Ec2LoadBalancers,
+        Service::Ec2TargetGroups,
     ];
     for service in services {
         for region in [R1, R2] {
@@ -654,6 +658,8 @@ fn list_route_matrix_covers_every_service_picker_entry() {
         Service::SqsQueues,
         Service::VpcVpcs,
         Service::Ec2Instances,
+        Service::Ec2LoadBalancers,
+        Service::Ec2TargetGroups,
         Service::EcrRepositories,
         Service::KmsKeys,
         Service::EfsFileSystems,

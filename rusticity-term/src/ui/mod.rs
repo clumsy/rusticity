@@ -776,6 +776,8 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
         Service::AcmCertificates => acm::render_certificates(frame, app, area),
         Service::EventBridgeEventBuses => crate::eventbridge::render(frame, app, area),
+        Service::Ec2LoadBalancers => crate::elb::render_load_balancers(frame, app, area),
+        Service::Ec2TargetGroups => crate::elb::render_target_groups(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }
@@ -1244,6 +1246,8 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::SecretsManagerSecrets => secretsmanager::render_secrets(frame, app, area),
         Service::AcmCertificates => acm::render_certificates(frame, app, area),
         Service::EventBridgeEventBuses => crate::eventbridge::render(frame, app, area),
+        Service::Ec2LoadBalancers => crate::elb::render_load_balancers(frame, app, area),
+        Service::Ec2TargetGroups => crate::elb::render_target_groups(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }

@@ -70,6 +70,11 @@ fn choice_of<T: 'static>(t: &crate::eventbridge::Table<T>) -> Described {
     Described::choice(columns(&all, &t.visible, Some), &t.visible, t.sort)
 }
 
+fn choice_dyn(t: &dyn crate::spec_table::AnyTable) -> Described {
+    let (all, visible) = t.columns();
+    Described::choice(columns(&all, &visible, Some), &visible, t.sort())
+}
+
 /// The sortable table on screen for `service`, if any.
 fn describe(app: &App, service: Service) -> Option<Described> {
     use crate::eventbridge::{Level, Tab};
@@ -304,6 +309,8 @@ fn describe(app: &App, service: Service) -> Option<Described> {
                 s.sort,
             )
         }
+        Service::Ec2LoadBalancers => choice_dyn(crate::elb::load_balancers::table(app)?),
+        Service::Ec2TargetGroups => choice_dyn(crate::elb::target_groups::table(app)?),
         Service::EventBridgeEventBuses => {
             let state = &app.eventbridge_state;
             match (crate::eventbridge::level(app), &state.bus) {
@@ -449,6 +456,18 @@ pub(crate) fn choose(app: &mut App, service: Service, value: &'static str) -> bo
         Service::StepFunctionsStateMachines => {
             toggle_choice(&mut app.stepfunctions_state.sort);
             app.stepfunctions_state.machines.reset();
+        }
+        Service::Ec2LoadBalancers | Service::Ec2TargetGroups => {
+            let table = if service == Service::Ec2LoadBalancers {
+                crate::elb::load_balancers::table_mut(app)
+            } else {
+                crate::elb::target_groups::table_mut(app)
+            };
+            let Some(table) = table else {
+                return false;
+            };
+            toggle_choice(table.sort_mut());
+            table.reset();
         }
         Service::EventBridgeEventBuses => {
             let state = &mut app.eventbridge_state;

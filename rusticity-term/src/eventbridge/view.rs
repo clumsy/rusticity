@@ -1,16 +1,6 @@
 //! Rendering for the event bus and rule tables and the rule detail page.
 use super::*;
-use crate::{
-    common::{render_pagination_text, SortDirection},
-    table::TableWindow,
-    ui::{
-        self,
-        filter::{render_filter_bar, FilterConfig, FilterControl},
-        loading::render_table,
-        table::{Column, TableConfig},
-        Summary,
-    },
-};
+use crate::ui::{self, Summary};
 use ratatui::{
     prelude::*,
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
@@ -93,28 +83,6 @@ fn state_style(text: &str) -> Style {
     }
 }
 
-fn columns<T: 'static>(table: &Table<T>) -> Vec<Box<dyn Column<T>>> {
-    table
-        .spec()
-        .iter()
-        .filter(|(id, ..)| table.visible.contains(id))
-        .map(|(name, width, cell)| {
-            let cell = *cell;
-            Box::new(ui::table::OwnedColumn::new(
-                name,
-                name,
-                *width,
-                false,
-                move |row: &T| {
-                    let text = value(&cell(row));
-                    let style = state_style(&text);
-                    (text, style)
-                },
-            )) as Box<dyn Column<T>>
-        })
-        .collect()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn render_list<T: 'static>(
     frame: &mut Frame,
@@ -127,58 +95,19 @@ fn render_list<T: 'static>(
     error: Option<&str>,
     area: Rect,
 ) {
-    let parts = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
-    let prepared = table
-        .rows
-        .prepare_view(table.filtered(), TableWindow::SelectedPage);
-    render_filter_bar(
+    crate::spec_table::render(
         frame,
-        FilterConfig {
-            filter_text: &table.rows.filter,
+        app,
+        table,
+        crate::spec_table::Texts {
+            title,
             placeholder,
-            mode: app.mode,
-            is_input_focused: table.focus == InputFocus::Filter,
-            controls: vec![FilterControl {
-                text: render_pagination_text(prepared.current_page, prepared.total_pages),
-                is_focused: table.focus == InputFocus::Pagination,
-            }],
-            area: parts[0],
-        },
-    );
-    let columns = columns(table);
-    let spec = table.spec();
-    let sort_header = table.sort.header(
-        &table.visible,
-        |id| Some(id.to_string()),
-        ("", SortDirection::Asc),
-    );
-    render_table(
-        frame,
-        TableConfig {
-            items: prepared.items,
-            selected_index: prepared.selected_index,
-            expanded_index: prepared.expanded_index,
-            columns: &columns,
-            sort_column: &sort_header.0,
-            sort_direction: sort_header.1,
-            title: ui::format_title(&format!("{title} ({})", prepared.total_items)),
-            area: parts[1],
-            get_expanded_content: Some(Box::new(move |row: &T| {
-                spec.iter()
-                    .map(|(name, _, cell)| {
-                        (format!("{name}: {}", value(&cell(row))), Style::default())
-                    })
-                    .collect()
-            })),
-            is_active: app.mode == Mode::Normal,
+            no_items,
         },
         status,
-        title,
         error,
-        ui::loading::EmptyState {
-            no_items,
-            has_unfiltered_items: !table.rows.items.is_empty(),
-        },
+        state_style,
+        area,
     );
 }
 

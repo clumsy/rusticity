@@ -167,6 +167,8 @@ fn every_table_offers_one_sort_section_that_toggles() {
         Service::SnsTopics,
         Service::StepFunctionsStateMachines,
         Service::EventBridgeEventBuses,
+        Service::Ec2LoadBalancers,
+        Service::Ec2TargetGroups,
         Service::EcrRepositories,
         Service::EfsFileSystems,
         Service::FsxFileSystems,

@@ -71,6 +71,8 @@ pub(super) fn target(app: &App) -> Result<Option<Target>, String> {
         Service::RdsInstances => rds(app),
         Service::VpcVpcs => vpc(app),
         Service::Ec2Instances => ec2(app),
+        Service::Ec2LoadBalancers => Ok(load_balancers(app)),
+        Service::Ec2TargetGroups => Ok(target_groups(app)),
         Service::KmsKeys => kms(app),
         Service::EfsFileSystems => efs(app),
         Service::FsxFileSystems => fsx(app),
@@ -319,6 +321,71 @@ fn ec2(app: &App) -> Result<Option<Target>, String> {
         ),
     };
     Ok(Some(view(operation, input, None, None)))
+}
+
+// ── ELB ────────────────────────────────────────────────────────────────────────
+// Load balancers table → describe-load-balancers. Entered load balancer: each
+// tab → the read behind it, scoped to the load balancer ARN; Monitoring is
+// charts → None.
+fn load_balancers(app: &App) -> Option<Target> {
+    use crate::elb::load_balancers::Tab;
+    let Some(lb) = app.load_balancers_state.view.as_ref() else {
+        return Some(view("elbv2 describe-load-balancers", json!({}), None, None));
+    };
+    let arn = &lb.source.arn;
+    let (operation, input) = match lb.tab {
+        Tab::Listeners => (
+            "elbv2 describe-listeners",
+            json!({ "LoadBalancerArn": arn }),
+        ),
+        Tab::NetworkMapping => (
+            "elbv2 describe-load-balancers",
+            json!({ "LoadBalancerArns": [arn] }),
+        ),
+        Tab::ResourceMap => (
+            "elbv2 describe-target-groups",
+            json!({ "LoadBalancerArn": arn }),
+        ),
+        Tab::Security if lb.source.security_groups.is_empty() => return None,
+        Tab::Security => (
+            "ec2 describe-security-groups",
+            json!({ "GroupIds": lb.source.security_groups }),
+        ),
+        Tab::Monitoring => return None,
+        Tab::Attributes => (
+            "elbv2 describe-load-balancer-attributes",
+            json!({ "LoadBalancerArn": arn }),
+        ),
+        Tab::Tags => ("elbv2 describe-tags", json!({ "ResourceArns": [arn] })),
+    };
+    Some(view(operation, input, None, None))
+}
+
+// Target groups table → describe-target-groups. Entered target group: each tab
+// → the read behind it, scoped to the target group ARN; Monitoring → None.
+fn target_groups(app: &App) -> Option<Target> {
+    use crate::elb::target_groups::Tab;
+    let Some(tg) = app.target_groups_state.view.as_ref() else {
+        return Some(view("elbv2 describe-target-groups", json!({}), None, None));
+    };
+    let arn = &tg.source.arn;
+    let (operation, input) = match tg.tab {
+        Tab::Targets => (
+            "elbv2 describe-target-health",
+            json!({ "TargetGroupArn": arn }),
+        ),
+        Tab::Monitoring => return None,
+        Tab::HealthChecks => (
+            "elbv2 describe-target-groups",
+            json!({ "TargetGroupArns": [arn] }),
+        ),
+        Tab::Attributes => (
+            "elbv2 describe-target-group-attributes",
+            json!({ "TargetGroupArn": arn }),
+        ),
+        Tab::Tags => ("elbv2 describe-tags", json!({ "ResourceArns": [arn] })),
+    };
+    Some(view(operation, input, None, None))
 }
 
 // ── KMS ────────────────────────────────────────────────────────────────────────

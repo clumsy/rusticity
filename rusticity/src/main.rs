@@ -221,7 +221,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // not by the generic CloudWatch refresh/reconnect path.
                         let items_view = app.current_service == Service::DynamoDbTables
                             && is_items_tab(&app);
-                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates | Service::EventBridgeEventBuses | Service::Ec2Instances | Service::SqsQueues | Service::LambdaFunctions | Service::DynamoDbTables);
+                        let inventory_view = app.service_selected && matches!(app.current_service, Service::RdsInstances | Service::VpcVpcs | Service::SnsTopics | Service::SecretsManagerSecrets | Service::StepFunctionsStateMachines | Service::AcmCertificates | Service::EventBridgeEventBuses | Service::Ec2LoadBalancers | Service::Ec2TargetGroups | Service::Ec2Instances | Service::SqsQueues | Service::LambdaFunctions | Service::DynamoDbTables);
                         // This loader only refreshes CloudWatch Logs views. Every other
                         // service refreshes through its own handler; running this for
                         // them reloaded log groups (KMS Ctrl+R did that).

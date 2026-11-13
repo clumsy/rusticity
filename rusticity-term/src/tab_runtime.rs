@@ -73,6 +73,8 @@ enum Snapshot {
     SecretsManagerSecrets(Box<crate::app::SecretsManagerState>, ViewMode),
     AcmCertificates(Box<crate::app::AcmState>, ViewMode),
     EventBridgeEventBuses(Box<crate::eventbridge::State>, ViewMode),
+    Ec2LoadBalancers(Box<crate::elb::load_balancers::State>, ViewMode),
+    Ec2TargetGroups(Box<crate::elb::target_groups::State>, ViewMode),
     StepFunctionsStateMachines(Box<crate::ui::stepfunctions::State>, ViewMode),
     SqsQueues(Box<crate::app::SqsState>, ViewMode),
     VpcVpcs(Box<crate::app::VpcState>, ViewMode),
@@ -107,6 +109,8 @@ impl Snapshot {
             Snapshot::SecretsManagerSecrets(..) => Service::SecretsManagerSecrets,
             Snapshot::AcmCertificates(..) => Service::AcmCertificates,
             Snapshot::EventBridgeEventBuses(..) => Service::EventBridgeEventBuses,
+            Snapshot::Ec2LoadBalancers(..) => Service::Ec2LoadBalancers,
+            Snapshot::Ec2TargetGroups(..) => Service::Ec2TargetGroups,
             Snapshot::StepFunctionsStateMachines(..) => Service::StepFunctionsStateMachines,
             Snapshot::SqsQueues(..) => Service::SqsQueues,
             Snapshot::VpcVpcs(..) => Service::VpcVpcs,
@@ -173,6 +177,14 @@ fn take_live(app: &mut App, service: Service) -> Option<Snapshot> {
         Service::AcmCertificates => {
             Snapshot::AcmCertificates(Box::new(std::mem::take(&mut app.acm_state)), view_mode)
         }
+        Service::Ec2LoadBalancers => Snapshot::Ec2LoadBalancers(
+            Box::new(std::mem::take(&mut app.load_balancers_state)),
+            view_mode,
+        ),
+        Service::Ec2TargetGroups => Snapshot::Ec2TargetGroups(
+            Box::new(std::mem::take(&mut app.target_groups_state)),
+            view_mode,
+        ),
         Service::EventBridgeEventBuses => Snapshot::EventBridgeEventBuses(
             Box::new(std::mem::take(&mut app.eventbridge_state)),
             view_mode,
@@ -270,6 +282,14 @@ fn hydrate(app: &mut App, snap: Snapshot) {
         }
         Snapshot::AcmCertificates(s, vm) => {
             app.acm_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::Ec2LoadBalancers(s, vm) => {
+            app.load_balancers_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::Ec2TargetGroups(s, vm) => {
+            app.target_groups_state = *s;
             app.view_mode = vm;
         }
         Snapshot::EventBridgeEventBuses(s, vm) => {
@@ -490,6 +510,8 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::Ec2Instances => crate::ec2::inventory::request(app),
         Service::SecretsManagerSecrets => crate::secretsmanager::inventory::request(app),
         Service::EventBridgeEventBuses => crate::eventbridge::request(app),
+        Service::Ec2LoadBalancers => crate::elb::load_balancers::request(app),
+        Service::Ec2TargetGroups => crate::elb::target_groups::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
         Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
@@ -580,6 +602,8 @@ fn is_managed(service: Service) -> bool {
             | Service::SecretsManagerSecrets
             | Service::AcmCertificates
             | Service::EventBridgeEventBuses
+            | Service::Ec2LoadBalancers
+            | Service::Ec2TargetGroups
             | Service::RdsInstances
             | Service::VpcVpcs
             | Service::Ec2Instances
@@ -625,6 +649,8 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::SecretsManagerSecrets => app.secretsmanager_state.load_status(),
         Service::AcmCertificates => app.acm_state.load_status(),
         Service::EventBridgeEventBuses => app.eventbridge_state.load_status(),
+        Service::Ec2LoadBalancers => app.load_balancers_state.load_status(),
+        Service::Ec2TargetGroups => app.target_groups_state.load_status(),
         Service::VpcVpcs => app.vpc_state.load_status(),
         Service::Ec2Instances => app.ec2_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
@@ -645,6 +671,8 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::SecretsManagerSecrets(s, _) => s.load_status(),
         Snapshot::AcmCertificates(s, _) => s.load_status(),
         Snapshot::EventBridgeEventBuses(s, _) => s.load_status(),
+        Snapshot::Ec2LoadBalancers(s, _) => s.load_status(),
+        Snapshot::Ec2TargetGroups(s, _) => s.load_status(),
         Snapshot::VpcVpcs(s, _) => s.load_status(),
         Snapshot::Ec2Instances(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
@@ -822,6 +850,8 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         }
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
         Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
+        Service::Ec2LoadBalancers => crate::elb::load_balancers::poll(app).await,
+        Service::Ec2TargetGroups => crate::elb::target_groups::poll(app).await,
         Service::RdsInstances => {
             let inventory = crate::rds::inventory::poll(app).await;
             crate::rds::detail::poll(app).await || inventory

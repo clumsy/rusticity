@@ -7,11 +7,9 @@
 use crate::{
     app::{App, Service},
     async_read::{AsyncRead, ReadScope, ReadStatus},
-    common::{CyclicEnum, InputFocus},
+    common::CyclicEnum,
     console::{component, ConsoleUrl},
-    inventory::{self, InventoryInput},
     keymap::{Action, Mode},
-    table::TableState,
 };
 use rusticity_core::eventbridge::{EventTarget, RuleDetail, RULE_METRICS};
 use rusticity_core::{EventBridgeClient, EventBus, EventRule};
@@ -19,8 +17,7 @@ use rusticity_core::{EventBridgeClient, EventBus, EventRule};
 pub mod view;
 pub use view::render;
 
-/// A column: (id and header, width, cell).
-pub(crate) type Spec<T> = &'static [(&'static str, u16, fn(&T) -> String)];
+pub(crate) use crate::spec_table::{Spec, Table};
 
 /// Console columns. Status and ID belong to Custom Event Bus (V2) buses,
 /// which ListEventBuses does not return, so they stay empty for these rows.
@@ -65,60 +62,6 @@ pub(crate) const TAG_COLUMNS: Spec<TagRow> = &[
 pub struct TagRow {
     pub key: String,
     pub value: String,
-}
-
-/// One table with its filter focus and visible columns.
-pub(crate) struct Table<T: 'static> {
-    pub(crate) rows: TableState<T>,
-    pub(crate) visible: Vec<crate::common::ColumnId>,
-    pub(crate) focus: InputFocus,
-    pub(crate) sort: crate::sort::Choice,
-    spec: Spec<T>,
-}
-
-impl<T: 'static> Table<T> {
-    fn new(spec: Spec<T>) -> Self {
-        Self {
-            rows: TableState::new(),
-            visible: spec.iter().map(|(id, ..)| *id).collect(),
-            focus: InputFocus::Filter,
-            sort: Default::default(),
-            spec,
-        }
-    }
-
-    pub(crate) fn spec(&self) -> Spec<T> {
-        self.spec
-    }
-
-    pub(crate) fn filtered(&self) -> Vec<&T> {
-        let filter = self.rows.filter.to_lowercase();
-        let mut rows: Vec<&T> = self
-            .rows
-            .items
-            .iter()
-            .filter(|row| {
-                filter.is_empty()
-                    || self
-                        .spec
-                        .iter()
-                        .any(|(_, _, cell)| cell(row).to_lowercase().contains(&filter))
-            })
-            .collect();
-        let spec = self.spec;
-        self.sort.apply(&mut rows, &self.visible, |row, id| {
-            spec.iter()
-                .find(|(name, ..)| *name == id)
-                .map(|(_, _, cell)| cell(row))
-                .unwrap_or_default()
-        });
-        rows
-    }
-
-    fn clear(&mut self) {
-        self.rows.items.clear();
-        self.rows.reset();
-    }
 }
 
 /// Rule tabs, in console order. The first is "Event schedule" for a
@@ -384,15 +327,13 @@ pub(crate) fn selected_arn(app: &App) -> Option<String> {
     }
 }
 
-const CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
-
 /// Run the shared table input on the table `pick` selects.
 fn table_input<T: 'static>(
     app: &mut App,
     pick: fn(&mut State) -> Option<&mut Table<T>>,
     action: &Action,
 ) -> bool {
-    let arn = selected_arn(app);
+    let selected_arn = selected_arn(app);
     let App {
         eventbridge_state,
         mode,
@@ -405,43 +346,15 @@ fn table_input<T: 'static>(
     let Some(table) = pick(eventbridge_state) else {
         return false;
     };
-    if *mode == Mode::FilterInput
-        && matches!(action, Action::NextFilterFocus | Action::PrevFilterFocus)
-    {
-        table.focus = if *action == Action::NextFilterFocus {
-            table.focus.next(&CONTROLS)
-        } else {
-            table.focus.prev(&CONTROLS)
-        };
-        page_input.clear();
-        return true;
-    }
-    if *mode == Mode::FilterInput && *action == Action::DeleteWord {
-        if table.focus == InputFocus::Filter {
-            table.rows.filter_clear();
-        } else {
-            page_input.clear();
-        }
-        return true;
-    }
-    if *mode == Mode::Normal && *action == Action::StartFilter {
-        table.focus = InputFocus::Filter;
-        page_input.clear();
-        *mode = Mode::FilterInput;
-        return true;
-    }
-    let filtered_count = table.filtered().len();
-    inventory::handle_action(
-        InventoryInput {
-            table: &mut table.rows,
-            focus: &mut table.focus,
+    crate::spec_table::input(
+        table,
+        crate::spec_table::Keys {
             mode,
             page_input,
             error_message,
             error_scroll,
-            filtered_count,
-            selected_arn: arn,
             clipboard,
+            selected_arn,
         },
         action,
     )
@@ -779,10 +692,7 @@ pub fn console_url(app: &App) -> String {
 /// Columns of the table on screen, for preferences; none on a summary tab.
 pub(crate) fn columns(app: &App) -> (Vec<&'static str>, Vec<&'static str>) {
     fn ids<T: 'static>(t: &Table<T>) -> (Vec<&'static str>, Vec<&'static str>) {
-        (
-            t.spec.iter().map(|(id, ..)| *id).collect(),
-            t.visible.clone(),
-        )
+        t.ids()
     }
     let state = &app.eventbridge_state;
     match (&state.bus, level(app)) {

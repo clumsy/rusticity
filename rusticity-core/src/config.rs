@@ -294,6 +294,10 @@ impl AwsConfig {
         aws_sdk_eventbridge::Client::new(&self.sdk_config)
     }
 
+    pub fn elbv2_client(&self) -> aws_sdk_elasticloadbalancingv2::Client {
+        aws_sdk_elasticloadbalancingv2::Client::new(&self.sdk_config)
+    }
+
     pub fn rds_client(&self) -> aws_sdk_rds::Client {
         aws_sdk_rds::Client::new(&self.sdk_config)
     }

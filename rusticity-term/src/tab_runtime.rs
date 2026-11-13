@@ -816,7 +816,10 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
             crate::secretsmanager::detail::poll(app).await || inventory
         }
         Service::VpcVpcs => crate::vpc::inventory::poll(app).await,
-        Service::Ec2Instances => crate::ec2::inventory::poll(app).await,
+        Service::Ec2Instances => {
+            let inventory = crate::ec2::inventory::poll(app).await;
+            crate::ec2::detail::poll(app).await || inventory
+        }
         Service::AcmCertificates => crate::acm::inventory::poll(app).await,
         Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
         Service::RdsInstances => {

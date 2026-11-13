@@ -4,7 +4,6 @@ use crate::ui::ec2::{
     filtered_ec2_instances, filtered_tags, DetailTab as Ec2DetailTab, FILTER_CONTROLS,
     STATE_FILTER as EC2_STATE_FILTER,
 };
-use crate::ui::monitoring::MonitoringState;
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 
@@ -99,35 +98,7 @@ pub fn page_down_normal(app: &mut App) {
 }
 
 pub fn page_up_normal(app: &mut App) {
-    if app.ec2_state.current_instance.is_some()
-        && app.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-        && !app.ec2_state.is_metrics_loading()
-    {
-        app.ec2_state
-            .set_monitoring_scroll(app.ec2_state.monitoring_scroll().saturating_sub(1));
-    } else {
-        app.ec2_state.table.page_up();
-    }
-}
-
-pub fn scroll_up(app: &mut App) {
-    if app.ec2_state.current_instance.is_some()
-        && app.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-        && !app.ec2_state.is_metrics_loading()
-    {
-        app.ec2_state
-            .set_monitoring_scroll(app.ec2_state.monitoring_scroll().saturating_sub(1));
-    }
-}
-
-pub fn scroll_down(app: &mut App) {
-    if app.ec2_state.current_instance.is_some()
-        && app.ec2_state.detail_tab == Ec2DetailTab::Monitoring
-        && !app.ec2_state.is_metrics_loading()
-    {
-        app.ec2_state
-            .set_monitoring_scroll((app.ec2_state.monitoring_scroll() + 1).min(5));
-    }
+    app.ec2_state.table.page_up();
 }
 
 pub fn expand_row(app: &mut App) {
@@ -152,47 +123,27 @@ pub fn collapse_row(app: &mut App) {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
+/// Enter the selected instance; its detail read starts at once.
 pub fn select_item(app: &mut App) {
     if app.ec2_state.current_instance.is_none() {
         let filtered = filtered_ec2_instances(app);
         if let Some(instance) = app.ec2_state.table.get_selected(&filtered) {
-            app.ec2_state.current_instance = Some(instance.instance_id.clone());
-            app.view_mode = crate::app::ViewMode::Detail;
-            app.update_current_tab_breadcrumb();
+            let id = instance.instance_id.clone();
+            crate::ec2::detail::open(app, id);
         }
     }
 }
 
 pub fn go_back(app: &mut App) {
-    app.ec2_state.current_instance = None;
-    app.view_mode = crate::app::ViewMode::List;
-    app.update_current_tab_breadcrumb();
+    crate::ec2::detail::close(app);
 }
 
 pub fn next_detail_tab(app: &mut App) {
     app.ec2_state.detail_tab = app.ec2_state.detail_tab.next();
-    if app.ec2_state.detail_tab == Ec2DetailTab::Tags {
-        app.ec2_state.tags.loading = true;
-    } else if app.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
-        app.ec2_state.set_metrics_loading(true);
-        app.ec2_state.set_monitoring_scroll(0);
-        app.ec2_state.clear_metrics();
-    }
 }
 
 pub fn prev_detail_tab(app: &mut App) {
     app.ec2_state.detail_tab = app.ec2_state.detail_tab.prev();
-    if app.ec2_state.detail_tab == Ec2DetailTab::Tags {
-        app.ec2_state.tags.loading = true;
-    } else if app.ec2_state.detail_tab == Ec2DetailTab::Monitoring {
-        app.ec2_state.set_metrics_loading(true);
-        app.ec2_state.set_monitoring_scroll(0);
-        app.ec2_state.clear_metrics();
-    }
-}
-
-pub fn block_column_selector(app: &App) -> bool {
-    app.ec2_state.table.expanded_item.is_some() && app.ec2_state.detail_tab != Ec2DetailTab::Tags
 }
 
 // ── Column preferences ────────────────────────────────────────────────────────

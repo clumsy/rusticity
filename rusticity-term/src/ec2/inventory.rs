@@ -1,7 +1,7 @@
 //! EC2 instance list as a tab-owned background read, bounded by 30s. See
-//! `crate::list_read`. Only the list is owned here; the entered instance keeps
-//! its Tags and Monitoring loaders. A finder or bookmark open enters the exact
-//! instance once the list is in.
+//! `crate::list_read`. Only the list is owned here; the entered instance has
+//! its own read in `crate::ec2::detail`. A finder or bookmark open enters the
+//! exact instance once the list is in.
 use crate::{
     app::{App, Service},
     async_read::{ReadScope, ReadStatus},

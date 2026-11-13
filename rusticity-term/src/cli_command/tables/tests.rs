@@ -245,10 +245,43 @@ fn ec2_describes_all_instances_without_client_state_filter() {
 }
 
 #[test]
-fn ec2_entered_instance_detail_is_none() {
+fn ec2_entered_instance_tabs_scope_their_read_to_the_instance() {
+    use crate::ui::ec2::DetailTab;
     let mut app = app(Service::Ec2Instances);
     app.ec2_state.current_instance = Some("i-123".into());
-    assert!(matches!(target(&app), Ok(None)));
+    let attached =
+        serde_json::json!({"Filters":[{"Name":"attachment.instance-id","Values":["i-123"]}]});
+    for (tab, operation, input) in [
+        (
+            DetailTab::Details,
+            "ec2 describe-instances",
+            serde_json::json!({"InstanceIds":["i-123"]}),
+        ),
+        (
+            DetailTab::StatusAndAlarms,
+            "ec2 describe-instance-status",
+            serde_json::json!({"InstanceIds":["i-123"],"IncludeAllInstances":true}),
+        ),
+        (
+            DetailTab::Networking,
+            "ec2 describe-network-interfaces",
+            attached.clone(),
+        ),
+        (DetailTab::Storage, "ec2 describe-volumes", attached),
+        (
+            DetailTab::Tags,
+            "ec2 describe-tags",
+            serde_json::json!({"Filters":[{"Name":"resource-id","Values":["i-123"]}]}),
+        ),
+    ] {
+        app.ec2_state.detail_tab = tab;
+        assert_eq!(view_of(&target(&app)), (operation, input), "{tab:?}");
+    }
+    // Charts have no command; Security needs the groups from the read.
+    for tab in [DetailTab::Monitoring, DetailTab::Security] {
+        app.ec2_state.detail_tab = tab;
+        assert!(matches!(target(&app), Ok(None)), "{tab:?}");
+    }
 }
 
 // ── KMS ─────────────────────────────────────────────────────────────────────

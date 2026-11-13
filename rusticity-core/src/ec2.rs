@@ -3,6 +3,15 @@ use crate::metrics::{MetricQuery, MetricReader};
 use anyhow::Result;
 use aws_sdk_cloudwatch::types::Statistic;
 
+pub mod detail;
+
+/// `2024-01-02 03:04:05 (UTC)`, the list and detail format; empty when absent.
+pub(crate) fn utc(time: Option<&aws_smithy_types::DateTime>) -> String {
+    time.and_then(|t| chrono::DateTime::from_timestamp(t.secs(), 0))
+        .map(|t| t.format("%Y-%m-%d %H:%M:%S (UTC)").to_string())
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug)]
 pub struct Instance {
     pub instance_id: String,
@@ -23,12 +32,6 @@ pub struct Instance {
     pub alarm_status: String,
     pub private_ip_address: String,
     pub private_dns_name: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct InstanceTag {
-    pub key: String,
-    pub value: String,
 }
 
 pub struct Ec2Client {
@@ -88,15 +91,7 @@ impl Ec2Client {
                                 .collect::<Vec<_>>()
                                 .join(", ");
 
-                            let launch_time = inst
-                                .launch_time()
-                                .map(|dt| {
-                                    let timestamp = dt.secs();
-                                    chrono::DateTime::from_timestamp(timestamp, 0)
-                                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S (UTC)").to_string())
-                                        .unwrap_or_default()
-                                })
-                                .unwrap_or_default();
+                            let launch_time = utc(inst.launch_time());
 
                             instances.push(Instance {
                                 instance_id: inst.instance_id().unwrap_or("").to_string(),
@@ -149,30 +144,9 @@ impl Ec2Client {
         Ok(instances)
     }
 
-    pub async fn list_tags(&self, instance_id: &str) -> Result<Vec<InstanceTag>> {
-        let client = self.config.ec2_client();
-
-        let response = client
-            .describe_tags()
-            .filters(
-                aws_sdk_ec2::types::Filter::builder()
-                    .name("resource-id")
-                    .values(instance_id)
-                    .build(),
-            )
-            .send()
-            .await?;
-
-        let mut tags = Vec::new();
-        if let Some(tag_list) = response.tags {
-            for tag in tag_list {
-                if let (Some(key), Some(value)) = (tag.key, tag.value) {
-                    tags.push(InstanceTag { key, value });
-                }
-            }
-        }
-
-        Ok(tags)
+    /// One instance, fresh, with every detail tab. See [`detail`].
+    pub async fn instance_details(&self, instance_id: &str) -> Result<detail::Ec2InstanceDetail> {
+        detail::instance_details(&self.config, instance_id).await
     }
 
     pub async fn get_cpu_metrics(&self, instance_id: &str) -> Result<Vec<(i64, f64)>> {

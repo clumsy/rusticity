@@ -563,41 +563,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.cloudtrail_state.table.loading = false;
                         }
 
-                        // EC2 instances load as a tab-owned background read (tab_runtime).
-
-                        // Load EC2 tags when tab is switched
-                        if app.current_service == Service::Ec2Instances
-                            && app.ec2_state.current_instance.is_some()
-                            && app.ec2_state.detail_tab == rusticity_term::ui::ec2::DetailTab::Tags
-                            && app.ec2_state.tags.loading
-                        {
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Some(instance_id) = &app.ec2_state.current_instance.clone() {
-                                if let Err(e) = rusticity_term::ui::ec2::load_tags(&mut app, instance_id).await {
-                                    app.error_message = Some(format!("Failed to load tags: {:#}", e));
-                                    app.error_scroll = 0;
-                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                }
-                            }
-                            app.ec2_state.tags.loading = false;
-                        }
-
-                        // Load EC2 metrics when entering Monitoring tab
-                        if app.current_service == Service::Ec2Instances
-                            && app.ec2_state.current_instance.is_some()
-                            && app.ec2_state.detail_tab == rusticity_term::ui::ec2::DetailTab::Monitoring
-                            && app.ec2_state.metrics_loading
-                        {
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Some(instance_id) = &app.ec2_state.current_instance.clone() {
-                                if let Err(e) = rusticity_term::ui::ec2::load_ec2_metrics(&mut app, instance_id).await {
-                                    app.error_message = Some(format!("Failed to load metrics: {:#}", e));
-                                    app.error_scroll = 0;
-                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                }
-                            }
-                            app.ec2_state.metrics_loading = false;
-                        }
+                        // EC2 instances and the entered instance load as tab-owned
+                        // background reads (tab_runtime).
 
                         // Load CloudWatch Alarm metrics when entering alarm detail view
                         if app.current_service == Service::CloudWatchAlarms

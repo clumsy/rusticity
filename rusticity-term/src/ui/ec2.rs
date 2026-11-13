@@ -3,12 +3,9 @@ use crate::ec2::tag::{Column as TagColumn, InstanceTag};
 use crate::ec2::{Column, Instance};
 use crate::keymap::Mode;
 use crate::table::TableState;
-use crate::tags::{self, TagSort, TagsConfig};
-use crate::ui::table::{expanded_from_columns, Column as TableColumn};
-use crate::ui::{
-    calculate_dynamic_height, format_title, render_fields_with_dynamic_columns, rounded_block,
-    titled_block,
-};
+use crate::tags::{self, TagSort};
+use crate::ui::format_title;
+use crate::ui::table::expanded_from_columns;
 use ratatui::prelude::*;
 
 pub const FILTER_CONTROLS: [InputFocus; 3] = [
@@ -141,25 +138,18 @@ pub struct State {
     pub tags: TableState<InstanceTag>,
     pub tag_visible_column_ids: Vec<String>,
     pub tag_column_ids: Vec<String>,
-    pub monitoring_scroll: usize,
-    pub metrics_loading: bool,
-    pub metric_data_cpu: Vec<(i64, f64)>,
-    pub metric_data_network_in: Vec<(i64, f64)>,
-    pub metric_data_network_out: Vec<(i64, f64)>,
-    pub metric_data_network_packets_in: Vec<(i64, f64)>,
-    pub metric_data_network_packets_out: Vec<(i64, f64)>,
-    pub metric_data_metadata_no_token: Vec<(i64, f64)>,
+    /// The entered instance read and its tab tables; see `crate::ec2::detail`.
+    pub(crate) detail: crate::ec2::detail::State,
     pub(crate) inventory: crate::list_read::ListRead<Instance>,
     /// Instance ID to enter once the list read completes.
     pub(crate) pending_focus: Option<String>,
 }
 
 impl State {
-    /// Tab indicator status: the list read. The entered instance has no
-    /// owned read yet.
+    /// Tab indicator status: the entered instance read, else the list read.
     pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
         if self.current_instance.is_some() {
-            crate::async_read::ReadStatus::Idle
+            self.detail.status()
         } else {
             self.inventory.status()
         }
@@ -179,44 +169,10 @@ impl Default for State {
             tags: TableState::new(),
             tag_visible_column_ids: tag_column_ids.clone(),
             tag_column_ids,
-            monitoring_scroll: 0,
-            metrics_loading: false,
-            metric_data_cpu: Vec::new(),
-            metric_data_network_in: Vec::new(),
-            metric_data_network_out: Vec::new(),
-            metric_data_network_packets_in: Vec::new(),
-            metric_data_network_packets_out: Vec::new(),
-            metric_data_metadata_no_token: Vec::new(),
+            detail: Default::default(),
             inventory: Default::default(),
             pending_focus: None,
         }
-    }
-}
-
-impl crate::ui::monitoring::MonitoringState for State {
-    fn is_metrics_loading(&self) -> bool {
-        self.metrics_loading
-    }
-
-    fn set_metrics_loading(&mut self, loading: bool) {
-        self.metrics_loading = loading;
-    }
-
-    fn monitoring_scroll(&self) -> usize {
-        self.monitoring_scroll
-    }
-
-    fn set_monitoring_scroll(&mut self, scroll: usize) {
-        self.monitoring_scroll = scroll;
-    }
-
-    fn clear_metrics(&mut self) {
-        self.metric_data_cpu.clear();
-        self.metric_data_network_in.clear();
-        self.metric_data_network_out.clear();
-        self.metric_data_network_packets_in.clear();
-        self.metric_data_network_packets_out.clear();
-        self.metric_data_metadata_no_token.clear();
     }
 }
 
@@ -368,297 +324,7 @@ pub(crate) fn filtered_rows<'a>(state: &'a State, visible: &[&str]) -> Vec<&'a I
 }
 
 pub fn render_instance_detail(frame: &mut Frame, area: Rect, app: &crate::app::App) {
-    use crate::ui::{labeled_field, render_tabs};
-
-    let instance = app
-        .ec2_state
-        .table
-        .items
-        .iter()
-        .find(|i| Some(&i.instance_id) == app.ec2_state.current_instance.as_ref());
-
-    let Some(instance) = instance else {
-        return;
-    };
-
-    // All fields to display (matching AWS console)
-    let all_fields = vec![
-        labeled_field("Instance ID", &instance.instance_id),
-        labeled_field("Public IPv4 address", &instance.public_ipv4_address),
-        labeled_field("Private IPv4 addresses", &instance.private_ip_address),
-        labeled_field("IPv6 address", &instance.ipv6_ips),
-        labeled_field("Instance state", &instance.state),
-        labeled_field("Public DNS", &instance.public_ipv4_dns),
-        labeled_field(
-            "Hostname type",
-            format!("IP name: {}", instance.private_dns_name),
-        ),
-        labeled_field(
-            "Private IP DNS name (IPv4 only)",
-            &instance.private_dns_name,
-        ),
-        labeled_field("Instance type", &instance.instance_type),
-        labeled_field("Elastic IP addresses", &instance.elastic_ip),
-        labeled_field(
-            "Auto-assigned IP address",
-            format!("{} [Public IP]", instance.public_ipv4_address),
-        ),
-        labeled_field("VPC ID", &instance.vpc_id),
-        labeled_field("IAM Role", &instance.iam_instance_profile_arn),
-        labeled_field("Subnet ID", &instance.subnet_ids),
-        labeled_field("IMDSv2", &instance.imdsv2),
-        labeled_field("Availability Zone", &instance.availability_zone),
-        labeled_field("Managed", &instance.managed),
-        labeled_field("Operator", &instance.operator),
-    ];
-
-    // Calculate height needed
-    let summary_height = calculate_dynamic_height(&all_fields, area.width.saturating_sub(4)) + 2;
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(summary_height), Constraint::Min(0)])
-        .split(area);
-
-    // Instance summary
-    let summary_block = titled_block("Instance summary");
-    let summary_inner = summary_block.inner(chunks[0]);
-    frame.render_widget(summary_block, chunks[0]);
-
-    render_fields_with_dynamic_columns(frame, summary_inner, all_fields);
-
-    // Tab content
-    let tab_names: Vec<(&str, DetailTab)> = DetailTab::ALL.iter().map(|t| (t.name(), *t)).collect();
-    render_tabs(frame, chunks[1], &tab_names, &app.ec2_state.detail_tab);
-
-    // Content area starts right after tabs (1 line for tab bar)
-    let content_area = Rect {
-        x: chunks[1].x,
-        y: chunks[1].y + 1,
-        width: chunks[1].width,
-        height: chunks[1].height.saturating_sub(1),
-    };
-
-    match app.ec2_state.detail_tab {
-        DetailTab::Details => {
-            let instance_details = vec![
-                labeled_field("AMI ID", &instance.image_id),
-                labeled_field("Monitoring", &instance.monitoring),
-                labeled_field("Platform details", &instance.platform_details),
-                labeled_field("AMI name", "–"),
-                labeled_field("Allowed image", "–"),
-                labeled_field("Termination protection", "–"),
-                labeled_field("Stop protection", "–"),
-                labeled_field("Launch time", &instance.launch_time),
-                labeled_field("AMI location", "–"),
-                labeled_field("Instance reboot migration", "–"),
-                labeled_field("Instance auto-recovery", "–"),
-                labeled_field("Lifecycle", &instance.instance_lifecycle),
-                labeled_field(
-                    "Stop-hibernate behavior",
-                    &instance.stop_hibernation_behavior,
-                ),
-                labeled_field("AMI Launch index", &instance.ami_launch_index),
-                labeled_field("Key pair assigned at launch", &instance.key_name),
-                labeled_field(
-                    "State transition reason",
-                    &instance.state_transition_reason_code,
-                ),
-                labeled_field("Credit specification", "–"),
-                labeled_field("Kernel ID", &instance.kernel_id),
-                labeled_field(
-                    "State transition message",
-                    &instance.state_transition_reason_message,
-                ),
-                labeled_field("Usage operation", &instance.usage_operation),
-                labeled_field("RAM disk ID", &instance.ramdisk_id),
-                labeled_field("Owner", &instance.owner_id),
-                labeled_field("Enclaves Support", "–"),
-                labeled_field("Boot mode", "–"),
-                labeled_field("Current instance boot mode", "–"),
-                labeled_field("Allow tags in instance metadata", "–"),
-                labeled_field("Use RBN as guest OS hostname", "–"),
-                labeled_field("Answer RBN DNS hostname IPv4", "–"),
-            ];
-
-            let placement = vec![
-                labeled_field("Host ID", &instance.host_id),
-                labeled_field("Affinity", &instance.affinity),
-                labeled_field("Placement group", &instance.placement_group),
-                labeled_field("Host resource group name", "–"),
-                labeled_field("Tenancy", &instance.tenancy),
-                labeled_field("Placement group ID", "–"),
-                labeled_field("Virtualization type", &instance.virtualization_type),
-                labeled_field("Reservation", &instance.reservation_id),
-                labeled_field("Partition number", &instance.partition_number),
-                labeled_field("Number of vCPUs", "–"),
-            ];
-
-            let capacity = vec![
-                labeled_field("Capacity Reservation ID", &instance.capacity_reservation_id),
-                labeled_field("Capacity Reservation setting", "open"),
-            ];
-
-            // Calculate heights for each section based on field count and width
-            let calc_height = |fields: &[Line], width: u16| -> u16 {
-                if fields.is_empty() {
-                    return 2; // Just borders
-                }
-                let field_widths: Vec<u16> = fields
-                    .iter()
-                    .map(|line| {
-                        line.spans
-                            .iter()
-                            .map(|span| span.content.len() as u16)
-                            .sum::<u16>()
-                            + 2
-                    })
-                    .collect();
-                let max_field_width = *field_widths.iter().max().unwrap_or(&20);
-                let num_columns =
-                    (width / max_field_width).max(1).min(fields.len() as u16) as usize;
-                let base = fields.len() / num_columns;
-                let extra = fields.len() % num_columns;
-                let max_rows = if extra > 0 { base + 1 } else { base };
-                (max_rows as u16) + 2
-            };
-
-            let details_height =
-                calc_height(&instance_details, content_area.width.saturating_sub(2));
-            let placement_height = calc_height(&placement, content_area.width.saturating_sub(2));
-            let capacity_height = calc_height(&capacity, content_area.width.saturating_sub(2));
-
-            // Ensure total height doesn't exceed available space
-            let total_height = details_height + placement_height + capacity_height;
-            let available_height = content_area.height;
-
-            let sections = if total_height <= available_height {
-                Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(details_height),
-                        Constraint::Length(placement_height),
-                        Constraint::Length(capacity_height),
-                    ])
-                    .split(content_area)
-            } else {
-                // If doesn't fit, use Min for last section
-                Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(details_height),
-                        Constraint::Length(placement_height),
-                        Constraint::Min(0),
-                    ])
-                    .split(content_area)
-            };
-
-            let details_block = titled_block("Instance details");
-            let details_inner = details_block.inner(sections[0]);
-            frame.render_widget(details_block, sections[0]);
-            render_fields_with_dynamic_columns(frame, details_inner, instance_details);
-
-            let placement_block = titled_block("Host and placement group");
-            let placement_inner = placement_block.inner(sections[1]);
-            frame.render_widget(placement_block, sections[1]);
-            render_fields_with_dynamic_columns(frame, placement_inner, placement);
-
-            let capacity_block = titled_block("Capacity reservation");
-            let capacity_inner = capacity_block.inner(sections[2]);
-            frame.render_widget(capacity_block, sections[2]);
-            render_fields_with_dynamic_columns(frame, capacity_inner, capacity);
-        }
-        DetailTab::StatusAndAlarms => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = vec![
-                labeled_field("Status checks", &instance.status_checks),
-                labeled_field("Alarm status", &instance.alarm_status),
-                labeled_field("Monitoring", &instance.monitoring),
-                labeled_field(
-                    "State transition reason",
-                    &instance.state_transition_reason_message,
-                ),
-            ];
-            render_fields_with_dynamic_columns(frame, inner, lines);
-        }
-        DetailTab::Monitoring => {
-            render_ec2_monitoring_charts(frame, app, content_area);
-        }
-        DetailTab::Security => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = vec![
-                labeled_field("Security groups", &instance.security_groups),
-                labeled_field("Security group IDs", &instance.security_group_ids),
-                labeled_field("Key name", &instance.key_name),
-                labeled_field("IAM role", &instance.iam_instance_profile_arn),
-                labeled_field("IMDSv2", &instance.imdsv2),
-            ];
-            render_fields_with_dynamic_columns(frame, inner, lines);
-        }
-        DetailTab::Networking => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = vec![
-                labeled_field("VPC ID", &instance.vpc_id),
-                labeled_field("Subnet IDs", &instance.subnet_ids),
-                labeled_field("Private DNS", &instance.private_dns_name),
-                labeled_field("Private IP", &instance.private_ip_address),
-                labeled_field("Public IPv4 DNS", &instance.public_ipv4_dns),
-                labeled_field("Public IPv4", &instance.public_ipv4_address),
-                labeled_field("Elastic IP", &instance.elastic_ip),
-                labeled_field("IPv6 IPs", &instance.ipv6_ips),
-            ];
-            render_fields_with_dynamic_columns(frame, inner, lines);
-        }
-        DetailTab::Storage => {
-            let block = rounded_block();
-            let inner = block.inner(content_area);
-            frame.render_widget(block, content_area);
-
-            let lines = vec![
-                labeled_field("Volume ID", &instance.volume_id),
-                labeled_field("Root device", &instance.root_device_name),
-                labeled_field("Root device type", &instance.root_device_type),
-                labeled_field("EBS optimized", &instance.ebs_optimized),
-            ];
-            render_fields_with_dynamic_columns(frame, inner, lines);
-        }
-        DetailTab::Tags => {
-            render_tags_tab(frame, app, content_area);
-        }
-    }
-}
-
-fn render_tags_tab(frame: &mut Frame, app: &crate::app::App, area: Rect) {
-    let columns = app
-        .ec2_state
-        .tag_visible_column_ids
-        .iter()
-        .filter_map(|id| TagColumn::from_id(id))
-        .map(|col| Box::new(col) as Box<dyn TableColumn<InstanceTag>>)
-        .collect();
-    tags::render(
-        frame,
-        area,
-        TagsConfig {
-            table: &app.ec2_state.tags,
-            items: &app.ec2_state.tags.items,
-            columns,
-            sort: TagSort::Value,
-            window: crate::table::TableWindow::SelectedPage,
-            focus: app.ec2_state.input_focus,
-            mode: app.mode,
-            loading: false,
-        },
-    );
+    crate::ec2::detail::render(frame, app, area);
 }
 
 pub fn filtered_tags(app: &crate::app::App) -> Vec<&InstanceTag> {
@@ -669,167 +335,11 @@ pub fn filtered_tags(app: &crate::app::App) -> Vec<&InstanceTag> {
     )
 }
 
-pub async fn load_tags(app: &mut crate::app::App, instance_id: &str) -> anyhow::Result<()> {
-    let tags = app.ec2_client.list_tags(instance_id).await?;
-
-    app.ec2_state.tags.items = tags
-        .into_iter()
-        .map(|t| InstanceTag {
-            key: t.key,
-            value: t.value,
-        })
-        .collect();
-
-    app.ec2_state
-        .tags
-        .items
-        .sort_by(|a, b| a.value.cmp(&b.value));
-
-    Ok(())
-}
-
-pub async fn load_ec2_metrics(app: &mut crate::app::App, instance_id: &str) -> anyhow::Result<()> {
-    app.ec2_state.metric_data_cpu = app.ec2_client.get_cpu_metrics(instance_id).await?;
-    app.ec2_state.metric_data_network_in =
-        app.ec2_client.get_network_in_metrics(instance_id).await?;
-    app.ec2_state.metric_data_network_out =
-        app.ec2_client.get_network_out_metrics(instance_id).await?;
-    app.ec2_state.metric_data_network_packets_in = app
-        .ec2_client
-        .get_network_packets_in_metrics(instance_id)
-        .await?;
-    app.ec2_state.metric_data_network_packets_out = app
-        .ec2_client
-        .get_network_packets_out_metrics(instance_id)
-        .await?;
-    app.ec2_state.metric_data_metadata_no_token = app
-        .ec2_client
-        .get_metadata_no_token_metrics(instance_id)
-        .await?;
-    Ok(())
-}
-
-fn render_ec2_monitoring_charts(frame: &mut Frame, app: &crate::app::App, area: Rect) {
-    use crate::ui::monitoring::render_monitoring_tab;
-
-    let cpu_avg: f64 = if !app.ec2_state.metric_data_cpu.is_empty() {
-        app.ec2_state
-            .metric_data_cpu
-            .iter()
-            .map(|(_, v)| v)
-            .sum::<f64>()
-            / app.ec2_state.metric_data_cpu.len() as f64
-    } else {
-        0.0
-    };
-    let cpu_label = format!("CPU utilization (%) [avg: {:.2}]", cpu_avg);
-
-    let network_in_sum: f64 = app
-        .ec2_state
-        .metric_data_network_in
-        .iter()
-        .map(|(_, v)| v)
-        .sum();
-    let network_in_label = format!("Network in (bytes) [sum: {:.0}]", network_in_sum);
-
-    let network_out_sum: f64 = app
-        .ec2_state
-        .metric_data_network_out
-        .iter()
-        .map(|(_, v)| v)
-        .sum();
-    let network_out_label = format!("Network out (bytes) [sum: {:.0}]", network_out_sum);
-
-    let network_packets_in_sum: f64 = app
-        .ec2_state
-        .metric_data_network_packets_in
-        .iter()
-        .map(|(_, v)| v)
-        .sum();
-    let network_packets_in_label = format!(
-        "Network packets in (count) [sum: {:.0}]",
-        network_packets_in_sum
-    );
-
-    let network_packets_out_sum: f64 = app
-        .ec2_state
-        .metric_data_network_packets_out
-        .iter()
-        .map(|(_, v)| v)
-        .sum();
-    let network_packets_out_label = format!(
-        "Network packets out (count) [sum: {:.0}]",
-        network_packets_out_sum
-    );
-
-    let metadata_no_token_sum: f64 = app
-        .ec2_state
-        .metric_data_metadata_no_token
-        .iter()
-        .map(|(_, v)| v)
-        .sum();
-    let metadata_no_token_label = format!(
-        "Metadata no token (count) [sum: {:.0}]",
-        metadata_no_token_sum
-    );
-
-    render_monitoring_tab(
-        frame,
-        area,
-        &[
-            crate::ui::monitoring::MetricChart {
-                title: &cpu_label,
-                data: &app.ec2_state.metric_data_cpu,
-                y_axis_label: "%",
-                x_axis_label: None,
-                ..Default::default()
-            },
-            crate::ui::monitoring::MetricChart {
-                title: &network_in_label,
-                data: &app.ec2_state.metric_data_network_in,
-                y_axis_label: "bytes",
-                x_axis_label: None,
-                ..Default::default()
-            },
-            crate::ui::monitoring::MetricChart {
-                title: &network_out_label,
-                data: &app.ec2_state.metric_data_network_out,
-                y_axis_label: "bytes",
-                x_axis_label: None,
-                ..Default::default()
-            },
-            crate::ui::monitoring::MetricChart {
-                title: &network_packets_in_label,
-                data: &app.ec2_state.metric_data_network_packets_in,
-                y_axis_label: "count",
-                x_axis_label: None,
-                ..Default::default()
-            },
-            crate::ui::monitoring::MetricChart {
-                title: &network_packets_out_label,
-                data: &app.ec2_state.metric_data_network_packets_out,
-                y_axis_label: "count",
-                x_axis_label: None,
-                ..Default::default()
-            },
-            crate::ui::monitoring::MetricChart {
-                title: &metadata_no_token_label,
-                data: &app.ec2_state.metric_data_metadata_no_token,
-                y_axis_label: "count",
-                x_axis_label: None,
-                ..Default::default()
-            },
-        ],
-        &[],
-        &[],
-        &[],
-        app.ec2_state.monitoring_scroll,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ec2::tag::Column as TagColumn;
+    use crate::ui::render_fields_with_dynamic_columns;
 
     #[test]
     fn test_state_filter_names() {
@@ -874,47 +384,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prepared_tags_preserve_filtering_and_value_sort_before_paging() {
-        use ratatui::{backend::TestBackend, Terminal};
-        let mut app = crate::app::App::new_without_client("test".into(), None);
-        app.mode = Mode::Normal;
-        app.ec2_state.tags.items = (0..25)
-            .rev()
-            .map(|i| InstanceTag {
-                key: format!("wanted-{i:02}"),
-                value: format!("rank{i:02}"),
-            })
-            .collect();
-        app.ec2_state.tags.items.push(InstanceTag {
-            key: "excluded".into(),
-            value: "rank-negative".into(),
-        });
-        app.ec2_state.tags.filter = "WANTED".into();
-        app.ec2_state.tags.page_size = crate::common::PageSize::Ten;
-        app.ec2_state.tags.selected = 12;
-        let mut terminal = Terminal::new(TestBackend::new(140, 35)).unwrap();
-        terminal
-            .draw(|f| render_tags_tab(f, &app, f.area()))
-            .unwrap();
-        let content = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|c| c.symbol())
-            .collect::<String>();
-        assert!(content.contains("Tags (25)"));
-        assert!(content.contains(&render_pagination_text(1, 3)));
-        assert!(content.contains("rank10"));
-        assert!(content.contains("rank19"));
-        assert!(content.contains("► wanted-12"));
-        assert!(content.find("rank10").unwrap() < content.find("rank19").unwrap());
-        assert!(!content.contains("rank09"));
-        assert!(!content.contains("rank20"));
-        assert!(!content.contains("rank-negative"));
-    }
-
-    #[test]
     fn test_state_default() {
         let state = State::default();
         assert_eq!(state.table.items.len(), 0);
@@ -923,13 +392,8 @@ mod tests {
         assert_eq!(state.table.filter, "");
         assert_eq!(state.state_filter, StateFilter::AllStates);
         assert_eq!(state.sort, default_sort());
-        assert!(!state.metrics_loading);
-        assert!(state.metric_data_cpu.is_empty());
-        assert!(state.metric_data_network_in.is_empty());
-        assert!(state.metric_data_network_out.is_empty());
-        assert!(state.metric_data_network_packets_in.is_empty());
-        assert!(state.metric_data_network_packets_out.is_empty());
-        assert!(state.metric_data_metadata_no_token.is_empty());
+        assert!(state.detail.detail().is_none());
+        assert_eq!(state.detail.status(), crate::async_read::ReadStatus::Idle);
     }
 
     #[test]
@@ -1402,18 +866,6 @@ mod tests {
         assert_eq!(filtered[0].value, "alpha");
         assert_eq!(filtered[1].value, "beta");
         assert_eq!(filtered[2].value, "zebra");
-    }
-
-    #[test]
-    fn test_load_tags_integration() {
-        // Test that load_tags function exists and has correct signature
-        use crate::app::App;
-        let mut app = App::new_without_client("default".to_string(), None);
-        app.ec2_state.tags.items = vec![InstanceTag {
-            key: "test".to_string(),
-            value: "value".to_string(),
-        }];
-        assert_eq!(app.ec2_state.tags.items.len(), 1);
     }
 
     #[test]

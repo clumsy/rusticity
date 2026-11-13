@@ -217,7 +217,8 @@ pub(super) fn watches(alarm: &MetricAlarm, identifier: &str) -> bool {
             .any(|d| d.name() == Some("DBInstanceIdentifier") && d.value() == Some(identifier))
 }
 
-pub(super) fn alarm(a: &MetricAlarm) -> RdsAlarm {
+/// Name, state and condition of an alarm; the EC2 detail shares it.
+pub(crate) fn alarm(a: &MetricAlarm) -> RdsAlarm {
     let op = match a.comparison_operator() {
         Some(ComparisonOperator::GreaterThanThreshold) => ">",
         Some(ComparisonOperator::GreaterThanOrEqualToThreshold) => ">=",

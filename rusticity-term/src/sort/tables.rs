@@ -133,6 +133,16 @@ fn describe(app: &App, service: Service) -> Option<Described> {
                 crate::ui::acm::default_sort(),
             )
         }
+        Service::Ec2Instances if crate::ec2::detail::active(app) => {
+            let slot = crate::ec2::detail::slot(&app.ec2_state)?;
+            let table = app.ec2_state.detail.table(slot);
+            let all: Vec<ColumnId> = slot.columns().iter().map(|(id, _)| *id).collect();
+            Described::choice(
+                columns(&all, &table.visible_column_ids, Some),
+                &table.visible_column_ids,
+                table.sort,
+            )
+        }
         Service::Ec2Instances if app.ec2_state.current_instance.is_none() => Described::order(
             columns(&app.ec2_column_ids, &app.ec2_visible_column_ids, |id| {
                 crate::ec2::Column::from_id(id).map(|c| c.default_name())
@@ -369,6 +379,12 @@ pub(crate) fn choose(app: &mut App, service: Service, value: &'static str) -> bo
         Service::AcmCertificates => {
             toggle_order(&mut app.acm_state.sort, crate::ui::acm::default_sort());
             app.acm_state.certificates.reset();
+        }
+        Service::Ec2Instances if crate::ec2::detail::active(app) => {
+            let slot = crate::ec2::detail::slot(&app.ec2_state).unwrap();
+            let t = app.ec2_state.detail.table_mut(slot);
+            toggle_choice(&mut t.sort);
+            t.rows.reset();
         }
         Service::Ec2Instances => {
             toggle_order(&mut app.ec2_state.sort, crate::ui::ec2::default_sort());

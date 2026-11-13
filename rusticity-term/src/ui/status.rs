@@ -117,6 +117,7 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             crate::eventbridge::Level::Rule(_) => "rule",
         },
         Service::RdsInstances if app.rds_state.detail.source.is_some() => "database details",
+        Service::Ec2Instances if app.ec2_state.current_instance.is_some() => "instance details",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
         Service::DynamoDbTables => "DynamoDB tables",
@@ -295,17 +296,25 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.mode == Mode::Normal
         && (crate::kms::detail::active(app)
             || crate::secretsmanager::detail::active(app)
-            || crate::rds::detail::active(app))
+            || crate::rds::detail::active(app)
+            || crate::ec2::detail::active(app))
     {
         let mut hints = first_hint("⇤⇥", "tabs");
-        if let Some(label) = crate::rds::detail::table_focus_hint(app) {
+        if let Some(label) = crate::rds::detail::table_focus_hint(app)
+            .or_else(|| crate::ec2::detail::table_focus_hint(app))
+        {
             hints.extend(hint("f/F", label));
         }
         hints.extend(hint("↑↓", "scroll / select"));
         hints.extend(hint("i", "filter table"));
         hints.extend(hint("p", "preferences"));
         hints.extend(hint("^u/^d", "page"));
-        hints.extend(hint("y", "copy ARN"));
+        let copy = if crate::ec2::detail::active(app) {
+            "copy ID"
+        } else {
+            "copy ARN"
+        };
+        hints.extend(hint("y", copy));
         hints.extend(hint("^o", "console"));
         hints.extend(hint("^p", "print"));
         hints.extend(hint("^r", "refresh"));

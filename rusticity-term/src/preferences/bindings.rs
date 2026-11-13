@@ -41,6 +41,7 @@ enum Source {
     SecretsManagerSecretDetails,
     AcmCertificates,
     RdsInstanceDetails,
+    Ec2InstanceDetails,
     EventBridge,
 }
 
@@ -130,6 +131,7 @@ impl Source {
             {
                 Self::Ec2Tags
             }
+            Service::Ec2Instances if crate::ec2::detail::active(app) => Self::Ec2InstanceDetails,
             Service::IamUsers
                 if app.iam_state.current_user.is_some()
                     && app.iam_state.user_tab == iam::UserTab::Tags =>
@@ -342,6 +344,19 @@ impl Source {
                     None,
                 )
             }
+            Self::Ec2InstanceDetails => {
+                // Summary panes carry no columns and leak no list preferences.
+                let Some(slot) = crate::ec2::detail::slot(&app.ec2_state) else {
+                    return Preferences::columns_only(Vec::new(), false).read_only();
+                };
+                let ids: Vec<_> = slot.columns().iter().map(|(id, _)| *id).collect();
+                columns(
+                    &ids,
+                    &app.ec2_state.detail.table(slot).visible_column_ids,
+                    |id| Some(id.into()),
+                    None,
+                )
+            }
             Self::EventBridge => {
                 // Summary tabs carry no columns.
                 if !crate::eventbridge::is_table(app) {
@@ -448,6 +463,7 @@ impl Source {
             Self::AcmCertificates => app.acm_state.certificates.page_size,
             Self::EventBridge => crate::eventbridge::page_size(app),
             Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
+            Self::Ec2InstanceDetails => ec2_detail(app).rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
             Self::IamUserTags => app.iam_state.user_tags.page_size,
             Self::IamRoleTags => app.iam_state.tags.page_size,
@@ -506,6 +522,7 @@ impl Source {
                 .active_table_mut()
                 .rows
                 .set_page_size(size),
+            Self::Ec2InstanceDetails => ec2_detail_mut(app).rows.set_page_size(size),
             Self::Ec2Tags => app.ec2_state.tags.set_page_size(size),
             Self::IamUserTags => app.iam_state.user_tags.set_page_size(size),
             Self::IamRoleTags => app.iam_state.tags.set_page_size(size),
@@ -556,6 +573,7 @@ impl Source {
             Self::RdsInstanceDetails => {
                 &mut rds_detail_mut(app).active_table_mut().visible_column_ids
             }
+            Self::Ec2InstanceDetails => &mut ec2_detail_mut(app).visible_column_ids,
             _ => return None,
         })
     }
@@ -567,6 +585,18 @@ fn rds_detail(app: &App) -> &crate::rds::detail::View {
 
 fn rds_detail_mut(app: &mut App) -> &mut crate::rds::detail::View {
     app.rds_state.detail.view_mut().expect("rds detail source")
+}
+
+/// The current EC2 detail table; Alarms on a pane-only tab, so preferences
+/// that carry no columns still read a page size.
+fn ec2_detail(app: &App) -> &crate::ec2::detail::Table {
+    let slot = crate::ec2::detail::slot(&app.ec2_state).unwrap_or(crate::ec2::detail::Slot::Alarms);
+    app.ec2_state.detail.table(slot)
+}
+
+fn ec2_detail_mut(app: &mut App) -> &mut crate::ec2::detail::Table {
+    let slot = crate::ec2::detail::slot(&app.ec2_state).unwrap_or(crate::ec2::detail::Slot::Alarms);
+    app.ec2_state.detail.table_mut(slot)
 }
 
 fn secret_detail(app: &App) -> &crate::secretsmanager::detail::View {

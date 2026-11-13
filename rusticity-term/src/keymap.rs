@@ -273,11 +273,12 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => Some(Action::CancelQuit),
             _ => None,
         },
+        // `i`, `j` and `k` arrive as FilterInput: letters in the filter, and
+        // filter / down / up on the list (see App FilterInput).
         Mode::RegionPicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
-            KeyCode::Char('i') => Some(Action::EnterFilterMode),
-            KeyCode::Char('j') | KeyCode::Down => Some(Action::NextItem),
-            KeyCode::Char('k') | KeyCode::Up => Some(Action::PrevItem),
+            KeyCode::Down => Some(Action::NextItem),
+            KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::MeasureLatency)
@@ -309,7 +310,6 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
         },
         Mode::SessionPicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
-            KeyCode::Char('i') => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::LoadSession),
@@ -342,7 +342,6 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
         },
         Mode::ProfilePicker => match key.code {
             KeyCode::Esc => Some(Action::ExitFilterMode),
-            KeyCode::Char('i') => Some(Action::EnterFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),

@@ -1210,6 +1210,7 @@ impl App {
         if vpc_actions::handle_action(self, &action)
             || crate::rds::detail::handle_action(self, &action)
             || rds_actions::handle_action(self, &action)
+            || crate::ec2::detail::handle_action(self, &action)
         {
             return;
         }
@@ -1331,10 +1332,6 @@ impl App {
                 };
                 if should_navigate {
                     self.next_item();
-                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
-                    // In INSERT mode, 'j' goes to filter
-                    self.region_filter.push('j');
-                    self.region_picker_selected = 0;
                 }
             }
             Action::PrevItem => {
@@ -1348,10 +1345,6 @@ impl App {
                 };
                 if should_navigate {
                     self.prev_item();
-                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
-                    // In INSERT mode, 'k' goes to filter
-                    self.region_filter.push('k');
-                    self.region_picker_selected = 0;
                 }
             }
             Action::PageUp => self.page_up(),
@@ -1650,6 +1643,18 @@ impl App {
                 } else if self.mode == Mode::SessionPicker && self.session_filter_active {
                     self.session_filter.push(c);
                     self.session_picker_selected = 0;
+                } else if self.mode == Mode::RegionPicker {
+                    // The list has focus: `i` starts the filter, `j`/`k` move.
+                    match c {
+                        'i' => self.region_filter_active = true,
+                        'j' => self.next_item(),
+                        'k' => self.prev_item(),
+                        _ => {}
+                    }
+                } else if self.mode == Mode::ProfilePicker && c == 'i' {
+                    self.profile_filter_active = true;
+                } else if self.mode == Mode::SessionPicker && c == 'i' {
+                    self.session_filter_active = true;
                 } else if self.mode == Mode::InsightsInput {
                     match self.insights_state.insights.insights_focus {
                         InsightsFocus::Query => {
@@ -1992,13 +1997,6 @@ impl App {
                             | SqsQueueDetailTab::Encryption
                             | SqsQueueDetailTab::DeadLetterQueueRedriveTasks
                     )
-                {
-                    return;
-                }
-
-                // Block preferences for EC2 non-tag tabs
-                if self.current_service == Service::Ec2Instances
-                    && crate::ec2::actions::block_column_selector(self)
                 {
                     return;
                 }
@@ -2522,8 +2520,6 @@ impl App {
                         self.cloudtrail_state.event_json_scroll.saturating_sub(10);
                 } else if self.current_service == Service::LambdaFunctions {
                     crate::lambda::functions::scroll_up(self);
-                } else if self.current_service == Service::Ec2Instances {
-                    crate::ec2::actions::scroll_up(self);
                 } else if self.current_service == Service::SqsQueues
                     && self.sqs_state.current_queue.is_some()
                     && self.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring
@@ -3692,8 +3688,6 @@ impl App {
             && !self.lambda_state.is_metrics_loading()
         {
             crate::lambda::functions::scroll_down(self);
-        } else if self.current_service == Service::Ec2Instances {
-            crate::ec2::actions::scroll_down(self);
         } else if self.current_service == Service::SqsQueues
             && self.sqs_state.current_queue.is_some()
         {
@@ -9195,6 +9189,122 @@ mod region_latency_tests {
             app.region_filter, "tok",
             "'k' must be typed into filter (not navigate up) when filter is active"
         );
+    }
+
+    #[test]
+    fn test_picker_filters_take_i_j_and_k_and_arrows_never_type() {
+        // Regression: `i` could not be typed into the Region, Profile or
+        // Session filter, and Down/Up typed `j`/`k` into the Region filter.
+        use crate::keymap::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let press = |app: &mut App, code: KeyCode| {
+            let key = KeyEvent::new(code, KeyModifiers::NONE);
+            if let Some(action) = handle_key(key, app.mode) {
+                app.handle_action(action);
+            }
+        };
+        let mut app = test_app();
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = false;
+        app.region_filter.clear();
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.region_filter_active, "i on the list starts the filter");
+        for c in "ijk".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.region_filter, "ijk");
+
+        app.mode = Mode::ProfilePicker;
+        app.profile_filter_active = false;
+        app.profile_filter.clear();
+        for c in "iadmin".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(app.profile_filter_active);
+        assert_eq!(app.profile_filter, "admin");
+
+        app.mode = Mode::SessionPicker;
+        app.session_filter_active = false;
+        app.session_filter.clear();
+        for c in "iis".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(app.session_filter_active);
+        assert_eq!(app.session_filter, "is");
+    }
+
+    #[test]
+    fn test_every_picker_filter_takes_every_letter_and_digit() {
+        // Guard against any single-letter hotkey taking a key from a filter
+        // that is being typed into.
+        use crate::keymap::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.";
+        let typed = |mode: Mode, setup: fn(&mut App), read: fn(&App) -> String| {
+            let mut app = test_app();
+            app.mode = mode;
+            setup(&mut app);
+            for c in text.chars() {
+                let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+                if let Some(action) = handle_key(key, app.mode) {
+                    app.handle_action(action);
+                }
+            }
+            assert_eq!(app.mode, mode, "{mode:?} stays open");
+            read(&app)
+        };
+        // (picker, start typing, read its filter)
+        type Case = (Mode, fn(&mut App), fn(&App) -> String);
+        let cases: [Case; 5] = [
+            (
+                Mode::ServicePicker,
+                |a| a.service_picker.filter_active = true,
+                |a| a.service_picker.filter.clone(),
+            ),
+            (
+                Mode::RegionPicker,
+                |a| a.region_filter_active = true,
+                |a| a.region_filter.clone(),
+            ),
+            (
+                Mode::ProfilePicker,
+                |a| a.profile_filter_active = true,
+                |a| a.profile_filter.clone(),
+            ),
+            (
+                Mode::SessionPicker,
+                |a| a.session_filter_active = true,
+                |a| a.session_filter.clone(),
+            ),
+            (Mode::TabPicker, |_| {}, |a| a.tab_filter.clone()),
+        ];
+        for (mode, setup, read) in cases {
+            assert_eq!(typed(mode, setup, read), text, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn test_region_picker_list_moves_with_j_k_and_arrows() {
+        use crate::keymap::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = test_app();
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = false;
+        app.region_filter.clear();
+        app.region_picker_selected = 0;
+        for code in [KeyCode::Char('j'), KeyCode::Down, KeyCode::Down] {
+            let action = handle_key(KeyEvent::new(code, KeyModifiers::NONE), app.mode).unwrap();
+            app.handle_action(action);
+        }
+        assert_eq!(app.region_picker_selected, 3);
+        for code in [KeyCode::Char('k'), KeyCode::Up] {
+            let action = handle_key(KeyEvent::new(code, KeyModifiers::NONE), app.mode).unwrap();
+            app.handle_action(action);
+        }
+        assert_eq!(app.region_picker_selected, 1);
+        assert!(app.region_filter.is_empty() && !app.region_filter_active);
     }
 
     #[test]
@@ -15896,78 +16006,45 @@ mod lambda_version_tab_tests {
     }
 
     #[test]
-    fn test_ec2_instance_detail_tabs_no_preferences() {
+    fn test_ec2_list_opens_preferences_with_or_without_an_expanded_row() {
+        // Regression: an expanded list row blocked `p` on EC2 > Instances.
         let mut app = test_app();
         app.current_service = Service::Ec2Instances;
         app.service_selected = true;
-        app.ec2_state.table.expanded_item = Some(0);
-        app.mode = Mode::Normal;
-
-        // Details tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Details;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // StatusAndAlarms tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::StatusAndAlarms;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // Monitoring tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Monitoring;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // Security tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Security;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // Networking tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Networking;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // Storage tab should NOT allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Storage;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::Normal);
-
-        // Tags tab SHOULD allow preferences
-        app.ec2_state.detail_tab = Ec2DetailTab::Tags;
-        app.handle_action(Action::OpenColumnSelector);
-        assert_eq!(app.mode, Mode::ColumnSelector);
+        // A tab left over from an earlier instance does not matter on the list.
+        for (expanded, tab) in [
+            (None, Ec2DetailTab::Details),
+            (Some(0), Ec2DetailTab::Details),
+            (Some(0), Ec2DetailTab::Tags),
+        ] {
+            app.mode = Mode::Normal;
+            app.ec2_state.table.expanded_item = expanded;
+            app.ec2_state.detail_tab = tab;
+            app.handle_action(Action::OpenColumnSelector);
+            assert_eq!(app.mode, Mode::ColumnSelector, "{expanded:?} {tab:?}");
+        }
     }
 
     #[test]
     fn test_ec2_monitoring_ctrl_u_scrolls_up() {
         // Regression: Ctrl+D (PageDown) scrolls monitoring graphs down but
-        // Ctrl+U (PageUp) did NOT scroll up — it called page_up_normal which
-        // only pages the instance table, not the monitoring scroll.
+        // Ctrl+U (PageUp) did NOT scroll up.
         let mut app = test_app();
         app.current_service = Service::Ec2Instances;
         app.service_selected = true;
         app.mode = Mode::Normal;
         app.ec2_state.current_instance = Some("i-abc".to_string());
         app.ec2_state.detail_tab = Ec2DetailTab::Monitoring;
+        app.ec2_state.detail.monitoring_scroll = 3;
 
-        // Set scroll to non-zero
-        app.ec2_state.set_monitoring_scroll(3);
-        assert_eq!(app.ec2_state.monitoring_scroll(), 3);
-
-        // Ctrl+U (PageUp) must scroll monitoring up
         app.handle_action(Action::PageUp);
         assert_eq!(
-            app.ec2_state.monitoring_scroll(),
-            2,
+            app.ec2_state.detail.monitoring_scroll, 2,
             "Ctrl+U must scroll monitoring up by 1"
         );
-
-        // Ctrl+D (PageDown) scrolls down — verify symmetry
         app.handle_action(Action::PageDown);
         assert_eq!(
-            app.ec2_state.monitoring_scroll(),
-            3,
+            app.ec2_state.detail.monitoring_scroll, 3,
             "Ctrl+D must scroll monitoring down by 1"
         );
     }

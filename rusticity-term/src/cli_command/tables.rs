@@ -275,21 +275,50 @@ fn vpc(_app: &App) -> Result<Option<Target>, String> {
 // Instances table → describe-instances with no InstanceIds. The view's state
 // filter is a CLIENT-side filter over already-loaded rows, NOT a server-side AWS
 // Filter, so it is deliberately not translated into a `--filters` argument (that
-// would silently change the command's meaning). The entered instance detail is a
-// summary view → None.
+// would silently change the command's meaning). Entered instance: each tab → the
+// read behind it, scoped to the instance (Security to its groups once read);
+// Monitoring is charts → None.
 fn ec2(app: &App) -> Result<Option<Target>, String> {
-    if let Some(instance) = &app.ec2_state.current_instance {
-        if app.ec2_state.detail_tab == crate::ui::ec2::DetailTab::Tags {
-            return Ok(Some(view(
-                "ec2 describe-tags",
-                json!({"Filters":[{"Name":"resource-id","Values":[instance]}]}),
-                None,
-                None,
-            )));
+    use crate::ui::ec2::DetailTab;
+    let Some(instance) = &app.ec2_state.current_instance else {
+        return Ok(Some(view("ec2 describe-instances", json!({}), None, None)));
+    };
+    let attached = || json!({"Filters":[{"Name":"attachment.instance-id","Values":[instance]}]});
+    let (operation, input) = match app.ec2_state.detail_tab {
+        DetailTab::Details => (
+            "ec2 describe-instances",
+            json!({ "InstanceIds": [instance] }),
+        ),
+        DetailTab::StatusAndAlarms => (
+            "ec2 describe-instance-status",
+            json!({ "InstanceIds": [instance], "IncludeAllInstances": true }),
+        ),
+        DetailTab::Monitoring => return Ok(None),
+        DetailTab::Security => {
+            let Some(detail) = app.ec2_state.detail.detail() else {
+                return Ok(None);
+            };
+            let groups: Vec<&str> = detail
+                .security_groups
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect();
+            if groups.is_empty() {
+                return Ok(None);
+            }
+            (
+                "ec2 describe-security-group-rules",
+                json!({"Filters":[{"Name":"group-id","Values":groups}]}),
+            )
         }
-        return Ok(None);
-    }
-    Ok(Some(view("ec2 describe-instances", json!({}), None, None)))
+        DetailTab::Networking => ("ec2 describe-network-interfaces", attached()),
+        DetailTab::Storage => ("ec2 describe-volumes", attached()),
+        DetailTab::Tags => (
+            "ec2 describe-tags",
+            json!({"Filters":[{"Name":"resource-id","Values":[instance]}]}),
+        ),
+    };
+    Ok(Some(view(operation, input, None, None)))
 }
 
 // ── KMS ────────────────────────────────────────────────────────────────────────

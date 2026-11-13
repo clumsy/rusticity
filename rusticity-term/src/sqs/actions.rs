@@ -2,9 +2,8 @@ use crate::app::{App, ViewMode};
 use crate::common::{CyclicEnum, InputFocus};
 use crate::ui::monitoring::MonitoringState;
 use crate::ui::sqs::{
-    filtered_eventbridge_pipes, filtered_lambda_triggers, filtered_queues, filtered_subscriptions,
-    filtered_tags, QueueDetailTab as SqsQueueDetailTab, FILTER_CONTROLS,
-    SUBSCRIPTION_FILTER_CONTROLS,
+    filtered_eventbridge_pipes, filtered_lambda_triggers, filtered_subscriptions, filtered_tags,
+    QueueDetailTab as SqsQueueDetailTab, FILTER_CONTROLS, SUBSCRIPTION_FILTER_CONTROLS,
 };
 
 // ── Filter helpers ────────────────────────────────────────────────────────────
@@ -111,7 +110,7 @@ pub fn next_item(app: &mut App) {
             app.sqs_state.subscriptions.next_item(filtered.len());
         }
     } else {
-        let filtered = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+        let filtered = crate::ui::sqs::visible_queues(app);
         if !filtered.is_empty() {
             app.sqs_state.queues.next_item(filtered.len());
         }
@@ -181,7 +180,7 @@ pub fn scroll_up_fast(app: &mut App) {
 }
 
 pub fn page_down_normal(app: &mut App) {
-    let filtered = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+    let filtered = crate::ui::sqs::visible_queues(app);
     app.sqs_state.queues.page_down(filtered.len());
 }
 
@@ -190,8 +189,7 @@ pub fn page_up_normal(app: &mut App) {
 }
 
 pub fn go_to_page(app: &mut App, page: usize) {
-    let filtered_count =
-        filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter).len();
+    let filtered_count = crate::ui::sqs::visible_queues(app).len();
     app.sqs_state.queues.goto_page(page, filtered_count);
 }
 
@@ -277,7 +275,7 @@ pub fn prev_detail_tab(app: &mut App) {
 
 pub fn select_item(app: &mut App) {
     if app.sqs_state.current_queue.is_none() {
-        let filtered = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+        let filtered = crate::ui::sqs::visible_queues(app);
         if let Some(queue) = app.sqs_state.queues.get_selected(&filtered) {
             app.sqs_state.current_queue = Some(queue.url.clone());
             if app.sqs_state.detail_tab == SqsQueueDetailTab::Monitoring {
@@ -334,7 +332,7 @@ pub fn yank(app: &App) {
     if let Some(queue_url) = &app.sqs_state.current_queue {
         app.clipboard.request_text(queue_url);
     } else {
-        let filtered = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+        let filtered = crate::ui::sqs::visible_queues(app);
         if let Some(q) = app.sqs_state.queues.get_selected(&filtered) {
             app.clipboard.request_text(&q.url);
         }

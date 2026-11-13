@@ -25,6 +25,8 @@ use ratatui::{prelude::*, widgets::*};
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub table: TableState<LambdaFunction>,
     /// Tab-owned background read backing `table`.
     pub(crate) inventory: crate::inventory_read::OwnedInventory<LambdaFunction>,
@@ -84,6 +86,7 @@ impl State {
 
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             table: TableState::new(),
             inventory: Default::default(),
             current_function: None,
@@ -256,6 +259,8 @@ impl VersionDetailTab {
 }
 
 pub struct ApplicationState {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub table: TableState<LambdaApplication>,
     pub input_focus: InputFocus,
     pub current_application: Option<String>,
@@ -294,6 +299,7 @@ impl Default for ApplicationState {
 impl ApplicationState {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             table: TableState::new(),
             input_focus: InputFocus::Filter,
             current_application: None,
@@ -379,13 +385,18 @@ pub fn render_functions(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    let sort_header = app.lambda_state.sort.header(
+        &app.lambda_state.function_visible_column_ids,
+        |id| crate::sort::name::<LambdaFunction, _>(LambdaColumn::from_id(id)),
+        ("Last modified", SortDirection::Desc),
+    );
     let config = TableConfig {
         items: view.items,
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Last modified",
-        sort_direction: SortDirection::Desc,
+        sort_column: &sort_header.0,
+        sort_direction: sort_header.1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|func: &LambdaFunction| {
@@ -1313,13 +1324,20 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    let app_sort_header = app.lambda_application_state.sort.header(
+        &app.lambda_application_visible_column_ids,
+        |id| {
+            crate::sort::name::<LambdaApplication, _>(crate::lambda::ApplicationColumn::from_id(id))
+        },
+        ("Last modified", SortDirection::Desc),
+    );
     let config = TableConfig {
         items: view.items,
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Last modified",
-        sort_direction: SortDirection::Desc,
+        sort_column: &app_sort_header.0,
+        sort_direction: app_sort_header.1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|app: &LambdaApplication| {
@@ -1333,19 +1351,32 @@ pub fn render_applications(frame: &mut Frame, app: &App, area: Rect) {
 
 // Lambda-specific helper functions
 pub fn filtered_lambda_functions(app: &App) -> Vec<&LambdaFunction> {
-    filter_by_fields(
+    let mut rows = filter_by_fields(
         &app.lambda_state.table.items,
         &app.lambda_state.table.filter,
         |f| [&f.name, &f.description, &f.runtime],
-    )
+    );
+    let state = &app.lambda_state;
+    state
+        .sort
+        .apply(&mut rows, &state.function_visible_column_ids, |row, id| {
+            crate::sort::cell(LambdaColumn::from_id(id), row)
+        });
+    rows
 }
 
 pub fn filtered_lambda_applications(app: &App) -> Vec<&LambdaApplication> {
-    filter_by_fields(
+    let mut rows = filter_by_fields(
         &app.lambda_application_state.table.items,
         &app.lambda_application_state.table.filter,
         |a| [&a.name, &a.description, &a.status],
-    )
+    );
+    app.lambda_application_state.sort.apply(
+        &mut rows,
+        &app.lambda_application_visible_column_ids,
+        |row, id| crate::sort::cell(crate::lambda::ApplicationColumn::from_id(id), row),
+    );
+    rows
 }
 
 pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {

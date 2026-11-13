@@ -94,6 +94,8 @@ impl DetailTab {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub file_systems: TableState<FsxFileSystem>,
     pub input_focus: InputFocus,
     pub current_file_system: Option<String>,
@@ -113,6 +115,7 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             file_systems: TableState::new(),
             input_focus: InputFocus::Filter,
             current_file_system: None,
@@ -126,11 +129,17 @@ impl State {
 }
 
 pub fn filtered_fsx_file_systems(app: &App) -> Vec<&FsxFileSystem> {
-    filter_by_fields(
+    let mut rows = filter_by_fields(
         &app.fsx_state.file_systems.items,
         &app.fsx_state.file_systems.filter,
         |fs| [&fs.name, &fs.file_system_id, &fs.file_system_type],
-    )
+    );
+    app.fsx_state
+        .sort
+        .apply(&mut rows, &app.fsx_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::fsx::fs::Column::from_id(id), row)
+        });
+    rows
 }
 
 pub fn render_file_systems(frame: &mut Frame, app: &App, area: Rect) {
@@ -648,8 +657,8 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Creation time",
-        sort_direction: SortDirection::Desc,
+        sort_column: &fs_sort_header(app).0,
+        sort_direction: fs_sort_header(app).1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|fs: &FsxFileSystem| {
@@ -659,6 +668,15 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     render_table(frame, config);
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn fs_sort_header(app: &App) -> (String, SortDirection) {
+    app.fsx_state.sort.header(
+        &app.fsx_visible_column_ids,
+        |id| crate::sort::name::<FsxFileSystem, _>(crate::fsx::fs::Column::from_id(id)),
+        ("Creation time", SortDirection::Desc),
+    )
 }
 
 #[cfg(test)]

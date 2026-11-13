@@ -149,6 +149,10 @@ impl AccessHistoryFilter {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub users_sort: crate::sort::Choice,
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub roles_sort: crate::sort::Choice,
     pub users: TableState<IamUser>,
     pub current_user: Option<String>,
     pub user_tab: UserTab,
@@ -189,6 +193,8 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            users_sort: Default::default(),
+            roles_sort: Default::default(),
             users: TableState::new(),
             current_user: None,
             user_tab: UserTab::Permissions,
@@ -284,8 +290,8 @@ pub fn render_user_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: app.iam_state.users.selected - app.iam_state.users.scroll_offset,
         expanded_index,
         columns: &columns,
-        sort_column: "User name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &user_sort_header(app).0,
+        sort_direction: user_sort_header(app).1,
         title: format_title(&format!("Users ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|user: &&IamUser| {
@@ -633,8 +639,8 @@ pub fn render_role_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: app.iam_state.roles.selected % page_size,
         expanded_index,
         columns: &columns,
-        sort_column: "Role name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &role_sort_header(app).0,
+        sort_direction: role_sort_header(app).1,
         title: format_title(&format!("Roles ({})", filtered_count)),
         area: chunks[1],
         is_active: app.mode != Mode::ColumnSelector,
@@ -1294,19 +1300,31 @@ pub fn render_last_accessed_table(frame: &mut Frame, app: &App, area: Rect) {
 
 // IAM-specific helper functions
 pub fn filtered_iam_users(app: &App) -> Vec<&IamUser> {
-    filter_by_field(
+    let mut rows = filter_by_field(
         &app.iam_state.users.items,
         &app.iam_state.users.filter,
         |u| &u.user_name,
-    )
+    );
+    app.iam_state
+        .users_sort
+        .apply(&mut rows, &app.iam_user_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::iam::UserColumn::from_id(id), &row)
+        });
+    rows
 }
 
 pub fn filtered_iam_roles(app: &App) -> Vec<&IamRole> {
-    filter_by_field(
+    let mut rows = filter_by_field(
         &app.iam_state.roles.items,
         &app.iam_state.roles.filter,
         |r| &r.role_name,
-    )
+    );
+    app.iam_state
+        .roles_sort
+        .apply(&mut rows, &app.iam_role_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::iam::RoleColumn::from_id(id), row)
+        });
+    rows
 }
 
 /// Canonical group-list filter: case-insensitive `contains` on `group_name`,
@@ -1575,6 +1593,24 @@ pub async fn load_iam_user_groups(app: &mut App) -> anyhow::Result<()> {
     app.iam_state.groups.items = iam_groups;
 
     Ok(())
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn user_sort_header(app: &App) -> (String, SortDirection) {
+    app.iam_state.users_sort.header(
+        &app.iam_user_visible_column_ids,
+        |id| crate::sort::name::<&IamUser, _>(crate::iam::UserColumn::from_id(id)),
+        ("User name", SortDirection::Asc),
+    )
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn role_sort_header(app: &App) -> (String, SortDirection) {
+    app.iam_state.roles_sort.header(
+        &app.iam_role_visible_column_ids,
+        |id| crate::sort::name::<IamRole, _>(crate::iam::RoleColumn::from_id(id)),
+        ("Role name", SortDirection::Asc),
+    )
 }
 
 #[cfg(test)]

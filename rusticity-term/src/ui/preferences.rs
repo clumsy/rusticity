@@ -27,6 +27,27 @@ pub(super) fn render_rows(prefs: &Preferences) -> (Vec<ListItem<'static>>, &'sta
                     Style::default().fg(Color::DarkGray),
                 ))
             }
+            PreferenceRow::Sort {
+                label,
+                selected,
+                direction,
+                ..
+            } => {
+                let text = match direction {
+                    Some(crate::common::SortDirection::Asc) => format!("{label} ↑"),
+                    Some(crate::common::SortDirection::Desc) => format!("{label} ↓"),
+                    None => label.to_string(),
+                };
+                if prefs.is_enabled() {
+                    super::render_radio_item(&text, *selected, false).0
+                } else {
+                    let (radio, _) = super::render_radio(*selected);
+                    ListItem::new(Span::styled(
+                        format!("{radio} {text}"),
+                        Style::default().fg(Color::DarkGray),
+                    ))
+                }
+            }
             PreferenceRow::Toggle { label, enabled, .. } if prefs.is_enabled() => {
                 super::render_column_toggle_string(label, *enabled).0
             }
@@ -100,6 +121,7 @@ mod tests {
             match row {
                 PreferenceRow::Section(label)
                 | PreferenceRow::Radio { label, .. }
+                | PreferenceRow::Sort { label, .. }
                 | PreferenceRow::Toggle { label, .. } => assert!(text.contains(label)),
                 PreferenceRow::Column(column) => {
                     // Wide glyphs have blank continuation cells in the buffer.

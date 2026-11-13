@@ -617,6 +617,11 @@ fn render_slot(
         .prepare_view(table.filtered(), TableWindow::SelectedPage);
     let spec = slot.columns();
     let columns = columns(spec, &table.visible_column_ids);
+    let sort_header = table.sort.header(
+        &table.visible_column_ids,
+        |id| Some(id.to_string()),
+        ("", SortDirection::Asc),
+    );
     render_table(
         frame,
         TableConfig {
@@ -624,8 +629,8 @@ fn render_slot(
             selected_index: prepared.selected_index,
             expanded_index: prepared.expanded_index,
             columns: &columns,
-            sort_column: "",
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_header.0,
+            sort_direction: sort_header.1,
             title: ui::format_title(&format!("{} ({})", slot.name(), prepared.total_items)),
             area,
             get_expanded_content: Some(Box::new(move |row: &Row| {

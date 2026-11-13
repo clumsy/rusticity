@@ -236,6 +236,8 @@ pub(crate) struct Table {
     pub(crate) rows: TableState<Row>,
     pub(crate) visible_column_ids: Vec<crate::common::ColumnId>,
     focus: InputFocus,
+    pub(crate) sort: crate::sort::Choice,
+    columns: &'static [(&'static str, u16)],
 }
 
 impl Table {
@@ -244,12 +246,15 @@ impl Table {
             rows: TableState::new(),
             visible_column_ids: slot.columns().iter().map(|(id, _)| *id).collect(),
             focus: InputFocus::Filter,
+            sort: Default::default(),
+            columns: slot.columns(),
         }
     }
 
-    fn filtered(&self) -> Vec<&Row> {
+    pub(crate) fn filtered(&self) -> Vec<&Row> {
         let filter = self.rows.filter.to_lowercase();
-        self.rows
+        let mut rows: Vec<&Row> = self
+            .rows
             .items
             .iter()
             .filter(|row| {
@@ -259,7 +264,17 @@ impl Table {
                         .iter()
                         .any(|cell| cell.to_lowercase().contains(&filter))
             })
-            .collect()
+            .collect();
+        let columns = self.columns;
+        self.sort
+            .apply(&mut rows, &self.visible_column_ids, |row, id| {
+                columns
+                    .iter()
+                    .position(|(name, _)| *name == id)
+                    .and_then(|i| row.cells.get(i).cloned())
+                    .unwrap_or_default()
+            });
+        rows
     }
 }
 

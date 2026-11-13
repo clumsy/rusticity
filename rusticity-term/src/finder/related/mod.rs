@@ -119,10 +119,7 @@ pub fn selected(app: &App) -> Option<Resource> {
             if let Some(name) = &app.sqs_state.current_queue {
                 return sqs_from_items(app, name, region);
             }
-            let filtered = crate::ui::sqs::filtered_queues(
-                &app.sqs_state.queues.items,
-                &app.sqs_state.queues.filter,
-            );
+            let filtered = crate::ui::sqs::visible_queues(app);
             let queue = filtered.get(app.sqs_state.queues.selected)?;
             sqs_from_items(app, &queue.name, region)
         }

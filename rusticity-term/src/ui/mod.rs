@@ -4005,7 +4005,8 @@ mod tests {
         // Should jump to page size section (9 columns + 1 empty + 1 header = 11)
         assert_eq!(app.column_selector_index, 11);
 
-        // Next should cycle back to columns
+        // Then Sort by, then back to columns
+        app.handle_action(crate::keymap::Action::NextPreferences);
         app.handle_action(crate::keymap::Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }

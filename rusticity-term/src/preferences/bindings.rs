@@ -384,10 +384,7 @@ impl Source {
             ),
             _ => Preferences::table(cols, self.page_size(app)),
         };
-        let prefs = match self.sort_choices(app) {
-            Some((choices, order)) => crate::sort::with_sort(prefs, &choices, order),
-            None => prefs,
-        };
+
         // Existing non-table panes show the parent schema, but cannot mutate it.
         let read_only = match self {
             Self::EfsFiles => app.efs_state.current_file_system.is_some(),
@@ -399,86 +396,6 @@ impl Source {
             prefs.read_only()
         } else {
             prefs
-        }
-    }
-
-    /// Visible columns to sort by and the order in effect, for the tables
-    /// that offer the shared sort chooser.
-    fn sort_choices(
-        self,
-        app: &App,
-    ) -> Option<(Vec<(ColumnId, &'static str)>, crate::sort::SortOrder)> {
-        // Column order, not visibility order, so toggling a column twice
-        // restores the same rows.
-        fn pick<C: Copy>(
-            all: &[ColumnId],
-            visible: &[ColumnId],
-            from_id: fn(&str) -> Option<C>,
-            spec: fn(C) -> (ColumnId, &'static str),
-            order: crate::sort::SortOrder,
-            default: crate::sort::SortOrder,
-        ) -> (Vec<(ColumnId, &'static str)>, crate::sort::SortOrder) {
-            let choices = all
-                .iter()
-                .filter(|id| visible.contains(id))
-                .filter_map(|id| from_id(id))
-                .map(spec)
-                .collect();
-            (choices, order.effective(default, visible))
-        }
-        use crate::ui;
-        Some(match self {
-            Self::RdsInstances => pick(
-                &app.rds_state.column_ids,
-                &app.rds_state.visible_column_ids,
-                RdsColumn::from_id,
-                |c| (c.id(), c.default_name()),
-                app.rds_state.sort,
-                ui::rds::default_sort(),
-            ),
-            Self::VpcVpcs => pick(
-                &app.vpc_state.column_ids,
-                &app.vpc_state.visible_column_ids,
-                crate::vpc::columns::Column::from_id,
-                |c| (c.id(), c.default_name()),
-                app.vpc_state.sort,
-                ui::vpc::default_sort(),
-            ),
-            Self::SecretsManagerSecrets => pick(
-                &app.secretsmanager_state.column_ids,
-                &app.secretsmanager_state.visible_column_ids,
-                crate::secretsmanager::columns::Column::from_id,
-                |c| (c.id(), c.default_name()),
-                app.secretsmanager_state.sort,
-                ui::secretsmanager::default_sort(),
-            ),
-            Self::AcmCertificates => pick(
-                &app.acm_state.column_ids,
-                &app.acm_state.visible_column_ids,
-                crate::acm::columns::Column::from_id,
-                |c| (c.id(), c.default_name()),
-                app.acm_state.sort,
-                ui::acm::default_sort(),
-            ),
-            _ => return None,
-        })
-    }
-
-    /// Apply a sort choice and show the first row of the new order.
-    fn choose_sort(self, app: &mut App, group: &str, value: &'static str) {
-        let (order, table_reset): (&mut crate::sort::SortOrder, fn(&mut App)) = match self {
-            Self::RdsInstances => (&mut app.rds_state.sort, |a| a.rds_state.instances.reset()),
-            Self::VpcVpcs => (&mut app.vpc_state.sort, |a| a.vpc_state.vpcs.reset()),
-            Self::SecretsManagerSecrets => (&mut app.secretsmanager_state.sort, |a| {
-                a.secretsmanager_state.secrets.reset()
-            }),
-            Self::AcmCertificates => (&mut app.acm_state.sort, |a| {
-                a.acm_state.certificates.reset()
-            }),
-            _ => return,
-        };
-        if order.choose(group, value) {
-            table_reset(app);
         }
     }
 
@@ -672,9 +589,10 @@ pub(crate) fn active(app: &App) -> Option<Preferences> {
 
 /// Explicit service routing also supports legacy service entry points used by callers/tests.
 pub(crate) fn model_for(app: &App, service: Service) -> Preferences {
-    Source::for_service(app, service)
+    let prefs = Source::for_service(app, service)
         .map(|source| source.model(app))
-        .unwrap_or_else(|| Panel::for_service(app, service).model(app))
+        .unwrap_or_else(|| Panel::for_service(app, service).model(app));
+    crate::sort::tables::extend(app, service, prefs)
 }
 
 pub(crate) fn activate_active(app: &mut App) -> bool {
@@ -683,6 +601,12 @@ pub(crate) fn activate_active(app: &mut App) -> bool {
 }
 
 pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
+    if let Some(PreferenceAction::SetSort { value }) =
+        model_for(app, service).action(app.column_selector_index)
+    {
+        crate::sort::tables::choose(app, service, value);
+        return true;
+    }
     let Some(source) = Source::for_service(app, service) else {
         Panel::for_service(app, service).activate(app);
         return true;
@@ -691,7 +615,6 @@ pub(crate) fn activate_for(app: &mut App, service: Service) -> bool {
     let previous_rds_options = RdsColumn::inventory_options(&app.rds_state.visible_column_ids);
     match model.action(app.column_selector_index) {
         Some(PreferenceAction::SetPageSize(size)) => source.set_page_size(app, size),
-        Some(PreferenceAction::SetRadio { group, value }) => source.choose_sort(app, group, value),
         Some(PreferenceAction::SetColumnVisibility { id, visible }) => {
             if matches!(source, Source::DdbItems) {
                 let hidden = &mut app.dynamodb_state.item_hidden_columns;

@@ -6,8 +6,7 @@ use crate::common::{ColumnId, SortDirection};
 use crate::preferences::Preferences;
 use std::cmp::Ordering;
 
-pub(crate) const COLUMN_GROUP: &str = "sort-column";
-pub(crate) const DIRECTION_GROUP: &str = "sort-direction";
+pub(crate) mod tables;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SortOrder {
@@ -30,42 +29,124 @@ impl SortOrder {
         }
     }
 
-    /// Apply a Preferences radio choice. Returns true when it was a sort row.
-    pub fn choose(&mut self, group: &str, value: &'static str) -> bool {
-        match group {
-            COLUMN_GROUP => self.column = value,
-            DIRECTION_GROUP => {
-                self.direction = if value == "desc" {
-                    SortDirection::Desc
-                } else {
-                    SortDirection::Asc
-                }
-            }
-            _ => return false,
-        }
-        true
+    /// Space on a "Sort by" row: the column in effect flips direction, any
+    /// other column becomes the order, ascending. `visible` decides which
+    /// column is in effect, so a hidden choice starts over from the default.
+    pub fn toggle(&mut self, value: &'static str, default: SortOrder, visible: &[&str]) {
+        let current = self.effective(default, visible);
+        *self = if current.column == value {
+            SortOrder::new(value, flip(current.direction))
+        } else {
+            SortOrder::new(value, SortDirection::Asc)
+        };
     }
 }
 
-/// Add "Sort by" (the visible columns) and "Sort direction" to a table's
-/// preferences, marking the order in effect.
+fn flip(direction: SortDirection) -> SortDirection {
+    match direction {
+        SortDirection::Asc => SortDirection::Desc,
+        SortDirection::Desc => SortDirection::Asc,
+    }
+}
+
+/// The value of the "Default order" row: keep the order the table had
+/// before any choice, which is each view's own order.
+pub(crate) const DEFAULT_VALUE: &str = "default";
+
+/// A user choice for a table whose default order is its own: no column
+/// means that order is kept. Used by every table except the five lists
+/// that have an explicit `SortOrder` default.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Choice {
+    pub column: Option<ColumnId>,
+    pub direction: SortDirection,
+}
+
+impl Choice {
+    /// The order to apply, if any: a chosen column that is still visible.
+    pub fn effective(self, visible: &[&str]) -> Option<SortOrder> {
+        self.column
+            .filter(|c| visible.contains(c))
+            .map(|column| SortOrder::new(column, self.direction))
+    }
+
+    /// Space on a "Sort by" row: "Default order" clears the choice, the
+    /// column in effect flips direction, any other column starts ascending.
+    pub fn toggle(&mut self, value: &'static str, visible: &[&str]) {
+        *self = if value == DEFAULT_VALUE {
+            Choice::default()
+        } else if self.effective(visible).is_some_and(|o| o.column == value) {
+            Choice {
+                column: Some(value),
+                direction: flip(self.direction),
+            }
+        } else {
+            Choice {
+                column: Some(value),
+                direction: SortDirection::Asc,
+            }
+        };
+    }
+
+    /// Sort `rows` when a column is in effect; otherwise leave them as they are.
+    pub fn apply<T>(
+        self,
+        rows: &mut Vec<&T>,
+        visible: &[&str],
+        cell: impl Fn(&T, ColumnId) -> String,
+    ) {
+        if let Some(order) = self.effective(visible) {
+            apply(rows, order, cell);
+        }
+    }
+
+    /// Header name and direction to show: the chosen column, else `fallback`.
+    pub fn header(
+        self,
+        visible: &[&str],
+        name: impl Fn(ColumnId) -> Option<String>,
+        fallback: (&str, SortDirection),
+    ) -> (String, SortDirection) {
+        self.effective(visible)
+            .and_then(|o| name(o.column).map(|n| (n, o.direction)))
+            .unwrap_or((fallback.0.to_string(), fallback.1))
+    }
+}
+
+/// "Sort by" with a "Default order" row first, then the visible columns.
+/// The column in effect shows its direction.
+pub(crate) fn with_choice(
+    prefs: Preferences,
+    columns: &[(ColumnId, &'static str)],
+    choice: Choice,
+    visible: &[&str],
+) -> Preferences {
+    let mut choices = vec![(DEFAULT_VALUE, "Default order")];
+    choices.extend_from_slice(columns);
+    let selected = match choice.effective(visible) {
+        Some(order) => (order.column, Some(order.direction)),
+        None => (DEFAULT_VALUE, None),
+    };
+    prefs.sort_group(&choices, selected)
+}
+
+/// The text a table column shows for `row`; empty for an unknown column.
+pub fn cell<T, C: crate::ui::table::Column<T>>(column: Option<C>, row: &T) -> String {
+    column.map(|c| c.render(row).0).unwrap_or_default()
+}
+
+/// The header name of a table column; `None` for an unknown column.
+pub fn name<T, C: crate::ui::table::Column<T>>(column: Option<C>) -> Option<String> {
+    column.map(|c| c.name().to_string())
+}
+
+/// "Sort by" (the visible columns), marking the order in effect.
 pub(crate) fn with_sort(
     prefs: Preferences,
     choices: &[(ColumnId, &'static str)],
     order: SortOrder,
 ) -> Preferences {
-    let direction = match order.direction {
-        SortDirection::Asc => "asc",
-        SortDirection::Desc => "desc",
-    };
-    prefs
-        .radio_group(COLUMN_GROUP, "Sort by", choices, order.column)
-        .radio_group(
-            DIRECTION_GROUP,
-            "Sort direction",
-            &[("asc", "Ascending"), ("desc", "Descending")],
-            direction,
-        )
+    prefs.sort_group(choices, (order.column, Some(order.direction)))
 }
 
 fn blank(text: &str) -> bool {
@@ -172,11 +253,39 @@ mod tests {
     }
 
     #[test]
-    fn radio_choices_set_column_and_direction_only() {
-        let mut order = SortOrder::new("name", SortDirection::Asc);
-        assert!(order.choose(COLUMN_GROUP, "size"));
-        assert!(order.choose(DIRECTION_GROUP, "desc"));
-        assert!(!order.choose("alarm-view", "cards"));
+    fn space_picks_a_column_ascending_then_flips_it() {
+        let default = SortOrder::new("name", SortDirection::Desc);
+        let visible = ["name", "size"];
+        let mut order = default;
+        order.toggle("size", default, &visible);
+        assert_eq!(order, SortOrder::new("size", SortDirection::Asc));
+        order.toggle("size", default, &visible);
         assert_eq!(order, SortOrder::new("size", SortDirection::Desc));
+        // The default column in effect flips too.
+        let mut order = default;
+        order.toggle("name", default, &visible);
+        assert_eq!(order, SortOrder::new("name", SortDirection::Asc));
+        // A hidden choice starts over from the default.
+        let mut order = SortOrder::new("gone", SortDirection::Desc);
+        order.toggle("size", default, &visible);
+        assert_eq!(order, SortOrder::new("size", SortDirection::Asc));
+    }
+
+    #[test]
+    fn choice_default_row_clears_and_columns_flip() {
+        let visible = ["name"];
+        let mut choice = Choice::default();
+        choice.toggle("name", &visible);
+        assert_eq!(
+            choice.effective(&visible),
+            Some(SortOrder::new("name", SortDirection::Asc))
+        );
+        choice.toggle("name", &visible);
+        assert_eq!(
+            choice.effective(&visible),
+            Some(SortOrder::new("name", SortDirection::Desc))
+        );
+        choice.toggle(DEFAULT_VALUE, &visible);
+        assert_eq!(choice.effective(&visible), None);
     }
 }

@@ -52,6 +52,8 @@ impl DetailTab {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub file_systems: TableState<EfsFileSystem>,
     pub input_focus: InputFocus,
     pub current_file_system: Option<String>,
@@ -100,6 +102,7 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             file_systems: TableState::new(),
             input_focus: InputFocus::Filter,
             current_file_system: None,
@@ -234,11 +237,17 @@ pub async fn load_metrics(app: &mut App, file_system_id: &str) -> anyhow::Result
 }
 
 pub fn filtered_efs_file_systems(app: &App) -> Vec<&EfsFileSystem> {
-    filter_by_fields(
+    let mut rows = filter_by_fields(
         &app.efs_state.file_systems.items,
         &app.efs_state.file_systems.filter,
         |fs| [&fs.name, &fs.file_system_id, &fs.availability_zone],
-    )
+    );
+    app.efs_state
+        .sort
+        .apply(&mut rows, &app.efs_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::efs::fs::Column::from_id(id), row)
+        });
+    rows
 }
 
 pub fn render_file_systems(frame: &mut Frame, app: &App, area: Rect) {
@@ -768,8 +777,8 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Creation time",
-        sort_direction: SortDirection::Desc,
+        sort_column: &fs_sort_header(app).0,
+        sort_direction: fs_sort_header(app).1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|fs: &EfsFileSystem| {
@@ -779,6 +788,15 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     render_table(frame, config);
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn fs_sort_header(app: &App) -> (String, SortDirection) {
+    app.efs_state.sort.header(
+        &app.efs_visible_column_ids,
+        |id| crate::sort::name::<EfsFileSystem, _>(crate::efs::fs::Column::from_id(id)),
+        ("Creation time", SortDirection::Desc),
+    )
 }
 
 #[cfg(test)]

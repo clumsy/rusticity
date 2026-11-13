@@ -13,6 +13,8 @@ use ratatui::prelude::*;
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub detail: crate::kms::detail::State,
     pub keys: TableState<KmsKey>,
     pub tab: Tab,
@@ -40,6 +42,7 @@ impl State {
     pub fn new() -> Self {
         use crate::kms::key::Column;
         Self {
+            sort: Default::default(),
             detail: crate::kms::detail::State::default(),
             keys: TableState::new(),
             tab: Tab::AwsManaged,
@@ -126,13 +129,21 @@ impl Tab {
 
 pub fn filtered_kms_keys(app: &App) -> Vec<&KmsKey> {
     let text_filter = TextFilter::new(&app.kms_state.keys.filter);
-    app.kms_state
+    let mut rows: Vec<&KmsKey> = app
+        .kms_state
         .keys
         .items
         .iter()
         .filter(|k| app.kms_state.tab.includes_key(k))
         .filter(|k| text_filter.matches_any([&k.alias, &k.key_id, &k.description]))
-        .collect()
+        .collect();
+    let state = &app.kms_state;
+    state
+        .sort
+        .apply(&mut rows, state.visible_column_ids(), |row, id| {
+            crate::sort::cell(crate::kms::key::Column::from_id(id), row)
+        });
+    rows
 }
 
 pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
@@ -189,13 +200,18 @@ pub fn render_keys(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let sort_header = app.kms_state.sort.header(
+        app.kms_state.visible_column_ids(),
+        |id| crate::sort::name::<KmsKey, _>(key::Column::from_id(id)),
+        ("Alias", SortDirection::Asc),
+    );
     let config = TableConfig {
         items: view.items,
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Alias",
-        sort_direction: SortDirection::Asc,
+        sort_column: &sort_header.0,
+        sort_direction: sort_header.1,
         title,
         area: chunks[2],
         get_expanded_content: Some(Box::new(|k: &KmsKey| expanded_from_columns(&columns, k))),

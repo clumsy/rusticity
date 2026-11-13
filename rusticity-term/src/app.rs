@@ -7547,12 +7547,18 @@ mod tests {
         app.mode = Mode::ColumnSelector;
         app.column_selector_index = 0;
 
-        // Should jump to PageSize section
+        // PageSize, then Sort by, then back to Columns
         let page_size_idx = app.cfn_column_ids.len() + 2;
+        let sort_by_idx = crate::preferences::bindings::active(&app)
+            .unwrap()
+            .rows()
+            .iter()
+            .position(|r| matches!(r, crate::preferences::PreferenceRow::Section("Sort by")))
+            .unwrap();
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
-
-        // Should wrap back to Columns
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }
@@ -7674,10 +7680,13 @@ mod tests {
         app.mode = Mode::ColumnSelector;
         app.column_selector_index = 0;
 
+        // Columns, Page size, Sort by, then back to the top.
         let page_size_idx = app.lambda_state.function_column_ids.len() + 2;
+        let sort_by_idx = page_size_idx + crate::preferences::PAGE_SIZE_OPTIONS.len() + 2;
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
-
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }
@@ -7690,9 +7699,12 @@ mod tests {
         app.column_selector_index = 0;
 
         let page_size_idx = app.lambda_application_column_ids.len() + 2;
+        // Applications offer the three small page sizes.
+        let sort_by_idx = page_size_idx + 3 + 2;
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
-
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }
@@ -7726,11 +7738,21 @@ mod tests {
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
 
-        // Tab from PageSize back to Columns
+        // Tab from PageSize to Sort by, then back to Columns
+        let sort_by_idx = crate::preferences::bindings::active(&app)
+            .unwrap()
+            .rows()
+            .iter()
+            .position(|r| matches!(r, crate::preferences::PreferenceRow::Section("Sort by")))
+            .unwrap();
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
 
-        // Shift+Tab from Columns to PageSize
+        // Shift+Tab from Columns to Sort by, then PageSize
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::PrevPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
 
@@ -10777,7 +10799,15 @@ mod region_latency_tests {
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 10);
 
-        // Tab again should wrap back to columns (0)
+        // Tab again goes to Sort by, then wraps back to columns (0)
+        let sort_by_idx = crate::preferences::bindings::active(&app)
+            .unwrap()
+            .rows()
+            .iter()
+            .position(|r| matches!(r, crate::preferences::PreferenceRow::Section("Sort by")))
+            .unwrap();
+        app.handle_action(Action::NextPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }
@@ -10792,11 +10822,17 @@ mod region_latency_tests {
         // Start at columns header (0)
         app.column_selector_index = 0;
 
-        // Shift+Tab should jump to page size section (10)
+        // Shift+Tab goes to the last section (Sort by), then page size (10)
+        let sort_by_idx = crate::preferences::bindings::active(&app)
+            .unwrap()
+            .rows()
+            .iter()
+            .position(|r| matches!(r, crate::preferences::PreferenceRow::Section("Sort by")))
+            .unwrap();
+        app.handle_action(Action::PrevPreferences);
+        assert_eq!(app.column_selector_index, sort_by_idx);
         app.handle_action(Action::PrevPreferences);
         assert_eq!(app.column_selector_index, 10);
-
-        // Shift+Tab again should wrap back to columns (0)
         app.handle_action(Action::PrevPreferences);
         assert_eq!(app.column_selector_index, 0);
     }
@@ -15474,9 +15510,11 @@ mod lambda_version_tab_tests {
         app.handle_action(Action::PageDown);
         assert_eq!(app.column_selector_index, 11);
 
-        // Second PageDown should be capped at max
+        // Repeated PageDown stops at the last row (sort direction now ends it).
         let max = app.get_column_selector_max();
-        app.handle_action(Action::PageDown);
+        for _ in 0..10 {
+            app.handle_action(Action::PageDown);
+        }
         assert_eq!(app.column_selector_index, max);
     }
 
@@ -15500,13 +15538,14 @@ mod lambda_version_tab_tests {
         app.current_service = Service::LambdaFunctions;
         app.mode = Mode::ColumnSelector;
         let page_size_idx = app.lambda_state.function_column_ids.len() + 2;
+        let sort_by_idx = page_size_idx + crate::preferences::PAGE_SIZE_OPTIONS.len() + 2;
         app.column_selector_index = page_size_idx;
 
         app.handle_action(Action::PrevPreferences);
         assert_eq!(app.column_selector_index, 0);
 
         app.handle_action(Action::PrevPreferences);
-        assert_eq!(app.column_selector_index, page_size_idx);
+        assert_eq!(app.column_selector_index, sort_by_idx);
     }
 
     #[test]
@@ -15515,13 +15554,19 @@ mod lambda_version_tab_tests {
         app.current_service = Service::CloudFormationStacks;
         app.mode = Mode::ColumnSelector;
         let page_size_idx = app.cfn_column_ids.len() + 2;
+        let sort_by_idx = crate::preferences::bindings::active(&app)
+            .unwrap()
+            .rows()
+            .iter()
+            .position(|r| matches!(r, crate::preferences::PreferenceRow::Section("Sort by")))
+            .unwrap();
         app.column_selector_index = page_size_idx;
 
         app.handle_action(Action::PrevPreferences);
         assert_eq!(app.column_selector_index, 0);
 
         app.handle_action(Action::PrevPreferences);
-        assert_eq!(app.column_selector_index, page_size_idx);
+        assert_eq!(app.column_selector_index, sort_by_idx);
     }
 
     #[test]
@@ -15566,16 +15611,13 @@ mod lambda_version_tab_tests {
         app.mode = Mode::ColumnSelector;
         app.column_selector_index = 0;
 
-        // Columns, Page size, Sort by, Sort direction, then back to the top.
+        // Columns, Page size, Sort by, then back to the top.
         let page_size_idx = app.ec2_column_ids.len() + 2;
         let sort_by_idx = page_size_idx + crate::preferences::PAGE_SIZE_OPTIONS.len() + 2;
-        let visible = app.ec2_visible_column_ids.len();
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, page_size_idx);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, sort_by_idx);
-        app.handle_action(Action::NextPreferences);
-        assert_eq!(app.column_selector_index, sort_by_idx + visible + 2);
         app.handle_action(Action::NextPreferences);
         assert_eq!(app.column_selector_index, 0);
     }

@@ -92,6 +92,8 @@ impl CyclicEnum for QueueDetailTab {
 
 #[derive(Debug, Clone)]
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub queues: TableState<Queue>,
     /// Tab-owned background read backing `queues`.
     pub(crate) inventory: crate::inventory_read::OwnedInventory<Queue>,
@@ -158,6 +160,7 @@ impl State {
             .map(|s| s.to_string())
             .collect();
         Self {
+            sort: Default::default(),
             queues: TableState::new(),
             inventory: Default::default(),
             triggers: TableState::new(),
@@ -240,6 +243,17 @@ pub fn filtered_queues<'a>(queues: &'a [Queue], filter: &str) -> Vec<&'a Queue> 
         .iter()
         .filter(|q| filter.is_empty() || q.name.to_lowercase().starts_with(&filter.to_lowercase()))
         .collect()
+}
+
+/// The queue list as shown: prefix filter, then the chosen order.
+pub fn visible_queues(app: &App) -> Vec<&Queue> {
+    let mut rows = filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+    app.sqs_state
+        .sort
+        .apply(&mut rows, &app.sqs_visible_column_ids, |row, id| {
+            crate::sort::cell(SqsColumn::from_id(id), row)
+        });
+    rows
 }
 
 pub fn filtered_lambda_triggers(app: &App) -> Vec<&LambdaTrigger> {
@@ -1192,8 +1206,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
         ])
         .split(area);
 
-    let filtered_count =
-        filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter).len();
+    let filtered_count = visible_queues(app).len();
     let page_size = app.sqs_state.queues.page_size.value();
     let total_pages = filtered_count.div_ceil(page_size);
     let current_page = app.sqs_state.queues.selected / page_size;
@@ -1212,8 +1225,7 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
         },
     );
 
-    let filtered: Vec<_> =
-        filtered_queues(&app.sqs_state.queues.items, &app.sqs_state.queues.filter);
+    let filtered: Vec<_> = visible_queues(app);
 
     let start_idx = current_page * page_size;
     let end_idx = (start_idx + page_size).min(filtered.len());
@@ -1237,13 +1249,18 @@ fn render_queue_list(frame: &mut ratatui::Frame, app: &App, area: ratatui::prelu
         }
     });
 
+    let sort_header = app.sqs_state.sort.header(
+        &app.sqs_visible_column_ids,
+        |id| crate::sort::name::<Queue, _>(SqsColumn::from_id(id)),
+        ("Name", SortDirection::Asc),
+    );
     let config = TableConfig {
         items: paginated,
         selected_index: app.sqs_state.queues.selected % page_size,
         expanded_index,
         columns: &columns,
-        sort_column: "Name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &sort_header.0,
+        sort_direction: sort_header.1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|queue: &Queue| {

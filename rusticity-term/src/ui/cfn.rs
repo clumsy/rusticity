@@ -52,6 +52,8 @@ pub enum EventsView {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub table: TableState<CfnStack>,
     pub input_focus: InputFocus,
     pub status_filter: StatusFilter,
@@ -90,6 +92,7 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             table: TableState::new(),
             input_focus: InputFocus::Filter,
             status_filter: StatusFilter::All,
@@ -375,7 +378,16 @@ pub fn filtered_cloudformation_stacks(app: &App) -> Vec<&CfnStack> {
     };
 
     if !app.cfn_state.view_nested {
-        return items.iter().filter(|s| passes_filter(s)).collect();
+        // The nested view keeps its parent-child order; the flat one sorts.
+        let mut rows: Vec<&CfnStack> = items.iter().filter(|s| passes_filter(s)).collect();
+        app.cfn_state
+            .sort
+            .apply(&mut rows, &app.cfn_visible_column_ids, |row, id| {
+                crate::cfn::Column::from_id(id)
+                    .map(|c| c.to_column().render(&row).0)
+                    .unwrap_or_default()
+            });
+        return rows;
     }
 
     // Hierarchical order: roots first, each followed by all direct children.
@@ -550,8 +562,8 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
         selected_index: app.cfn_state.table.selected.saturating_sub(scroll_offset),
         expanded_index,
         columns: &columns,
-        sort_column: app.cfn_state.sort_column.default_name(),
-        sort_direction: app.cfn_state.sort_direction,
+        sort_column: &stack_sort_header(app).0,
+        sort_direction: stack_sort_header(app).1,
         title: format_title(&format!("Stacks ({})", filtered_count)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|stack: &&CfnStack| {
@@ -960,6 +972,22 @@ fn render_git_sync(frame: &mut Frame, _app: &App, _stack: &CfnStack, area: Rect)
     let inner = block.inner(sections[0]);
     frame.render_widget(block, sections[0]);
     render_fields_with_dynamic_columns(frame, inner, lines);
+}
+
+/// Header of the order in effect; the nested view keeps its own order.
+fn stack_sort_header(app: &App) -> (String, SortDirection) {
+    let fallback = (
+        app.cfn_state.sort_column.default_name(),
+        app.cfn_state.sort_direction,
+    );
+    if app.cfn_state.view_nested {
+        return (fallback.0.to_string(), fallback.1);
+    }
+    app.cfn_state.sort.header(
+        &app.cfn_visible_column_ids,
+        |id| crate::cfn::Column::from_id(id).map(|c| c.default_name().to_string()),
+        fallback,
+    )
 }
 
 #[cfg(test)]

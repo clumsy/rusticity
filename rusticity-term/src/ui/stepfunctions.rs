@@ -16,6 +16,8 @@ use ratatui::prelude::*;
 use rusticity_core::StateMachineMetadata;
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub machines: TableState<StateMachineMetadata>,
     pub executions: crate::stepfunctions::executions::State,
     pub input_focus: InputFocus,
@@ -32,6 +34,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            sort: Default::default(),
             machines: TableState::new(),
             executions: crate::stepfunctions::executions::State::default(),
             input_focus: InputFocus::Filter,
@@ -73,6 +76,14 @@ pub fn filtered_machines(app: &App) -> Vec<&StateMachineMetadata> {
         },
     );
     rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arn.cmp(&b.arn)));
+    let state = &app.stepfunctions_state;
+    state
+        .sort
+        .apply(&mut rows, &state.visible_column_ids, |row, id| {
+            Column::from_id(id)
+                .map(|c| c.render(row).0)
+                .unwrap_or_default()
+        });
     rows
 }
 
@@ -109,6 +120,11 @@ pub fn render_state_machines(frame: &mut Frame, app: &App, area: Rect) {
         .into_iter()
         .map(Column::into_table_column)
         .collect();
+    let sort_header = app.stepfunctions_state.sort.header(
+        &app.stepfunctions_state.visible_column_ids,
+        |id| Column::from_id(id).map(|c| c.name()),
+        ("Name", SortDirection::Asc),
+    );
     render_table(
         frame,
         TableConfig {
@@ -116,7 +132,7 @@ pub fn render_state_machines(frame: &mut Frame, app: &App, area: Rect) {
             selected_index: view.selected_index,
             expanded_index: view.expanded_index,
             columns: &columns,
-            sort_column: &Column::Name.name(),
+            sort_column: &sort_header.0,
             sort_direction: SortDirection::Asc,
             title: format_title(&format!("State machines ({})", view.total_items)),
             area: chunks[1],

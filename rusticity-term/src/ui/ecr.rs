@@ -15,6 +15,8 @@ use ratatui::{prelude::*, widgets::*};
 pub const FILTER_CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub repositories: TableState<EcrRepository>,
     pub tab: Tab,
     pub current_repository: Option<String>,
@@ -33,6 +35,7 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             repositories: TableState::new(),
             tab: Tab::Private,
             current_repository: None,
@@ -64,11 +67,17 @@ impl Tab {
 }
 
 pub fn filtered_ecr_repositories(app: &App) -> Vec<&EcrRepository> {
-    filter_by_field(
+    let mut rows = filter_by_field(
         &app.ecr_state.repositories.items,
         &app.ecr_state.repositories.filter,
         |r| &r.name,
-    )
+    );
+    app.ecr_state
+        .sort
+        .apply(&mut rows, &app.ecr_repo_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::ecr::repo::Column::from_id(id), row)
+        });
+    rows
 }
 
 pub fn filtered_ecr_images(app: &App) -> Vec<&EcrImage> {
@@ -145,8 +154,8 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Repository name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &repo_sort_header(app).0,
+        sort_direction: repo_sort_header(app).1,
         title,
         area: chunks[2],
         get_expanded_content: Some(Box::new(|repo: &EcrRepository| {
@@ -199,6 +208,15 @@ pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {
             is_active: app.mode != Mode::FilterInput,
         },
     );
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn repo_sort_header(app: &App) -> (String, SortDirection) {
+    app.ecr_state.sort.header(
+        &app.ecr_repo_visible_column_ids,
+        |id| crate::sort::name::<EcrRepository, _>(crate::ecr::repo::Column::from_id(id)),
+        ("Repository name", SortDirection::Asc),
+    )
 }
 
 #[cfg(test)]

@@ -147,6 +147,11 @@ fn render_list<T: 'static>(
     );
     let columns = columns(table);
     let spec = table.spec();
+    let sort_header = table.sort.header(
+        &table.visible,
+        |id| Some(id.to_string()),
+        ("", SortDirection::Asc),
+    );
     render_table(
         frame,
         TableConfig {
@@ -154,8 +159,8 @@ fn render_list<T: 'static>(
             selected_index: prepared.selected_index,
             expanded_index: prepared.expanded_index,
             columns: &columns,
-            sort_column: "",
-            sort_direction: SortDirection::Asc,
+            sort_column: &sort_header.0,
+            sort_direction: sort_header.1,
             title: ui::format_title(&format!("{title} ({})", prepared.total_items)),
             area: parts[1],
             get_expanded_content: Some(Box::new(move |row: &T| {

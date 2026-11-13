@@ -42,6 +42,15 @@ pub enum PreferenceRow {
         label: &'static str,
         selected: bool,
     },
+    /// One "Sort by" choice. `direction` is set on the row in effect; Space
+    /// on it flips the direction, Space on another row picks it ascending.
+    Sort {
+        value: &'static str,
+        label: &'static str,
+        selected: bool,
+        /// Shown as ↑ or ↓ on the selected column; none for "Default order".
+        direction: Option<crate::common::SortDirection>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +67,10 @@ pub enum PreferenceAction {
     SetToggle {
         id: &'static str,
         enabled: bool,
+    },
+    /// Pick a sort column, or flip the direction of the one in effect.
+    SetSort {
+        value: &'static str,
     },
 }
 
@@ -135,6 +148,27 @@ impl Preferences {
         self
     }
 
+    /// A "Sort by" section; `selected` is the row in effect and its direction.
+    pub fn sort_group(
+        mut self,
+        choices: &[(&'static str, &'static str)],
+        selected: (&str, Option<crate::common::SortDirection>),
+    ) -> Self {
+        self.section("Sort by");
+        self.rows
+            .extend(choices.iter().map(|&(value, label)| PreferenceRow::Sort {
+                value,
+                label,
+                selected: value == selected.0,
+                direction: if value == selected.0 {
+                    selected.1
+                } else {
+                    None
+                },
+            }));
+        self
+    }
+
     pub fn toggle(
         mut self,
         id: &'static str,
@@ -195,6 +229,7 @@ impl Preferences {
             PreferenceRow::Radio { group, value, .. } => {
                 Some(PreferenceAction::SetRadio { group, value })
             }
+            PreferenceRow::Sort { value, .. } => Some(PreferenceAction::SetSort { value }),
             PreferenceRow::Toggle { id, enabled, .. } => Some(PreferenceAction::SetToggle {
                 id,
                 enabled: !enabled,

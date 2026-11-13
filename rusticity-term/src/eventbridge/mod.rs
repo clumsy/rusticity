@@ -72,6 +72,7 @@ pub(crate) struct Table<T: 'static> {
     pub(crate) rows: TableState<T>,
     pub(crate) visible: Vec<crate::common::ColumnId>,
     pub(crate) focus: InputFocus,
+    pub(crate) sort: crate::sort::Choice,
     spec: Spec<T>,
 }
 
@@ -81,6 +82,7 @@ impl<T: 'static> Table<T> {
             rows: TableState::new(),
             visible: spec.iter().map(|(id, ..)| *id).collect(),
             focus: InputFocus::Filter,
+            sort: Default::default(),
             spec,
         }
     }
@@ -91,7 +93,8 @@ impl<T: 'static> Table<T> {
 
     pub(crate) fn filtered(&self) -> Vec<&T> {
         let filter = self.rows.filter.to_lowercase();
-        self.rows
+        let mut rows: Vec<&T> = self
+            .rows
             .items
             .iter()
             .filter(|row| {
@@ -101,7 +104,15 @@ impl<T: 'static> Table<T> {
                         .iter()
                         .any(|(_, _, cell)| cell(row).to_lowercase().contains(&filter))
             })
-            .collect()
+            .collect();
+        let spec = self.spec;
+        self.sort.apply(&mut rows, &self.visible, |row, id| {
+            spec.iter()
+                .find(|(name, ..)| *name == id)
+                .map(|(_, _, cell)| cell(row))
+                .unwrap_or_default()
+        });
+        rows
     }
 
     fn clear(&mut self) {

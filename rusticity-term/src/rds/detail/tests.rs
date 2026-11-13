@@ -1158,4 +1158,22 @@ mod console_tabs {
         press(&mut app, KeyCode::Char('f'));
         assert!(screen(&app).contains("CIDR/IP - Outbound"));
     }
+
+    #[tokio::test]
+    async fn recent_events_can_be_sorted_oldest_first_from_preferences() {
+        let mut app = opened(two_events()).await;
+        goto(&mut app, Tab::LogsEvents);
+        press(&mut app, KeyCode::Char('f'));
+        crate::sort_tests::sort_by(&mut app, "Time");
+        let view = app.rds_state.detail.view().unwrap();
+        let first = view.table(Slot::Events).filtered()[0].cells[1].clone();
+        assert_eq!(first, "DB instance restarted", "oldest first");
+        assert!(screen(&app).contains("Time ↑"));
+        crate::sort_tests::sort_by(&mut app, "Time");
+        let view = app.rds_state.detail.view().unwrap();
+        assert_eq!(
+            view.table(Slot::Events).filtered()[0].cells[1],
+            "DB instance created"
+        );
+    }
 }

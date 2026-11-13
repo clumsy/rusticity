@@ -179,6 +179,8 @@ impl DetailTab {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub tables: TableState<DdbTable>,
     /// Tab-owned background read backing `tables`.
     pub(crate) inventory: crate::inventory_read::OwnedInventory<DdbTable>,
@@ -262,6 +264,7 @@ impl State {
 
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             tables: TableState::new(),
             inventory: Default::default(),
             input_focus: InputFocus::Filter,
@@ -298,11 +301,17 @@ impl State {
 }
 
 pub fn filtered_dynamodb_tables(app: &App) -> Vec<&DdbTable> {
-    filter_by_fields(
+    let mut rows = filter_by_fields(
         &app.dynamodb_state.tables.items,
         &app.dynamodb_state.tables.filter,
         |t| [&t.name, &t.status, &t.partition_key],
-    )
+    );
+    app.dynamodb_state
+        .sort
+        .apply(&mut rows, &app.dynamodb_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::dynamodb::table::Column::from_id(id), row)
+        });
+    rows
 }
 
 /// The table currently open in the detail view.
@@ -1327,13 +1336,18 @@ pub fn render_tables_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let sort_header = app.dynamodb_state.sort.header(
+        &app.dynamodb_visible_column_ids,
+        |id| crate::sort::name::<DdbTable, _>(crate::dynamodb::table::Column::from_id(id)),
+        ("Name", SortDirection::Asc),
+    );
     let config = TableConfig {
         items: view.items,
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "Name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &sort_header.0,
+        sort_direction: sort_header.1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|t: &DdbTable| expanded_from_columns(&columns, t))),

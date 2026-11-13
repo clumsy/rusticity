@@ -99,7 +99,8 @@ fn every_bound_panel_uses_model_navigation_and_page_size_actions() {
     for &source in SOURCES {
         let mut app = app_for(source);
         let model = active(&app).unwrap();
-        assert_eq!(model.rows(), source.model(&app).rows());
+        // The shared sort rows follow the source rows.
+        assert!(model.rows().starts_with(source.model(&app).rows()));
         assert!(model.column_count() > 0);
         // Walk every row through the real App routing, skipping only separators.
         let expected: Vec<_> = (0..model.rows().len())

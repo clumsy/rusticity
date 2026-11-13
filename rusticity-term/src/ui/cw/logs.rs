@@ -18,6 +18,8 @@ use rusticity_core::{LogEvent, LogGroup, LogStream};
 
 // State
 pub struct CloudWatchLogGroupsState {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub log_groups: crate::table::TableState<LogGroup>,
     pub log_streams: Vec<LogStream>,
     pub log_events: Vec<LogEvent>,
@@ -61,6 +63,7 @@ impl CloudWatchLogGroupsState {
 impl Default for CloudWatchLogGroupsState {
     fn default() -> Self {
         Self {
+            sort: Default::default(),
             log_groups: crate::table::TableState::new(),
             log_streams: Vec::new(),
             log_events: Vec::new(),
@@ -182,6 +185,16 @@ pub fn selected_log_group(app: &App) -> Option<&LogGroup> {
 }
 
 pub fn filtered_log_groups(app: &App) -> Vec<&LogGroup> {
+    let mut rows = filtered_log_groups_unsorted(app);
+    app.log_groups_state.sort.apply(
+        &mut rows,
+        &app.cw_log_group_visible_column_ids,
+        |row, id| crate::sort::cell(LogGroupColumn::from_id(id), row),
+    );
+    rows
+}
+
+fn filtered_log_groups_unsorted(app: &App) -> Vec<&LogGroup> {
     if app.log_groups_state.log_groups.filter.is_empty() {
         app.log_groups_state.log_groups.items.iter().collect()
     } else {
@@ -305,8 +318,8 @@ pub fn render_groups_list(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: view.selected_index,
         expanded_index: view.expanded_index,
         columns: &columns,
-        sort_column: "",
-        sort_direction: SortDirection::Asc,
+        sort_column: &log_group_sort_header(app).0,
+        sort_direction: log_group_sort_header(app).1,
         title: format_title(&format!("Log groups ({})", view.total_items)),
         area: chunks[1],
         get_expanded_content: Some(Box::new(|group: &LogGroup| {
@@ -1116,6 +1129,15 @@ fn render_tags_table(frame: &mut Frame, app: &App, area: Rect, _border_style: St
     };
 
     render_table(frame, config);
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn log_group_sort_header(app: &App) -> (String, SortDirection) {
+    app.log_groups_state.sort.header(
+        &app.cw_log_group_visible_column_ids,
+        |id| crate::sort::name::<LogGroup, _>(LogGroupColumn::from_id(id)),
+        ("", SortDirection::Asc),
+    )
 }
 
 #[cfg(test)]

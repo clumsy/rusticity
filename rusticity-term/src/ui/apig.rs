@@ -128,6 +128,8 @@ impl ApiDetailTab {
 }
 
 pub struct State {
+    /// Chosen in Preferences; see `crate::sort::Choice`.
+    pub sort: crate::sort::Choice,
     pub apis: TableState<RestApi>,
     pub input_focus: InputFocus,
     pub current_api: Option<RestApi>,
@@ -150,6 +152,7 @@ impl Default for State {
 impl State {
     pub fn new() -> Self {
         Self {
+            sort: Default::default(),
             apis: TableState::new(),
             input_focus: InputFocus::Filter,
             current_api: None,
@@ -166,11 +169,17 @@ impl State {
 }
 
 pub fn filtered_apis(app: &App) -> Vec<&RestApi> {
-    filter_by_field(
+    let mut rows = filter_by_field(
         &app.apig_state.apis.items,
         &app.apig_state.apis.filter,
         |a| &a.name,
-    )
+    );
+    app.apig_state
+        .sort
+        .apply(&mut rows, &app.apig_api_visible_column_ids, |row, id| {
+            crate::sort::cell(crate::apig::api::Column::from_id(id), row)
+        });
+    rows
 }
 
 pub fn render_apis(frame: &mut Frame, app: &App, area: Rect) {
@@ -240,8 +249,8 @@ pub fn render_apis(frame: &mut Frame, app: &App, area: Rect) {
         selected_index: app.apig_state.apis.selected % page_size,
         expanded_index,
         columns: &columns,
-        sort_column: "Name",
-        sort_direction: SortDirection::Asc,
+        sort_column: &api_sort_header(app).0,
+        sort_direction: api_sort_header(app).1,
         title,
         area: chunks[1],
         get_expanded_content: Some(Box::new(|api: &RestApi| {
@@ -824,4 +833,13 @@ fn matches_filter<T: TreeItem + Clone>(
     }
 
     false
+}
+
+/// Header of the order in effect: the chosen column, else the table default.
+fn api_sort_header(app: &App) -> (String, SortDirection) {
+    app.apig_state.sort.header(
+        &app.apig_api_visible_column_ids,
+        |id| crate::sort::name::<RestApi, _>(crate::apig::api::Column::from_id(id)),
+        ("Name", SortDirection::Asc),
+    )
 }

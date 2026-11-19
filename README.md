@@ -35,7 +35,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🚨 **CloudWatch Alarms**: View alarms with metrics graphs
 - 🛤️ **CloudTrail**: Event history with resource details
 - ☁️ **CloudFormation**: Stacks, resources, outputs, parameters, templates
-- 🖥️ **EC2**: Instances with tags and monitoring
+- 🖥️ **EC2**: Instances with read-only details (status and alarms, monitoring, security rules, networking, storage, tags); read-only load balancers (listeners, network mapping, resource map, security, monitoring, attributes, tags) and target groups (targets, monitoring, health checks, attributes, tags)
 - 🗄️ **DynamoDB**: Tables with an item explorer (scan/query), indexes, global tables, backups, monitoring, settings and tags
 - 📦 **ECR**: Elastic Container Registry (public and private repositories)
 - 📂 **EFS**: Elastic File System — file systems with detail view and tags
@@ -140,18 +140,38 @@ and 1 MiB of stdout, uses no shell, and shows unsupported targets or failed read
 explicitly. Output tabs are not saved in sessions; their in-memory results may
 contain sensitive AWS metadata and are discarded on close or AWS context change.
 
+Press `p` in a table for its preferences. `Sort by` lists the visible columns;
+Space on a column sorts by it, and Space again flips the direction.
+
+## Regions and tabs
+
+Each tab reads in its own Region. `Space`, then `r`, moves only the current tab
+to another Region with the same sign-in. A finder result or bookmark in another
+Region opens in a new tab in that Region. The profile (`Space`, then `p`) is
+shared by all tabs: switching it signs in once and keeps every tab in its
+Region. Once tabs are in more than one Region, the tab bar shows each Region
+after its tab. Sessions save the Region of every tab.
+
+`Space`, then `b` or `t`, opens the tab picker, which lists every tab with its
+Region. The list has focus first. Typing, or `i`, moves focus to the filter,
+which keeps tabs whose name or Region contains every typed word in any case
+(`ec2 west`). Enter or Esc in the filter returns to the list; on the list,
+Enter opens the tab and Esc closes the picker.
+
 ## Loading and freshness
 
-Tab-owned asynchronous loading currently covers SNS, Step Functions, KMS, Secrets
-Manager details, ACM, the SQS queues, Lambda functions and DynamoDB tables lists,
-and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
+Tab-owned asynchronous loading currently covers ACM, EC2 (instances, load
+balancers, target groups and their details), EventBridge, KMS, RDS, Secrets
+Manager, SNS, Step Functions, VPC, the SQS queues, Lambda functions and DynamoDB
+tables lists, and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
 after a successful read (including an empty result), or `!` after a failure.
 Indicators use the same text color as their tab label, including on the selected
 background. Filters and table headers remain visible while loading; the table body
 shows `Loading…` instead of old rows. Elapsed time and cancellation hints appear in
 the status bar's message area. Switching or opening another tab does not cancel the
 originating tab's read. Closing its tab,
-explicit cancellation, a superseding refresh, or an AWS-context change does.
+explicit cancellation, a superseding refresh, or a change of that tab's Region
+or the profile does.
 Refresh immediately removes old results; a failed read shows an error, not cached
 data. Successful empty collections and filters hiding all rows have distinct
 messages. Recognized permission and expired-credential errors include recovery
@@ -168,7 +188,6 @@ eligible selections. VPC and unsupported references cannot be bookmarked
 until dedicated views exist. `Space`,
 then `k`, opens the bookmark picker: `i`/Tab filters, arrows select, Right/Left
 show/hide the identity, Enter opens, Delete removes, and `Ctrl+R` reloads the file.
-The existing `Space b`/`Space t` tab picker is unchanged.
 
 Bookmarks store only identity metadata plus profile, Region, and an account guard
 in `~/.rusticity/bookmarks.json`. Opening explicitly uses the saved profile/Region

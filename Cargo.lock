@@ -3640,7 +3640,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3654,7 +3654,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity-core"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -3701,7 +3701,7 @@ dependencies = [
 
 [[package]]
 name = "rusticity-term"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "arboard",

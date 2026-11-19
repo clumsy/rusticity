@@ -157,7 +157,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             }
                             let mut enter_resource = false;
                             if let Some(resource) = app.resource_finder.pending_open.take() {
-                                match finder::navigation::open_from_finder(&mut app, resource).await {
+                                match finder::navigation::open_resource(&mut app, resource).await {
                                     Ok(enter) => enter_resource = enter,
                                     Err(error) => {
                                         app.error_message = Some(format!("Failed to open resource: {error:#}"));
@@ -251,8 +251,12 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             let request = app.aws.request();
                             app.context_request.get_or_insert(request);
                         }
-                        // A profile, Region or session pick connects off-screen and
-                        // swaps the whole context; a failure leaves everything as is.
+                        if std::mem::take(&mut app.context_changed) {
+                            // The current tab moved Region: its legacy loaders below reload it.
+                            prev_service_selected = false;
+                        }
+                        // A profile, offline Region or session pick connects off-screen
+                        // and swaps the whole context; a failure leaves everything as is.
                         if let Some(request) = app.context_request.take() {
                             app.log_groups_state.loading = true;
                             app.log_groups_state.loading_message = "Connecting to AWS...".to_string();

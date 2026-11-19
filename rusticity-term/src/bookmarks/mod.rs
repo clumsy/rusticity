@@ -279,11 +279,16 @@ where
             "This bookmark has no dedicated resource view. It can be removed from the picker."
         );
     }
-    let replacing = app.aws.profile != entry.profile || app.aws.config.region != entry.region;
+    // Another profile signs in first, in the current Region so every tab
+    // keeps its own; the bookmark Region then gets a tab of its own.
+    let replacing = !app.aws.connected || app.aws.profile != entry.profile;
     if replacing {
+        let region = Some(app.aws.config.region.clone())
+            .filter(|region| !region.is_empty())
+            .unwrap_or_else(|| entry.region.clone());
         crate::finder::navigation::switch_context(
             app,
-            connect(entry.profile.clone(), entry.region.clone()),
+            connect(entry.profile.clone(), region),
             |next| validate_open(next, &entry),
         )
         .await?;
@@ -304,7 +309,7 @@ fn validate_open(aws: &crate::aws_context::AwsContext, entry: &Bookmark) -> anyh
             aws.config.account_id
         );
     }
-    crate::finder::navigation::validate_scope(&aws.config, &entry.resource)
+    crate::finder::navigation::validate_account(&aws.config, &entry.resource)
 }
 
 #[cfg(test)]

@@ -334,6 +334,7 @@ fn sns_session_restore_and_finder_routes_are_registered() {
             breadcrumb: "SNS › Topics".into(),
             filter: None,
             selected_item: None,
+            region: None,
         });
         app.sessions = vec![session];
         app.mode = Mode::SessionPicker;

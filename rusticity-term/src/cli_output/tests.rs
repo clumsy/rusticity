@@ -436,3 +436,20 @@ async fn output_tab_search_jumps_scrolls_sideways_and_esc_clears_before_closing(
     press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     assert!(!active(&app), "the second Esc closes the output tab");
 }
+
+#[tokio::test]
+async fn a_cli_tab_keeps_its_region_when_its_source_tab_moves() {
+    let mut app = app();
+    app.aws.connected = true;
+    let id = open(&mut app);
+    // Back to the source tab, which then moves to another Region.
+    press(&mut app, KeyCode::Char('['), KeyModifiers::NONE);
+    assert_eq!(app.current_service, Service::SnsTopics);
+    let west = app.aws.in_region("eu-west-1");
+    crate::tab_runtime::set_current_context(&mut app, west);
+    // The output was captured in us-east-1 and its tab still reads there.
+    finish(&mut app, id, Ok("{\"east\":1}".into())).await;
+    let view = app.cli_output.views.get(&id).unwrap();
+    assert!(!view.failed, "{}", view.text);
+    assert!(view.text.contains("east"));
+}

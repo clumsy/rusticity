@@ -299,8 +299,9 @@ pub fn handle_key(key: KeyEvent, mode: Mode) -> Option<Action> {
             KeyCode::Enter => Some(Action::CalendarSelect),
             _ => None,
         },
+        // Esc leaves the filter first, then closes, as in the service picker.
         Mode::TabPicker => match key.code {
-            KeyCode::Esc => Some(Action::CloseMenu),
+            KeyCode::Esc => Some(Action::ExitFilterMode),
             KeyCode::Down => Some(Action::NextItem),
             KeyCode::Up => Some(Action::PrevItem),
             KeyCode::Enter => Some(Action::Select),

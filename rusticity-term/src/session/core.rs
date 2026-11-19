@@ -20,6 +20,10 @@ pub struct SessionTab {
     pub breadcrumb: String,
     pub filter: Option<String>,
     pub selected_item: Option<String>,
+    /// The Region the tab reads in; absent in sessions saved before Regions
+    /// were per tab, which use the session Region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 impl Session {

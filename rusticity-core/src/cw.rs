@@ -12,8 +12,13 @@ pub struct CloudWatchClient {
 
 impl CloudWatchClient {
     pub async fn new(config: AwsConfig) -> Result<Self> {
+        Ok(Self::from_config(config))
+    }
+
+    /// The client for an already resolved `config`; makes no request.
+    pub fn from_config(config: AwsConfig) -> Self {
         let client = config.cloudwatch_logs_client();
-        Ok(Self { client, config })
+        Self { client, config }
     }
 
     pub fn config(&self) -> &AwsConfig {

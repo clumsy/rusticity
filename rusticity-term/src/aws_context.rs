@@ -1,9 +1,11 @@
 //! The AWS context: the profile, the resolved Region, account and role, and
 //! the service clients built for them, as one value.
 //!
-//! Its parts never change one at a time. A new profile or Region connects a
-//! new context off-screen ([`AwsContext::connect`], bounded), and only a
-//! successful connection replaces the current one, whole, through
+//! Its parts never change one at a time. Every tab owns one: the visible tab's
+//! is `app.aws`, the others are parked by [`crate::tab_runtime`]. Another
+//! Region of the same sign-in is derived at once ([`AwsContext::in_region`]);
+//! a new profile connects off-screen ([`AwsContext::connect`], bounded), and
+//! only a successful connection replaces the current one, whole, through
 //! [`crate::app::App::replace_context`]. A failed or slow connection leaves the
 //! current context, and everything shown for it, untouched.
 use anyhow::{anyhow, Result};
@@ -20,6 +22,9 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct AwsContext {
     pub profile: String,
+    /// Signed in. An offline context (startup without credentials, tests)
+    /// connects before its Region can change.
+    pub connected: bool,
     /// The resolved Region, account and role.
     pub config: AwsConfig,
     pub cloudwatch_client: CloudWatchClient,
@@ -66,8 +71,7 @@ impl AwsContext {
         // The SDK credential chain reads the profile from the environment.
         std::env::set_var("AWS_PROFILE", &profile);
         let config = AwsConfig::new(region).await?;
-        let cloudwatch_client = CloudWatchClient::new(config.clone()).await?;
-        Ok(Self::with_clients(profile, config, cloudwatch_client))
+        Ok(Self::with_clients(profile, config, true))
     }
 
     /// [`AwsContext::connect`] bounded by [`CONNECT_TIMEOUT`].
@@ -83,19 +87,29 @@ impl AwsContext {
     /// A context that never signs in: no credentials, no account. For a
     /// startup without credentials and for tests.
     pub fn offline(profile: String, region: Option<String>) -> Self {
-        let config = AwsConfig::dummy(region);
-        let cloudwatch_client = CloudWatchClient::dummy(config.clone());
-        Self::with_clients(profile, config, cloudwatch_client)
+        Self::with_clients(profile, AwsConfig::dummy(region), false)
     }
 
-    fn with_clients(
-        profile: String,
-        config: AwsConfig,
-        cloudwatch_client: CloudWatchClient,
-    ) -> Self {
+    /// The same sign-in in `region`, with every client built for it. Makes no
+    /// request: the credentials, account and role carry over.
+    pub fn in_region(&self, region: &str) -> Self {
+        Self::with_clients(
+            self.profile.clone(),
+            self.config.in_region(region),
+            self.connected,
+        )
+    }
+
+    /// An independent copy, for a new tab opened from this one.
+    pub fn duplicate(&self) -> Self {
+        self.in_region(&self.config.region)
+    }
+
+    fn with_clients(profile: String, config: AwsConfig, connected: bool) -> Self {
         Self {
             profile,
-            cloudwatch_client,
+            connected,
+            cloudwatch_client: CloudWatchClient::from_config(config.clone()),
             cloudtrail_client: CloudTrailClient::new(config.clone()),
             s3_client: S3Client::new(config.clone()),
             sqs_client: SqsClient::new(config.clone()),

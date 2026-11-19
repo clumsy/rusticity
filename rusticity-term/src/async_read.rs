@@ -33,16 +33,24 @@ impl ReadScope {
         self
     }
     pub(crate) fn from_app(app: &App, resource: impl Into<String>) -> Self {
+        let owner = app
+            .tabs
+            .get(app.current_tab)
+            .filter(|tab| tab.service == app.current_service)
+            .map(|tab| tab.id);
+        Self::from_context(&app.aws, resource).with_owner(owner)
+    }
+    /// The identity of `aws` alone, with no owner.
+    pub(crate) fn from_context(
+        aws: &crate::aws_context::AwsContext,
+        resource: impl Into<String>,
+    ) -> Self {
         Self {
-            owner: app
-                .tabs
-                .get(app.current_tab)
-                .filter(|tab| tab.service == app.current_service)
-                .map(|tab| tab.id),
-            profile: app.aws.profile.clone(),
-            region: app.aws.config.region.clone(),
-            account: app.aws.config.account_id.clone(),
-            role: app.aws.config.role_arn.clone(),
+            owner: None,
+            profile: aws.profile.clone(),
+            region: aws.config.region.clone(),
+            account: aws.config.account_id.clone(),
+            role: aws.config.role_arn.clone(),
             resource: resource.into(),
         }
     }

@@ -321,6 +321,7 @@ fn vpc_session_restoration_uses_both_entrypoints() {
             breadcrumb: "VPC › VPCs".into(),
             filter: None,
             selected_item: None,
+            region: None,
         });
         app.sessions = vec![session];
         app.mode = Mode::SessionPicker;

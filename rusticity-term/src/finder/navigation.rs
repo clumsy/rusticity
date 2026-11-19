@@ -128,12 +128,9 @@ pub fn validate_account(config: &rusticity_core::AwsConfig, resource: &Resource)
 
 pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -> Result<()> {
     validate_account(config, resource)?;
-    // Opening never silently switches credentials or the regional client set;
-    // `open_from_finder` switches only after the user confirmed it.
+    // `open_resource` gives a resource in another Region its own tab there.
     if let Some(region) = other_region(config, resource) {
-        bail!(
-            "Resource is in {region}; switch Region (Space, r) to open it, or bookmark it (Ctrl+B) to open it in its Region later"
-        );
+        bail!("Resource is in {region}, not {}", config.region);
     }
     Ok(())
 }
@@ -141,7 +138,8 @@ pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -
 /// Replace the AWS context of every tab: connect off-screen (bounded by
 /// 30s), check the new context with `check`, and only then swap it in, so a
 /// failed sign-in or a wrong account leaves the current app untouched. Tabs
-/// and the bookmark store carry over; every tab reloads in the new context.
+/// and the bookmark store carry over; every tab reloads, each in its own
+/// Region.
 pub async fn switch_context<Fut>(
     app: &mut App,
     connect: Fut,
@@ -157,43 +155,6 @@ where
     check(&next)?;
     app.replace_context(next);
     Ok(())
-}
-
-/// Enter on a finder result. A result from another Region, confirmed in the
-/// finder, first switches the whole app to that Region with the same profile
-/// and must resolve to the same account.
-pub async fn open_from_finder(app: &mut App, resource: Resource) -> Result<bool> {
-    open_from_finder_with(app, resource, |profile, region| {
-        AwsContext::connect(Some(profile), Some(region))
-    })
-    .await
-}
-
-pub(crate) async fn open_from_finder_with<F, Fut>(
-    app: &mut App,
-    resource: Resource,
-    connect: F,
-) -> Result<bool>
-where
-    F: FnOnce(String, String) -> Fut,
-    Fut: std::future::Future<Output = Result<AwsContext>>,
-{
-    if let Some(region) = other_region(&app.aws.config, &resource) {
-        validate_account(&app.aws.config, &resource)?;
-        let account = app.aws.config.account_id.clone();
-        switch_context(app, connect(app.aws.profile.clone(), region.to_string()), |next| {
-            if next.config.account_id != account {
-                bail!(
-                    "Profile {} resolved to account {} in {region}, not {account}. No resource was opened.",
-                    next.profile,
-                    next.config.account_id
-                );
-            }
-            validate_scope(&next.config, &resource)
-        })
-        .await?;
-    }
-    open_resource(app, resource).await
 }
 
 fn isolate_resource<T>(
@@ -216,8 +177,13 @@ fn isolate_resource<T>(
     Ok(())
 }
 
-fn start_resource_view(app: &mut App, kind: ResourceKind) {
+/// Open `kind` in a new tab, in `target` when given (another Region), else in
+/// a copy of the current tab's context.
+fn start_resource_view(app: &mut App, kind: ResourceKind, target: Option<AwsContext>) {
     crate::tab_runtime::sync_active(app);
+    if let Some(aws) = target {
+        crate::tab_runtime::open_next_tab_in(app, aws);
+    }
     let target = service(kind);
     app.current_service = target;
     app.service_selected = true;
@@ -234,7 +200,12 @@ fn start_resource_view(app: &mut App, kind: ResourceKind) {
     crate::tab_runtime::sync_active(app);
 }
 
-fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -> Result<()> {
+fn open_log_group(
+    app: &mut App,
+    name: &str,
+    lookup: Result<Option<LogGroup>>,
+    target: Option<AwsContext>,
+) -> Result<()> {
     // Resolve errors before changing tabs, selection, or the current service.
     let group = lookup?
         .filter(|group| group.name == name)
@@ -247,7 +218,7 @@ fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -
     state.log_groups.items = vec![group];
     state.log_groups.filter.clear();
     state.exact_match = true;
-    start_resource_view(app, ResourceKind::LogGroup);
+    start_resource_view(app, ResourceKind::LogGroup, target);
     app.log_groups_state = state;
     app.tabs[app.current_tab].breadcrumb = app.breadcrumbs();
     Ok(())
@@ -255,14 +226,20 @@ fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -
 
 /// Returns true when the event loop should run its ordinary Enter path, including
 /// that resource view's existing loaders. Managed inventories enter on completion.
+///
+/// A resource in another Region opens in a new tab in that Region, with the
+/// same sign-in; every other tab keeps its own Region.
 pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
-    validate_scope(&app.aws.config, &resource)?;
+    let target = other_region(&app.aws.config, &resource).map(|region| app.aws.in_region(region));
+    let config = target.as_ref().map_or(&app.aws.config, |aws| &aws.config);
+    validate_scope(config, &resource)?;
     if resource.kind == ResourceKind::LogGroup {
-        let lookup = app.aws.cloudwatch_client.get_log_group(&resource.id).await;
-        open_log_group(app, &resource.id, lookup)?;
+        let client = &target.as_ref().unwrap_or(&app.aws).cloudwatch_client;
+        let lookup = client.get_log_group(&resource.id).await;
+        open_log_group(app, &resource.id, lookup, target)?;
         return Ok(true);
     }
-    start_resource_view(app, resource.kind);
+    start_resource_view(app, resource.kind, target);
     // No search filter is reused accidentally from an older visit to this service.
     macro_rules! focus {
         ($table:expr, $field:ident, $arn:ident) => {{
@@ -563,7 +540,7 @@ mod log_group_navigation_tests {
         app.page_input = "9".into();
         let tabs = app.tabs.len();
         let name = "/aws/lambda/GrantFn";
-        open_log_group(&mut app, name, Ok(Some(group(name)))).unwrap();
+        open_log_group(&mut app, name, Ok(Some(group(name))), None).unwrap();
         assert_eq!(app.current_service, Service::CloudWatchLogGroups);
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.view_mode, ViewMode::List);
@@ -600,7 +577,7 @@ mod log_group_navigation_tests {
         });
         app.log_groups_state.log_groups.items = vec![group("old")];
         crate::tab_runtime::sync_active(&mut app);
-        open_log_group(&mut app, "new", Ok(Some(group("new")))).unwrap();
+        open_log_group(&mut app, "new", Ok(Some(group("new"))), None).unwrap();
         assert_eq!(app.log_groups_state.log_groups.items[0].name, "new");
         app.handle_action(crate::keymap::Action::PrevTab);
         assert_eq!(app.log_groups_state.log_groups.items[0].name, "old");
@@ -624,7 +601,7 @@ mod log_group_navigation_tests {
             app.page_input = "2".into();
             let tabs = app.tabs.len();
             let current_tab = app.current_tab;
-            assert!(open_log_group(&mut app, "/aws/lambda/GrantFn", lookup).is_err());
+            assert!(open_log_group(&mut app, "/aws/lambda/GrantFn", lookup, None).is_err());
             assert_eq!(app.current_service, Service::LambdaFunctions);
             assert_eq!(app.mode, Mode::ResourceFinder);
             assert_eq!(app.tabs.len(), tabs);

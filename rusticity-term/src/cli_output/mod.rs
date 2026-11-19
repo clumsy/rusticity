@@ -53,10 +53,14 @@ impl State {
         }
     }
 }
-/// Invalidate before drawing a frame with a changed AWS identity.
-pub(crate) fn invalidate_context(app: &mut App) {
-    let context = ReadScope::from_app(app, "").with_owner(None);
+/// Invalidate the output of tab `owner` before drawing a frame with its
+/// changed AWS context (`app.aws`).
+pub(crate) fn invalidate_context(app: &mut App, owner: TabId) {
+    let context = ReadScope::from_context(&app.aws, "");
     for view in app.cli_output.views.values_mut() {
+        if view.owner != owner {
+            continue;
+        }
         let scope = context.clone().with_owner(Some(view.owner));
         if !view.read.matches_scope(&scope) {
             view.read.request(scope);
@@ -102,7 +106,8 @@ pub(crate) fn viewer_scroll_mut(app: &mut App, id: u64) -> Option<&mut usize> {
 /// owner decide whether the captured command is still valid — switching focus
 /// to another tab never invalidates it.
 fn scope_for(app: &App, owner: TabId) -> ReadScope {
-    ReadScope::from_app(app, "").with_owner(Some(owner))
+    let aws = crate::tab_runtime::context_of(app, owner);
+    ReadScope::from_context(aws, "").with_owner(Some(owner))
 }
 fn open(app: &mut App) {
     let result = cli_command::invocation(app);
@@ -264,10 +269,20 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
 }
 
 pub async fn poll(app: &mut App) -> bool {
-    // One AWS-identity snapshot (owner unset); each view re-owns it with its own
-    // tab id below, so a background completion is matched to the tab that opened
-    // it and a focus change to a sibling tab never invalidates anything.
-    let base_scope = ReadScope::from_app(app, "").with_owner(None);
+    // Each view's scope is its own tab's AWS context, owned by that tab, so a
+    // background completion is matched to the tab that opened it and a focus
+    // change to a tab in another Region never invalidates anything.
+    let scopes: BTreeMap<TabId, ReadScope> = app
+        .tabs
+        .iter()
+        .map(|tab| {
+            let aws = crate::tab_runtime::context_of(app, tab.id);
+            (
+                tab.id,
+                ReadScope::from_context(aws, "").with_owner(Some(tab.id)),
+            )
+        })
+        .collect();
     let ids: Vec<u64> = app
         .tabs
         .iter()
@@ -281,8 +296,10 @@ pub async fn poll(app: &mut App) -> bool {
     state.views.retain(|id, _| ids.contains(id));
     let mut changed = state.views.len() != before;
     for view in state.views.values_mut() {
-        // This view's current scope = the AWS snapshot re-owned by its own tab.
-        let current_scope = base_scope.clone().with_owner(Some(view.owner));
+        // A view whose tab is gone was dropped above.
+        let Some(current_scope) = scopes.get(&view.owner).cloned() else {
+            continue;
+        };
         if !view.read.matches_scope(&current_scope) {
             // AWS context changed: invalidate, clear the captured invocation and
             // show the context-changed message. No automatic rerun — re-point the

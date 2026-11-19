@@ -35,6 +35,7 @@ impl Drop for Temp {
 
 fn app(temp: &Temp) -> App {
     let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
+    app.aws.connected = true;
     app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::SnsTopics;
     app.service_selected = true;
@@ -204,6 +205,34 @@ async fn same_context_reopens_through_finder_and_selects_exact_topic_after_local
     app.handle_action(Action::PrevTab);
     assert_eq!(app.sns_state.topics.filter, "chosen");
     assert!(app.sns_state.subscriptions.topic.is_none());
+}
+
+#[tokio::test]
+async fn a_bookmark_in_another_region_opens_a_tab_there_without_signing_in_again() {
+    let temp = Temp::new();
+    let mut app = app(&temp);
+    let mut entry = selected(&app).unwrap();
+    entry.region = "eu-west-1".into();
+    entry.resource.region = "eu-west-1".into();
+    entry.resource.arn = "arn:aws:sns:eu-west-1:123456789012:chosen".into();
+    app.bookmarks.pending_open = Some(entry);
+    let source = app.tabs[0].id;
+    open_with(&mut app, |_, _| async {
+        panic!("the same profile needs no new sign-in")
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(app.aws.config.region, "eu-west-1");
+    assert_eq!(
+        app.sns_state.pending_focus.as_deref(),
+        Some("arn:aws:sns:eu-west-1:123456789012:chosen")
+    );
+    assert_eq!(
+        crate::tab_runtime::context_of(&app, source).config.region,
+        "us-east-1",
+        "the source tab keeps its Region"
+    );
 }
 
 #[tokio::test]

@@ -28,3 +28,20 @@ fn a_reconnect_request_names_the_same_profile_and_region() {
         }
     );
 }
+
+#[test]
+fn another_region_keeps_the_sign_in_and_builds_its_clients_there() {
+    let mut aws = AwsContext::offline("beta".into(), Some("us-east-1".into()));
+    aws.connected = true;
+    aws.config.account_id = "123456789012".into();
+    let moved = aws.in_region("eu-west-1");
+    assert_eq!(moved.profile, "beta");
+    assert!(moved.connected);
+    assert_eq!(moved.config.region, "eu-west-1");
+    assert_eq!(moved.config.account_id, "123456789012");
+    assert_eq!(moved.cloudwatch_client.config().region, "eu-west-1");
+    assert_eq!(aws.config.region, "us-east-1", "the original is untouched");
+    let copy = aws.duplicate();
+    assert_eq!(copy.config.region, "us-east-1");
+    assert!(!AwsContext::offline("beta".into(), None).connected);
+}

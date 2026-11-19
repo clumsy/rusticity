@@ -225,14 +225,15 @@ fn finder_result_cap_and_errors_are_honest() {
 }
 
 #[tokio::test]
-async fn finder_rejects_cross_region_targets_without_changing_context() {
+async fn a_cross_region_target_reads_in_a_new_tab_in_its_region() {
     let mut app = app();
-    let old_service = app.current_service;
     let mut target = resource(ResourceKind::Table, "orders");
     target.region = "eu-west-1".into();
+    // The offline fixture cannot read; the failed read was made in eu-west-1.
     assert!(navigation::open_resource(&mut app, target).await.is_err());
-    assert_eq!(app.current_service, old_service);
-    assert_eq!(app.aws.config.region, "us-east-2");
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.current_service, Service::DynamoDbTables);
+    assert_eq!(app.aws.config.region, "eu-west-1");
 }
 
 fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
@@ -683,7 +684,7 @@ fn multi_region_results_keep_their_region_and_never_collapse_across_regions() {
 }
 
 #[test]
-fn a_result_from_another_region_explains_how_to_open_it() {
+fn scope_validation_names_both_regions() {
     let mut app = app();
     app.aws.config.account_id = "123456789012".into();
     let other = Resource {
@@ -696,7 +697,10 @@ fn a_result_from_another_region_explains_how_to_open_it() {
     let error = navigation::validate_scope(&app.aws.config, &other)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("eu-west-1") && error.contains("Space, r") && error.contains("Ctrl+B"));
+    assert!(
+        error.contains("eu-west-1") && error.contains("us-east-2"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -739,7 +743,9 @@ mod open_in_its_region {
         }
     }
 
+    /// A signed-in app on one tab, the finder open on `row`.
     fn finder_on(app: &mut App, row: Resource) {
+        app.aws.connected = true;
         app.aws.config.account_id = "123456789012".into();
         open(app);
         app.resource_finder.rows = vec![row];
@@ -747,118 +753,93 @@ mod open_in_its_region {
     }
 
     #[test]
-    fn the_first_enter_asks_and_the_second_queues_the_open() {
+    fn enter_queues_the_open_at_once_with_nothing_to_confirm() {
         let mut app = app();
         finder_on(&mut app, other());
-        app.handle_action(Action::Select);
-        assert!(
-            app.resource_finder.pending_open.is_none(),
-            "nothing opens yet"
-        );
-        let message = app.resource_finder.message();
-        assert!(
-            message.contains("eu-west-1")
-                && message.contains("switches all tabs")
-                && message.contains("us-east-2"),
-            "{message}"
-        );
         app.handle_action(Action::Select);
         assert_eq!(app.resource_finder.pending_open, Some(other()));
-        assert_eq!(
-            app.aws.config.region, "us-east-2",
-            "the switch happens on open"
-        );
+        assert_eq!(app.aws.config.region, "us-east-2", "nothing changed yet");
     }
 
     #[test]
-    fn esc_or_moving_cancels_the_question_and_keeps_the_finder() {
-        let mut app = app();
-        finder_on(&mut app, other());
-        app.handle_action(Action::Select);
-        app.handle_action(Action::GoBack);
-        assert_eq!(
-            app.mode,
-            Mode::ResourceFinder,
-            "Esc only cancels the question"
-        );
-        assert!(app.resource_finder.confirm_region.is_none());
-        app.handle_action(Action::Select);
-        app.handle_action(Action::NextItem);
-        app.handle_action(Action::Select);
-        assert!(app.resource_finder.pending_open.is_none(), "asked again");
-    }
-
-    #[test]
-    fn another_account_is_refused_without_asking() {
+    fn another_account_is_refused() {
         let mut app = app();
         let mut foreign = other();
         foreign.arn = "arn:aws:sns:eu-west-1:999999999999:orders".into();
         finder_on(&mut app, foreign);
         app.handle_action(Action::Select);
-        assert!(app.resource_finder.confirm_region.is_none());
+        assert!(app.resource_finder.pending_open.is_none());
         assert!(app
             .resource_finder
             .message()
             .contains("account 999999999999"));
     }
 
-    #[tokio::test]
-    async fn the_open_switches_every_tab_to_the_resource_region() {
+    fn signed_in_with_a_tab() -> App {
         let mut app = app();
+        app.aws.connected = true;
         app.aws.config.account_id = "123456789012".into();
-        let tabs = app.tabs.len();
-        let enter =
-            navigation::open_from_finder_with(&mut app, other(), |profile, region| async move {
-                assert_eq!((profile.as_str(), region.as_str()), ("test", "eu-west-1"));
-                let mut next = crate::aws_context::AwsContext::offline(profile, Some(region));
-                next.config.account_id = "123456789012".into();
-                Ok(next)
-            })
-            .await
-            .unwrap();
+        app.tabs.push(crate::app::Tab {
+            id: crate::tab_runtime::TabId::new(),
+            service: Service::VpcVpcs,
+            title: "VPC › VPCs".into(),
+            breadcrumb: "VPC › VPCs".into(),
+        });
+        app.current_service = Service::VpcVpcs;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        crate::tab_runtime::sync_active(&mut app);
+        app
+    }
+
+    #[tokio::test]
+    async fn the_open_adds_a_tab_in_the_resource_region_and_keeps_the_others() {
+        let mut app = signed_in_with_a_tab();
+        let vpc_tab = app.tabs[0].id;
+        let enter = navigation::open_resource(&mut app, other()).await.unwrap();
         assert!(!enter, "the topic opens on completion of its read");
-        assert_eq!(app.aws.config.region, "eu-west-1");
+        assert_eq!(app.tabs.len(), 2, "old tab kept, one opened");
         assert_eq!(app.current_service, Service::SnsTopics);
-        assert_eq!(app.tabs.len(), tabs + 1, "old tabs kept, one opened");
+        assert_eq!(
+            app.aws.config.region, "eu-west-1",
+            "the new tab reads there"
+        );
+        assert_eq!(app.aws.config.account_id, "123456789012", "same sign-in");
+        assert_eq!(
+            crate::tab_runtime::context_of(&app, vpc_tab).config.region,
+            "us-east-2",
+            "the other tab keeps its Region"
+        );
+        // Its read is scoped to the new tab in eu-west-1.
+        assert!(matches!(
+            app.sns_state.load_status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        ));
+        app.handle_action(Action::PrevTab);
+        assert_eq!(app.current_service, Service::VpcVpcs);
+        assert_eq!(app.aws.config.region, "us-east-2");
+        app.handle_action(Action::NextTab);
+        assert_eq!(app.aws.config.region, "eu-west-1");
     }
 
     #[tokio::test]
-    async fn a_different_account_or_failed_sign_in_keeps_the_current_app() {
-        for fail in [false, true] {
-            let mut app = app();
-            app.aws.config.account_id = "123456789012".into();
-            let service = app.current_service;
-            let result = navigation::open_from_finder_with(
-                &mut app,
-                other(),
-                |profile, region| async move {
-                    if fail {
-                        anyhow::bail!("ExpiredToken");
-                    }
-                    let mut next = crate::aws_context::AwsContext::offline(profile, Some(region));
-                    next.config.account_id = "210987654321".into();
-                    Ok(next)
-                },
-            )
-            .await;
-            assert!(result.is_err());
-            assert_eq!(app.aws.config.region, "us-east-2");
-            assert_eq!(app.current_service, service);
-        }
-    }
-
-    #[tokio::test]
-    async fn a_current_region_result_opens_without_reconnecting() {
-        let mut app = app();
-        app.aws.config.account_id = "123456789012".into();
+    async fn a_current_region_result_opens_in_the_current_region() {
+        let mut app = signed_in_with_a_tab();
         let mut here = other();
         here.region = "us-east-2".into();
         here.arn = "arn:aws:sns:us-east-2:123456789012:orders".into();
-        navigation::open_from_finder_with(&mut app, here, |_, _| async {
-            panic!("no reconnect for the current Region")
-        })
-        .await
-        .unwrap();
+        navigation::open_resource(&mut app, here).await.unwrap();
         assert_eq!(app.current_service, Service::SnsTopics);
+        assert_eq!(app.aws.config.region, "us-east-2");
+    }
+
+    #[tokio::test]
+    async fn another_account_never_opens_a_tab() {
+        let mut app = signed_in_with_a_tab();
+        let mut foreign = other();
+        foreign.arn = "arn:aws:sns:eu-west-1:999999999999:orders".into();
+        assert!(navigation::open_resource(&mut app, foreign).await.is_err());
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.aws.config.region, "us-east-2");
     }
 }

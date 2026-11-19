@@ -590,6 +590,7 @@ fn both_session_restore_paths_and_retry_keep_state_machine_inventory() {
             breadcrumb: "Step Functions › State machines".into(),
             filter: None,
             selected_item: None,
+            region: None,
         });
         app.sessions = vec![session];
         app.mode = Mode::SessionPicker;

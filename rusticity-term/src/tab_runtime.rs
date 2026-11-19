@@ -14,8 +14,13 @@
 //! into the live fields. [`poll`] temporarily hydrates every *background* owned
 //! tab so its reads make progress, then restores the visible window untouched.
 //!
+//! Every tab also owns its AWS context ([`AwsContext`]: profile, Region,
+//! account, role and clients). The bound tab's is `app.aws`; the others are
+//! parked in [`TabRuntime::contexts`] and swapped in with their state, so each
+//! tab reads, and background-polls, in its own Region. A new tab starts with a
+//! copy of the context it was opened from, or the one [`open_next_tab_in`] set.
+//!
 //! What this module deliberately does NOT move:
-//! * AWS clients, [`App::config`], profile/region — identity, shared by all tabs.
 //! * `tabs`, `current_tab`, `current_service`, pickers, sessions — global chrome.
 //! * `cli_output::State` — it already keys its views by its own id, so it is
 //!   independent without snapshotting; [`poll`] drives it once in the visible
@@ -30,7 +35,8 @@
 
 use crate::app::{App, Service, ViewMode};
 use crate::async_read::{ReadScope, ReadStatus};
-use std::collections::BTreeMap;
+use crate::aws_context::AwsContext;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Stable, monotonic identity for a tab. Cloned freely; equality is identity.
@@ -361,10 +367,20 @@ fn hydrate(app: &mut App, snap: Snapshot) {
 pub struct TabRuntime {
     /// Parked view state, keyed by the owning tab's stable id.
     snapshots: BTreeMap<TabId, Snapshot>,
+    /// The AWS context of every open tab except the bound one, whose context
+    /// is `app.aws`. A tab with no entry uses `app.aws`.
+    contexts: BTreeMap<TabId, AwsContext>,
+    /// The context the next new tab opens in, instead of a copy of the
+    /// current one.
+    next_tab: Option<AwsContext>,
+    /// Tabs whose context changed while they were bound: their state was
+    /// dropped and they read again once they are the owner.
+    stale: BTreeSet<TabId>,
     /// The tab whose state currently occupies the live `*_state` fields, or
     /// `None` before the runtime has ever bound (a freshly constructed app).
     bound: Option<TabId>,
     bound_service: Option<Service>,
+    /// The identity of `app.aws` at the last sync, to notice an in-place change.
     identity: Option<ReadScope>,
 }
 
@@ -407,18 +423,24 @@ fn active_owner(app: &App) -> Option<(TabId, Service)> {
 /// * A detached fixture (no tab, or `tab.service != current_service`) leaves the
 ///   live fields alone and does not fabricate an id — tests stay usable.
 pub fn sync_active(app: &mut App) {
-    let identity = ReadScope::from_app(app, "").with_owner(None);
-    if app
+    sync_window(app);
+    app.tab_runtime.identity = Some(ReadScope::from_context(&app.aws, ""));
+}
+
+fn sync_window(app: &mut App) {
+    let identity = ReadScope::from_context(&app.aws, "");
+    let changed = app
         .tab_runtime
         .identity
         .as_ref()
-        .is_some_and(|saved| saved != &identity)
-    {
-        reset_for_session_replace(app);
-        crate::cli_output::invalidate_context(app);
-    }
-    app.tab_runtime.identity = Some(identity);
+        .is_some_and(|saved| saved != &identity);
     purge_closed(app);
+    if changed {
+        // The bound tab's own context changed in place (its Region was
+        // picked): only that tab starts over. Every other tab keeps its own
+        // context and rows.
+        reset_bound(app);
+    }
     let Some((owner, service)) = active_owner(app) else {
         // Nothing owns the screen (empty fixture, CLI tab, or mid-transition
         // divergence). Leave the live window and binding untouched.
@@ -427,7 +449,16 @@ pub fn sync_active(app: &mut App) {
 
     if app.tab_runtime.unbound() {
         // Adopt the pre-existing live state as this owner's, without disturbing
-        // prepared fixture fields.
+        // prepared fixture fields. Nothing owned `app.aws` yet, so a context
+        // set for this tab replaces it.
+        let runtime = &mut app.tab_runtime;
+        if let Some(aws) = runtime
+            .contexts
+            .remove(&owner)
+            .or_else(|| runtime.next_tab.take())
+        {
+            app.aws = aws;
+        }
         app.tab_runtime.bound = Some(owner);
         app.tab_runtime.bound_service = Some(service);
         if is_managed(service) && live_status(app, service) == ReadStatus::Idle {
@@ -438,29 +469,43 @@ pub fn sync_active(app: &mut App) {
 
     let previous = app.tab_runtime.bound;
     if previous == Some(owner) {
+        if app.tab_runtime.stale.remove(&owner) {
+            request_fresh_managed(app, service);
+        }
         return; // Already the visible window.
     }
 
     // Park the outgoing owner's live state, but only if that tab is still open —
     // a closed tab's state was already dropped (and its reads aborted) by purge.
-    if let Some(prev_id) = previous {
-        let prev_still_open = app
+    let prev_open = previous.filter(|id| app.tabs.iter().any(|tab| tab.id == *id));
+    if let Some(prev_id) = prev_open {
+        // The service to park under is the one the live fields hold, which is
+        // the previous owner's service. Find it from the tab list.
+        if let Some(prev_service) = app
             .tabs
             .iter()
-            .any(|tab| tab.id == prev_id && !matches!(tab.service, Service::CliOutput(_)));
-        if prev_still_open {
-            // The service to park under is the one the live fields hold, which is
-            // the previous owner's service. Find it from the tab list.
-            if let Some(prev_service) = app
-                .tabs
-                .iter()
-                .find(|tab| tab.id == prev_id)
-                .map(|tab| tab.service)
-            {
-                if let Some(snap) = take_live(app, prev_service) {
-                    app.tab_runtime.snapshots.insert(prev_id, snap);
-                }
+            .find(|tab| tab.id == prev_id && !matches!(tab.service, Service::CliOutput(_)))
+            .map(|tab| tab.service)
+        {
+            if let Some(snap) = take_live(app, prev_service) {
+                app.tab_runtime.snapshots.insert(prev_id, snap);
             }
+        }
+    }
+
+    // Swap the AWS context: the incoming owner's own, or for a new tab the one
+    // it was opened in (a copy of the outgoing tab's by default). A closed
+    // outgoing tab's context is dropped.
+    let runtime = &mut app.tab_runtime;
+    let incoming = runtime
+        .contexts
+        .remove(&owner)
+        .or_else(|| runtime.next_tab.take())
+        .or_else(|| prev_open.map(|_| app.aws.duplicate()));
+    if let Some(incoming) = incoming {
+        let outgoing = std::mem::replace(&mut app.aws, incoming);
+        if let Some(prev_id) = prev_open {
+            app.tab_runtime.contexts.insert(prev_id, outgoing);
         }
     }
 
@@ -476,6 +521,9 @@ pub fn sync_active(app: &mut App) {
                 "snapshot/service mismatch on hydrate"
             );
             hydrate(app, snap);
+            if app.tab_runtime.stale.remove(&owner) {
+                request_fresh_managed(app, service);
+            }
         }
         None => {
             // A tab seen for the first time. Install a fresh default so it begins
@@ -486,6 +534,7 @@ pub fn sync_active(app: &mut App) {
             if let Some(fresh) = take_live(app, service) {
                 drop(fresh);
             }
+            app.tab_runtime.stale.remove(&owner);
             // A brand-new managed tab kicks off its first inventory read exactly
             // once. Non-managed services keep their legacy open-time request path.
             request_fresh_managed(app, service);
@@ -494,6 +543,43 @@ pub fn sync_active(app: &mut App) {
 
     app.tab_runtime.bound = Some(owner);
     app.tab_runtime.bound_service = Some(service);
+}
+
+/// The bound tab's context changed: drop its rows and reads (it reads again
+/// once it is the owner) and invalidate its CLI output.
+fn reset_bound(app: &mut App) {
+    let Some(id) = app.tab_runtime.bound else {
+        return;
+    };
+    crate::cli_output::invalidate_context(app, id);
+    if let Some(service) = app.tab_runtime.bound_service {
+        drop(take_live(app, service));
+        app.tab_runtime.stale.insert(id);
+    }
+}
+
+/// The AWS context of `tab`: `app.aws` for the bound tab (and any tab never
+/// bound), else its parked context.
+pub(crate) fn context_of(app: &App, tab: TabId) -> &AwsContext {
+    app.tab_runtime.contexts.get(&tab).unwrap_or(&app.aws)
+}
+
+/// Give `tab`, which is not the bound tab, its own context.
+pub(crate) fn park_context(app: &mut App, tab: TabId, aws: AwsContext) {
+    app.tab_runtime.contexts.insert(tab, aws);
+}
+
+/// The next new tab opens in `aws` instead of a copy of the current context.
+pub(crate) fn open_next_tab_in(app: &mut App, aws: AwsContext) {
+    app.tab_runtime.next_tab = Some(aws);
+}
+
+/// Move the current tab to `aws` (another Region of its sign-in). Only this
+/// tab starts over; every other tab keeps its context and rows.
+pub fn set_current_context(app: &mut App, aws: AwsContext) {
+    app.aws = aws;
+    app.context_changed = true;
+    sync_active(app);
 }
 
 /// Queue the first inventory read for a freshly-opened managed tab. Delegates to
@@ -533,6 +619,8 @@ pub fn purge_closed(app: &mut App) {
     app.cli_output.retain_tabs(&app.tabs);
     let live: std::collections::BTreeSet<TabId> = app.tabs.iter().map(|tab| tab.id).collect();
     app.tab_runtime.snapshots.retain(|id, _| live.contains(id));
+    app.tab_runtime.contexts.retain(|id, _| live.contains(id));
+    app.tab_runtime.stale.retain(|id| live.contains(id));
     if app.tab_runtime.bound.is_some_and(|id| !live.contains(&id)) {
         if let Some(service) = app.tab_runtime.bound_service.take() {
             drop(take_live(app, service));
@@ -550,6 +638,9 @@ pub fn reset_for_session_replace(app: &mut App) {
         drop(take_live(app, service));
     }
     app.tab_runtime.snapshots.clear();
+    app.tab_runtime.contexts.clear();
+    app.tab_runtime.stale.clear();
+    app.tab_runtime.next_tab = None;
     app.tab_runtime.bound = Some(TabId::new());
 }
 
@@ -777,9 +868,22 @@ pub async fn poll(app: &mut App) -> bool {
         };
         hydrate(app, snap);
         point_context_at(app, id, service);
+        // A parked tab reads in its own AWS context.
+        let parked = match app.tab_runtime.contexts.get_mut(&id) {
+            Some(context) => {
+                std::mem::swap(&mut app.aws, context);
+                true
+            }
+            None => false,
+        };
 
         changed |= poll_managed(app, service).await;
 
+        if parked {
+            if let Some(context) = app.tab_runtime.contexts.get_mut(&id) {
+                std::mem::swap(&mut app.aws, context);
+            }
+        }
         if let Some(reparked) = take_live(app, service) {
             app.tab_runtime.snapshots.insert(id, reparked);
         }

@@ -272,6 +272,7 @@ fn rds_restores_from_both_session_entrypoints() {
             breadcrumb: "RDS › DB Instances".into(),
             filter: None,
             selected_item: None,
+            region: None,
         });
         app.sessions = vec![session];
         app.session_picker_selected = 0;

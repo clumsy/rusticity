@@ -393,7 +393,36 @@ async fn closing_visible_owner_aborts_only_that_job_and_reindex_keeps_other_resu
 }
 
 #[tokio::test]
-async fn aws_context_change_clears_ready_background_data_before_next_draw() {
+async fn a_context_change_resets_only_its_own_tab() {
+    let mut app = app();
+    let a = push_tab(&mut app, Service::SnsTopics);
+    sync_active(&mut app);
+    let tx = start_local_topics(&mut app);
+    tx.send(Ok(vec![topic("EAST-ROW")])).unwrap();
+    tokio::task::yield_now().await;
+    poll(&mut app).await;
+    let b = push_tab(&mut app, Service::SnsTopics);
+    sync_active(&mut app);
+    assert_eq!(status_for(&app, a), ReadStatus::Ready);
+    // Tab b moves to eu-west-1: it starts over there; tab a keeps us-east-1.
+    let west = app.aws.in_region("eu-west-1");
+    set_current_context(&mut app, west);
+    assert_eq!(app.tabs[app.current_tab].id, b);
+    assert!(app.context_changed);
+    assert!(matches!(status_for(&app, b), ReadStatus::Loading { .. }));
+    assert_eq!(status_for(&app, a), ReadStatus::Ready);
+    assert_eq!(context_of(&app, a).config.region, "us-east-1");
+    assert_eq!(app.aws.config.region, "eu-west-1");
+    app.handle_action(crate::keymap::Action::PrevTab);
+    assert_eq!(app.aws.config.region, "us-east-1");
+    assert_eq!(app.sns_state.topics.items[0].name, "EAST-ROW");
+    app.handle_action(crate::keymap::Action::NextTab);
+    assert_eq!(app.aws.config.region, "eu-west-1");
+    assert!(app.sns_state.topics.items.is_empty());
+}
+
+#[tokio::test]
+async fn an_in_place_change_drops_the_bound_tab_rows_before_the_next_draw() {
     let mut app = app();
     let a = push_tab(&mut app, Service::SnsTopics);
     sync_active(&mut app);
@@ -401,17 +430,64 @@ async fn aws_context_change_clears_ready_background_data_before_next_draw() {
     tx.send(Ok(vec![topic("OLD-ACCOUNT-ROW")])).unwrap();
     tokio::task::yield_now().await;
     poll(&mut app).await;
-    let b = push_tab(&mut app, Service::VpcVpcs);
-    sync_active(&mut app);
-    assert_eq!(status_for(&app, a), ReadStatus::Ready);
     app.aws.config.account_id = "999999999999".into();
     sync_active(&mut app);
-    assert_eq!(app.tabs[app.current_tab].id, b);
-    assert_eq!(status_for(&app, a), ReadStatus::Idle);
-    app.handle_action(crate::keymap::Action::PrevTab);
     assert!(app.sns_state.topics.items.is_empty());
     assert!(!screen(&app).contains("OLD-ACCOUNT-ROW"));
     assert!(matches!(status_for(&app, a), ReadStatus::Loading { .. }));
+}
+
+#[tokio::test]
+async fn a_background_tab_finishes_its_read_in_its_own_region() {
+    let mut app = app();
+    let a = push_tab(&mut app, Service::SnsTopics);
+    sync_active(&mut app);
+    let tx = start_local_topics(&mut app);
+    let b = push_tab(&mut app, Service::VpcVpcs);
+    sync_active(&mut app);
+    let west = app.aws.in_region("eu-west-1");
+    set_current_context(&mut app, west);
+    // a was started in us-east-1 and is parked; b reads in eu-west-1.
+    tx.send(Ok(vec![topic("EAST-ROW")])).unwrap();
+    tokio::task::yield_now().await;
+    assert!(poll(&mut app).await);
+    assert_eq!(app.tabs[app.current_tab].id, b);
+    assert_eq!(
+        app.aws.config.region, "eu-west-1",
+        "the visible tab is untouched"
+    );
+    assert_eq!(
+        status_for(&app, a),
+        ReadStatus::Ready,
+        "accepted, not cancelled"
+    );
+    app.handle_action(crate::keymap::Action::PrevTab);
+    assert_eq!(app.sns_state.topics.items[0].name, "EAST-ROW");
+}
+
+#[test]
+fn a_new_tab_copies_the_context_it_was_opened_from_unless_one_is_given() {
+    let mut app = app();
+    let a = push_tab(&mut app, Service::VpcVpcs);
+    sync_active(&mut app);
+    let west = app.aws.in_region("eu-west-1");
+    set_current_context(&mut app, west);
+    let b = push_tab(&mut app, Service::VpcVpcs);
+    sync_active(&mut app);
+    assert_eq!(app.aws.config.region, "eu-west-1", "copied from a");
+    let tokyo = app.aws.in_region("ap-northeast-1");
+    open_next_tab_in(&mut app, tokyo);
+    let c = push_tab(&mut app, Service::VpcVpcs);
+    sync_active(&mut app);
+    assert_eq!(app.aws.config.region, "ap-northeast-1");
+    for (tab, region) in [(a, "eu-west-1"), (b, "eu-west-1"), (c, "ap-northeast-1")] {
+        assert_eq!(context_of(&app, tab).config.region, region);
+    }
+    // Closing a tab drops its context; the next tab is bound in its own.
+    app.handle_action(crate::keymap::Action::CloseTab);
+    assert_eq!(app.tabs[app.current_tab].id, b);
+    assert_eq!(app.aws.config.region, "eu-west-1");
+    assert!(!app.tab_runtime.contexts.contains_key(&c));
 }
 
 #[test]

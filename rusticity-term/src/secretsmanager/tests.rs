@@ -274,6 +274,7 @@ fn refresh_retry_and_sessions_remain_metadata_inventory() {
             breadcrumb: "Secrets Manager › Secrets".into(),
             filter: None,
             selected_item: None,
+            region: None,
         });
         app.sessions = vec![session];
         app.mode = Mode::SessionPicker;

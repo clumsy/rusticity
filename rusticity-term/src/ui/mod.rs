@@ -673,7 +673,9 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));
     frame.render_widget(info_widget, chunks[0]);
 
-    // Tabs line
+    // Tabs line. Once tabs read in more than one Region, each names its own.
+    let regions: Vec<&str> = app.tabs.iter().map(|tab| app.tab_region(tab.id)).collect();
+    let mixed = regions.iter().any(|region| *region != regions[0]);
     let mut spans = Vec::new();
     for (index, tab) in app.tabs.iter().enumerate() {
         if index > 0 {
@@ -681,6 +683,9 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
         }
         let style = service_tab_style(index == app.current_tab);
         spans.push(Span::styled(tab.title.as_str(), style));
+        if mixed {
+            spans.push(Span::styled(format!(" ({})", regions[index]), style));
+        }
         if let Some(mut marker) = loading::marker(crate::tab_runtime::status_for(app, tab.id)) {
             spans.push(Span::styled(" ", style));
             marker.style = style.patch(marker.style);
@@ -1125,24 +1130,31 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    // Filter input
-    let filter_text = if app.tab_filter.is_empty() {
-        "Type to filter tabs...".to_string()
+    // Filter input; only one of the filter and the list is active, as in
+    // the service picker.
+    let filter_text = if app.tab_filter_active {
+        vec![
+            Span::raw(&app.tab_filter),
+            Span::styled("█", Style::default().fg(Color::Green)),
+        ]
+    } else if app.tab_filter.is_empty() {
+        vec![Span::styled(
+            "Type to filter tabs by name or Region...",
+            Style::default().fg(Color::DarkGray),
+        )]
     } else {
-        app.tab_filter.clone()
+        vec![Span::raw(&app.tab_filter)]
     };
-    let filter_style = if app.tab_filter.is_empty() {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
-    let filter = Paragraph::new(filter_text).style(filter_style).block(
+    let filter = Paragraph::new(Line::from(filter_text)).block(
         Block::default()
             .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Yellow)),
+            .border_style(Style::default().fg(if app.tab_filter_active {
+                Color::Green
+            } else {
+                Color::White
+            })),
     );
     frame.render_widget(Clear, main_chunks[0]);
     frame.render_widget(filter, main_chunks[0]);
@@ -1156,7 +1168,24 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
     let filtered_tabs = app.get_filtered_tabs();
     let items: Vec<ListItem> = filtered_tabs
         .iter()
-        .map(|(_, tab)| ListItem::new(tab.breadcrumb.clone()))
+        .enumerate()
+        .map(|(index, (_, tab))| {
+            let mut line = vec![Span::raw(tab.breadcrumb.clone())];
+            let region = app.tab_region(tab.id);
+            if !region.is_empty() {
+                // The selected row has a DarkGray background.
+                let color = if index == app.tab_picker_selected {
+                    Color::Gray
+                } else {
+                    Color::DarkGray
+                };
+                line.push(Span::styled(
+                    format!(" ({region})"),
+                    Style::default().fg(color),
+                ));
+            }
+            ListItem::new(Line::from(line))
+        })
         .collect();
 
     let list = List::new(items)
@@ -1169,9 +1198,11 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
                 )))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_type(BorderType::Rounded)
-                .border_type(BorderType::Rounded)
-                .border_style(active_border()),
+                .border_style(if app.tab_filter_active {
+                    Style::default().fg(Color::White)
+                } else {
+                    active_border()
+                }),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("► ");

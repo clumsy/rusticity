@@ -628,8 +628,13 @@ async fn the_tab_shows_a_spinner_while_its_read_runs() {
         ReadStatus::Loading { .. }
     ));
     let tabs: String = screen(&app).chars().skip(220).take(220).collect();
+    // The frame follows elapsed time, so any spinner frame will do.
     assert!(
-        tabs.contains("EC2 › Load balancers ✓ ⋮ EC2 › Load balancers ⠋"),
+        crate::ui::SPINNER_FRAMES.iter().any(|frame| {
+            tabs.contains(&format!(
+                "EC2 › Load balancers ✓ ⋮ EC2 › Load balancers {frame}"
+            ))
+        }),
         "{}",
         tabs.trim_end()
     );

@@ -152,6 +152,7 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::BookmarkPicker => app.bookmarks.filtering,
         Mode::SessionPicker => app.session_filter_active,
         Mode::ProfilePicker => app.profile_filter_active,
+        Mode::TabPicker => app.tab_filter_active,
         _ => false,
     };
 

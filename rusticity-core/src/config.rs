@@ -166,6 +166,23 @@ impl AwsConfig {
             .ok_or_else(|| anyhow::anyhow!("Could not determine fastest region"))
     }
 
+    /// The same sign-in in another Region: the credentials, account and role
+    /// carry over, so no request is made. Every client built from the result
+    /// calls `region`.
+    pub fn in_region(&self, region: &str) -> Self {
+        Self {
+            region: region.to_string(),
+            account_id: self.account_id.clone(),
+            role_arn: self.role_arn.clone(),
+            region_auto_detected: false,
+            sdk_config: self
+                .sdk_config
+                .to_builder()
+                .region(aws_config::Region::new(region.to_string()))
+                .build(),
+        }
+    }
+
     pub fn dummy(region: Option<String>) -> Self {
         // Build a minimal SdkConfig with just the region — no credential resolution.
         let region_str = region.unwrap_or_default();
@@ -390,6 +407,38 @@ mod tests {
         assert_eq!(config.region, "");
         assert_eq!(config.account_id, "");
         assert!(!config.region_auto_detected);
+    }
+
+    #[test]
+    fn in_region_keeps_the_sign_in_and_moves_every_client() {
+        use aws_sdk_sts::config::{Credentials, SharedCredentialsProvider};
+        let credentials = Credentials::new("a", "b", None, None, "test");
+        let sdk_config = aws_config::SdkConfig::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(SharedCredentialsProvider::new(credentials))
+            .build();
+        let mut config = AwsConfig::from_sdk_config(sdk_config, "us-east-1", "123456789012");
+        config.role_arn = "arn:aws:iam::123456789012:role/Admin".into();
+        let moved = config.in_region("eu-west-1");
+        assert_eq!(moved.region, "eu-west-1");
+        assert_eq!(moved.account_id, "123456789012");
+        assert_eq!(moved.role_arn, config.role_arn);
+        assert_eq!(
+            moved.sdk_config.region().map(|r| r.as_ref()),
+            Some("eu-west-1")
+        );
+        assert!(moved.sdk_config.credentials_provider().is_some());
+        assert_eq!(
+            moved.ec2_client().config().region().map(|r| r.as_ref()),
+            Some("eu-west-1")
+        );
+        // The original is untouched.
+        assert_eq!(config.region, "us-east-1");
+        assert_eq!(
+            config.ec2_client().config().region().map(|r| r.as_ref()),
+            Some("us-east-1")
+        );
     }
 
     #[tokio::test]

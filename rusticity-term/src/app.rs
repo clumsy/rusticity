@@ -127,6 +127,9 @@ pub struct App {
     pub context_request: Option<crate::aws_context::ContextRequest>,
     /// A profile picked without a Region, waiting for the Region picker.
     pub pending_profile: Option<String>,
+    /// The current tab moved to another context in place; the event loop
+    /// reloads its legacy (not tab-owned) views.
+    pub context_changed: bool,
     pub current_service: Service,
     pub tabs: Vec<Tab>,
     pub current_tab: usize,
@@ -135,6 +138,8 @@ pub struct App {
     pub tab_runtime: crate::tab_runtime::TabRuntime,
     pub tab_picker_selected: usize,
     pub tab_filter: String,
+    /// The tab picker filter has focus; otherwise the tab list does.
+    pub tab_filter_active: bool,
     pub pending_key: Option<char>,
     pub log_groups_state: CloudWatchLogGroupsState,
     pub insights_state: CloudWatchInsightsState,
@@ -642,6 +647,7 @@ impl App {
             aws,
             context_request: None,
             pending_profile: None,
+            context_changed: false,
             running: true,
             mode: Mode::ServicePicker,
             current_service: Service::CloudWatchLogGroups,
@@ -650,6 +656,7 @@ impl App {
             tab_runtime: TabRuntime::default(),
             tab_picker_selected: 0,
             tab_filter: String::new(),
+            tab_filter_active: false,
             pending_key: None,
             log_groups_state: CloudWatchLogGroupsState::new(),
             insights_state: CloudWatchInsightsState::new(),
@@ -864,24 +871,27 @@ impl App {
         }
     }
 
-    /// Ask the event loop to connect `profile` in `region`, unless that is
-    /// already the current context.
-    pub(crate) fn request_context(&mut self, profile: String, region: String) {
-        if profile == self.aws.profile && region == self.aws.config.region {
-            return;
-        }
-        self.context_request = Some(ContextRequest {
-            profile: Some(profile),
-            region: Some(region).filter(|r| !r.is_empty()),
-        });
-    }
-
-    /// Swap in a connected context, whole. Every view starts empty and each
-    /// tab reloads in the new context; the tabs, the bookmarks, the session
-    /// and the profile and Region pickers carry over. Nothing read in the old
-    /// context stays on screen.
+    /// Swap in a connected context, whole: the current tab gets `aws`, every
+    /// other tab the same sign-in in its own Region. Every view starts empty
+    /// and each tab reloads; the tabs, the bookmarks, the session and the
+    /// profile and Region pickers carry over. Nothing read in the old context
+    /// stays on screen.
     pub fn replace_context(&mut self, aws: AwsContext) {
+        let current = self.tabs.get(self.current_tab).map(|tab| tab.id);
+        let regions: Vec<(TabId, String)> = self
+            .tabs
+            .iter()
+            .filter(|tab| Some(tab.id) != current)
+            .map(|tab| {
+                let aws = crate::tab_runtime::context_of(self, tab.id);
+                (tab.id, aws.config.region.clone())
+            })
+            .collect();
         let mut next = App::with_context(aws);
+        for (id, region) in regions {
+            let aws = next.aws.in_region(&region);
+            crate::tab_runtime::park_context(&mut next, id, aws);
+        }
         next.tabs = std::mem::take(&mut self.tabs);
         next.current_tab = self.current_tab.min(next.tabs.len().saturating_sub(1));
         next.current_service = self.current_service;
@@ -999,6 +1009,7 @@ impl App {
                 Mode::RegionPicker => self.region_filter_active = true,
                 Mode::SessionPicker => self.session_filter_active = true,
                 Mode::ProfilePicker => self.profile_filter_active = true,
+                Mode::TabPicker => self.tab_filter_active = true,
                 _ => {}
             },
             Action::ExitFilterMode => match self.mode {
@@ -1006,6 +1017,14 @@ impl App {
                     if self.service_picker.filter_active {
                         self.service_picker.filter_active = false;
                     } else {
+                        self.mode = Mode::Normal;
+                    }
+                }
+                Mode::TabPicker => {
+                    if self.tab_filter_active {
+                        self.tab_filter_active = false;
+                    } else {
+                        self.tab_filter.clear();
                         self.mode = Mode::Normal;
                     }
                 }
@@ -1076,6 +1095,7 @@ impl App {
                     Mode::RegionPicker => !self.region_filter_active,
                     Mode::SessionPicker => !self.session_filter_active,
                     Mode::ProfilePicker => !self.profile_filter_active,
+                    Mode::TabPicker => !self.tab_filter_active,
                     _ => true,
                 };
                 if should_navigate {
@@ -1089,6 +1109,7 @@ impl App {
                     Mode::RegionPicker => !self.region_filter_active,
                     Mode::SessionPicker => !self.session_filter_active,
                     Mode::ProfilePicker => !self.profile_filter_active,
+                    Mode::TabPicker => !self.tab_filter_active,
                     _ => true,
                 };
                 if should_navigate {
@@ -1235,6 +1256,9 @@ impl App {
             }
             Action::OpenTabPicker => {
                 if !self.tabs.is_empty() {
+                    // The list has focus first, as in the service picker.
+                    self.tab_filter.clear();
+                    self.tab_filter_active = false;
                     self.tab_picker_selected = self.current_tab;
                     self.mode = Mode::TabPicker;
                 } else {
@@ -1251,77 +1275,7 @@ impl App {
                 let filtered_sessions = self.get_filtered_sessions();
                 if let Some(&session) = filtered_sessions.get(self.session_picker_selected) {
                     let session = session.clone();
-                    // A session in another profile or Region connects it; the
-                    // account and role come from that connection, not the file.
-                    self.request_context(session.profile.clone(), session.region.clone());
-
-                    // Clear existing tabs and load session tabs
-                    self.tabs.clear();
-                    for session_tab in &session.tabs {
-                        // Parse service from string
-                        let service = match session_tab.service.as_str() {
-                            "ApiGatewayApis" => Service::ApiGatewayApis,
-                            "CloudWatchLogGroups" => Service::CloudWatchLogGroups,
-                            "CloudWatchInsights" => Service::CloudWatchInsights,
-                            "CloudWatchAlarms" => Service::CloudWatchAlarms,
-                            "CloudTrailEvents" => Service::CloudTrailEvents,
-                            "S3Buckets" => Service::S3Buckets,
-                            "SqsQueues" => Service::SqsQueues,
-                            "SnsTopics" => Service::SnsTopics,
-                            "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
-                            "AcmCertificates" => Service::AcmCertificates,
-                            "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
-                            "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
-                            "Ec2Instances" => Service::Ec2Instances,
-                            "Ec2LoadBalancers" => Service::Ec2LoadBalancers,
-                            "Ec2TargetGroups" => Service::Ec2TargetGroups,
-                            "EcrRepositories" => Service::EcrRepositories,
-                            "KmsKeys" => Service::KmsKeys,
-                            "EfsFileSystems" => Service::EfsFileSystems,
-                            "FsxFileSystems" => Service::FsxFileSystems,
-                            "RdsInstances" => Service::RdsInstances,
-                            "VpcVpcs" => Service::VpcVpcs,
-                            "DynamoDbTables" => Service::DynamoDbTables,
-                            "LambdaFunctions" => Service::LambdaFunctions,
-                            "LambdaApplications" => Service::LambdaApplications,
-                            "CloudFormationStacks" => Service::CloudFormationStacks,
-                            "IamUsers" => Service::IamUsers,
-                            "IamRoles" => Service::IamRoles,
-                            "IamUserGroups" => Service::IamUserGroups,
-                            _ => continue,
-                        };
-
-                        self.tabs.push(Tab {
-                            id: TabId::new(),
-                            service,
-                            title: if service == Service::RdsInstances {
-                                service.name().into()
-                            } else {
-                                session_tab.title.clone()
-                            },
-                            breadcrumb: if service == Service::RdsInstances {
-                                service.name().into()
-                            } else {
-                                session_tab.breadcrumb.clone()
-                            },
-                        });
-
-                        // Restore filter if present
-                        if let Some(filter) = &session_tab.filter {
-                            if service == Service::CloudWatchLogGroups {
-                                self.log_groups_state.log_groups.filter = filter.clone();
-                            }
-                        }
-                    }
-
-                    if !self.tabs.is_empty() {
-                        self.current_tab = 0;
-                        self.current_service = self.tabs[0].service;
-                        self.service_selected = true;
-                        self.current_session = Some(session.clone());
-                    }
-                    crate::tab_runtime::reset_for_session_replace(self);
-                    crate::tab_runtime::sync_active(self);
+                    self.load_session(session);
                 }
                 self.mode = Mode::Normal;
             }
@@ -1368,8 +1322,13 @@ impl App {
             }
             Action::FilterInput(c) => {
                 if self.mode == Mode::TabPicker {
-                    self.tab_filter.push(c);
-                    self.tab_picker_selected = 0;
+                    // On the list, `i` moves to the filter and any other
+                    // character starts it, as in the service picker.
+                    if self.tab_filter_active || c != 'i' {
+                        self.tab_filter.push(c);
+                        self.tab_picker_selected = 0;
+                    }
+                    self.tab_filter_active = true;
                 } else if self.mode == Mode::ServicePicker && self.service_picker.filter_active {
                     self.service_picker.filter.push(c);
                     self.service_picker.selected = 0;
@@ -1563,7 +1522,7 @@ impl App {
                 if self.mode == Mode::ServicePicker && self.service_picker.filter_active {
                     self.service_picker.filter.pop();
                     self.service_picker.selected = 0;
-                } else if self.mode == Mode::TabPicker {
+                } else if self.mode == Mode::TabPicker && self.tab_filter_active {
                     self.tab_filter.pop();
                     self.tab_picker_selected = 0;
                 } else if self.mode == Mode::RegionPicker && self.region_filter_active {
@@ -3957,41 +3916,30 @@ impl App {
             }
             let filtered = self.get_filtered_regions();
             if let Some(region) = filtered.get(self.region_picker_selected) {
-                // Save current session before changing region
-                if !self.tabs.is_empty() {
-                    let mut session = Session::new(
-                        self.aws.profile.clone(),
-                        self.aws.config.region.clone(),
-                        self.aws.config.account_id.clone(),
-                        self.aws.config.role_arn.clone(),
-                    );
-
-                    for tab in self
-                        .tabs
-                        .iter()
-                        .filter(|tab| !matches!(tab.service, Service::CliOutput(_)))
-                    {
-                        session.tabs.push(SessionTab {
-                            service: format!("{:?}", tab.service),
-                            title: tab.title.clone(),
-                            breadcrumb: tab.breadcrumb.clone(),
-                            filter: None,
-                            selected_item: None,
-                        });
+                let region = region.code.to_string();
+                match self.pending_profile.take() {
+                    // A new profile connects in the picked Region.
+                    Some(profile) => {
+                        self.context_request = Some(ContextRequest {
+                            profile: Some(profile).filter(|p| !p.is_empty()),
+                            region: Some(region),
+                        })
                     }
-
-                    let _ = session.save();
+                    // Only this tab moves; every other tab keeps its Region
+                    // and rows. The same sign-in needs no request.
+                    None if self.aws.connected => {
+                        if region != self.aws.config.region {
+                            let next = self.aws.in_region(&region);
+                            crate::tab_runtime::set_current_context(self, next);
+                        }
+                    }
+                    None => {
+                        self.context_request = Some(ContextRequest {
+                            profile: Some(self.aws.profile.clone()).filter(|p| !p.is_empty()),
+                            region: Some(region),
+                        })
+                    }
                 }
-
-                // Connect the Region; every tab reloads in it once connected.
-                let profile = self
-                    .pending_profile
-                    .take()
-                    .unwrap_or_else(|| self.aws.profile.clone());
-                self.context_request = Some(ContextRequest {
-                    profile: Some(profile).filter(|p| !p.is_empty()),
-                    region: Some(region.code.to_string()),
-                });
                 self.mode = if self.service_selected {
                     Mode::Normal
                 } else {
@@ -4002,12 +3950,11 @@ impl App {
             let filtered = self.get_filtered_profiles();
             if let Some(profile) = filtered.get(self.profile_picker_selected) {
                 let profile_name = profile.name.clone();
-                // The profile Region, else the current one; with neither, the
-                // Region picker completes the request.
-                let region = profile
-                    .region
-                    .clone()
-                    .or_else(|| Some(self.aws.config.region.clone()))
+                // Every tab keeps its Region; with none yet, the profile
+                // Region; with neither, the Region picker completes the request.
+                let region = Some(self.aws.config.region.clone())
+                    .filter(|r| !r.is_empty())
+                    .or_else(|| profile.region.clone())
                     .filter(|r| !r.is_empty());
                 match region {
                     Some(region) => {
@@ -4112,6 +4059,11 @@ impl App {
                 self.mode = Mode::Normal;
             }
         } else if self.mode == Mode::TabPicker {
+            // Enter in the filter hands focus back to the list.
+            if self.tab_filter_active {
+                self.tab_filter_active = false;
+                return;
+            }
             let filtered = self.get_filtered_tabs();
             if let Some(&(idx, _)) = filtered.get(self.tab_picker_selected) {
                 self.current_tab = idx;
@@ -4124,60 +4076,7 @@ impl App {
             let filtered = self.get_filtered_sessions();
             if let Some(&session) = filtered.get(self.session_picker_selected) {
                 let session = session.clone();
-
-                // Load the selected session
-                self.current_session = Some(session.clone());
-                self.request_context(session.profile.clone(), session.region.clone());
-
-                // Restore tabs
-                self.tabs = session
-                    .tabs
-                    .iter()
-                    .map(|st| Tab {
-                        id: TabId::new(),
-                        service: match st.service.as_str() {
-                            "RdsInstances" => Service::RdsInstances,
-                            "VpcVpcs" => Service::VpcVpcs,
-                            "CloudWatchLogGroups" => Service::CloudWatchLogGroups,
-                            "CloudWatchInsights" => Service::CloudWatchInsights,
-                            "CloudWatchAlarms" => Service::CloudWatchAlarms,
-                            "S3Buckets" => Service::S3Buckets,
-                            "CloudTrailEvents" => Service::CloudTrailEvents,
-                            "SqsQueues" => Service::SqsQueues,
-                            "SnsTopics" => Service::SnsTopics,
-                            "SecretsManagerSecrets" => Service::SecretsManagerSecrets,
-                            "AcmCertificates" => Service::AcmCertificates,
-                            "EventBridgeEventBuses" => Service::EventBridgeEventBuses,
-                            "StepFunctionsStateMachines" => Service::StepFunctionsStateMachines,
-                            "Ec2LoadBalancers" => Service::Ec2LoadBalancers,
-                            "Ec2TargetGroups" => Service::Ec2TargetGroups,
-                            _ => Service::CloudWatchLogGroups,
-                        },
-                        title: if st.service == "RdsInstances" {
-                            Service::RdsInstances.name().into()
-                        } else {
-                            st.title.clone()
-                        },
-                        breadcrumb: if st.service == "RdsInstances" {
-                            Service::RdsInstances.name().into()
-                        } else {
-                            st.breadcrumb.clone()
-                        },
-                    })
-                    .collect();
-
-                if !self.tabs.is_empty() {
-                    self.current_tab = 0;
-                    self.current_service = self.tabs[0].service;
-                    self.service_selected = true;
-                }
-
-                // Session replace installs all-new tab ids; drop every parked
-                // snapshot from the old session and resync onto the new tab 0.
-                crate::tab_runtime::reset_for_session_replace(self);
-                crate::tab_runtime::sync_active(self);
-
-                self.mode = Mode::Normal;
+                self.load_session(session);
             }
         } else if self.mode == Mode::InsightsInput {
             // In InsightsInput mode, behavior depends on focus
@@ -5621,6 +5520,41 @@ impl ServicePickerState {
     }
 }
 
+/// The service of a saved session tab, by its saved name.
+fn session_service(name: &str) -> Option<Service> {
+    match name {
+        "ApiGatewayApis" => Some(Service::ApiGatewayApis),
+        "CloudWatchLogGroups" => Some(Service::CloudWatchLogGroups),
+        "CloudWatchInsights" => Some(Service::CloudWatchInsights),
+        "CloudWatchAlarms" => Some(Service::CloudWatchAlarms),
+        "CloudTrailEvents" => Some(Service::CloudTrailEvents),
+        "S3Buckets" => Some(Service::S3Buckets),
+        "SqsQueues" => Some(Service::SqsQueues),
+        "SnsTopics" => Some(Service::SnsTopics),
+        "SecretsManagerSecrets" => Some(Service::SecretsManagerSecrets),
+        "AcmCertificates" => Some(Service::AcmCertificates),
+        "EventBridgeEventBuses" => Some(Service::EventBridgeEventBuses),
+        "StepFunctionsStateMachines" => Some(Service::StepFunctionsStateMachines),
+        "Ec2Instances" => Some(Service::Ec2Instances),
+        "Ec2LoadBalancers" => Some(Service::Ec2LoadBalancers),
+        "Ec2TargetGroups" => Some(Service::Ec2TargetGroups),
+        "EcrRepositories" => Some(Service::EcrRepositories),
+        "KmsKeys" => Some(Service::KmsKeys),
+        "EfsFileSystems" => Some(Service::EfsFileSystems),
+        "FsxFileSystems" => Some(Service::FsxFileSystems),
+        "RdsInstances" => Some(Service::RdsInstances),
+        "VpcVpcs" => Some(Service::VpcVpcs),
+        "DynamoDbTables" => Some(Service::DynamoDbTables),
+        "LambdaFunctions" => Some(Service::LambdaFunctions),
+        "LambdaApplications" => Some(Service::LambdaApplications),
+        "CloudFormationStacks" => Some(Service::CloudFormationStacks),
+        "IamUsers" => Some(Service::IamUsers),
+        "IamRoles" => Some(Service::IamRoles),
+        "IamUserGroups" => Some(Service::IamUserGroups),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod test_helpers {
     use super::*;
@@ -6982,6 +6916,7 @@ mod tests {
                     breadcrumb: String::new(),
                     filter: None,
                     selected_item: None,
+                    region: None,
                 },
                 SessionTab {
                     service: "S3".to_string(),
@@ -6989,6 +6924,7 @@ mod tests {
                     breadcrumb: String::new(),
                     filter: None,
                     selected_item: None,
+                    region: None,
                 },
             ],
         }];
@@ -7135,6 +7071,7 @@ mod tests {
                 breadcrumb: "CloudWatch › Log Groups".to_string(),
                 filter: Some("test".to_string()),
                 selected_item: None,
+                region: None,
             }],
         }];
 
@@ -8240,19 +8177,31 @@ impl App {
             .collect()
     }
 
+    /// Tabs whose title, breadcrumb or Region holds every word of the filter,
+    /// in any case: `west` finds the tabs in us-west-2 and eu-west-1, and
+    /// `ec2 west` the EC2 tabs among them.
     pub fn get_filtered_tabs(&self) -> Vec<(usize, &Tab)> {
-        if self.tab_filter.is_empty() {
-            return self.tabs.iter().enumerate().collect();
-        }
-        let filter_lower = self.tab_filter.to_lowercase();
+        let filter = self.tab_filter.to_lowercase();
+        let words: Vec<&str> = filter.split_whitespace().collect();
         self.tabs
             .iter()
             .enumerate()
             .filter(|(_, tab)| {
-                tab.title.to_lowercase().contains(&filter_lower)
-                    || tab.breadcrumb.to_lowercase().contains(&filter_lower)
+                let text = format!(
+                    "{} {} {}",
+                    tab.title,
+                    tab.breadcrumb,
+                    self.tab_region(tab.id)
+                )
+                .to_lowercase();
+                words.iter().all(|word| text.contains(word))
             })
             .collect()
+    }
+
+    /// The Region `tab` reads in.
+    pub fn tab_region(&self, tab: TabId) -> &str {
+        &crate::tab_runtime::context_of(self, tab).config.region
     }
 
     pub fn load_aws_profiles() -> Vec<AwsProfile> {
@@ -8275,6 +8224,99 @@ impl App {
         }
     }
 
+    /// Open a saved session: its tabs, each in its saved Region (the session
+    /// Region for a tab saved before Regions were per tab). Another profile,
+    /// or an offline context, connects first, and the account comes from that
+    /// connection, never from the file.
+    fn load_session(&mut self, session: Session) {
+        self.tabs.clear();
+        let mut regions = Vec::new();
+        for session_tab in &session.tabs {
+            let Some(service) = session_service(&session_tab.service) else {
+                continue;
+            };
+            let id = TabId::new();
+            let rds = service == Service::RdsInstances;
+            self.tabs.push(Tab {
+                id,
+                service,
+                title: if rds {
+                    service.name().into()
+                } else {
+                    session_tab.title.clone()
+                },
+                breadcrumb: if rds {
+                    service.name().into()
+                } else {
+                    session_tab.breadcrumb.clone()
+                },
+            });
+            let region = session_tab
+                .region
+                .clone()
+                .filter(|r| !r.is_empty())
+                .unwrap_or_else(|| session.region.clone());
+            regions.push((id, region));
+        }
+        // All-new tab ids: drop every parked snapshot and context of the old
+        // session and resync onto the new tab 0.
+        crate::tab_runtime::reset_for_session_replace(self);
+        let first = regions
+            .first()
+            .map(|(_, region)| region.clone())
+            .unwrap_or_else(|| session.region.clone());
+        if !self.aws.connected || session.profile != self.aws.profile {
+            self.context_request = Some(ContextRequest {
+                profile: Some(session.profile.clone()).filter(|p| !p.is_empty()),
+                region: Some(first).filter(|r| !r.is_empty()),
+            });
+        } else if !first.is_empty() && first != self.aws.config.region {
+            self.aws = self.aws.in_region(&first);
+            self.context_changed = true;
+        }
+        // The other tabs: the same sign-in in each saved Region. A connect
+        // above keeps these Regions.
+        for (id, region) in regions.iter().skip(1) {
+            let aws = self.aws.in_region(region);
+            crate::tab_runtime::park_context(self, *id, aws);
+        }
+        if !self.tabs.is_empty() {
+            self.current_tab = 0;
+            self.current_service = self.tabs[0].service;
+            self.service_selected = true;
+        }
+        self.current_session = Some(session);
+        crate::tab_runtime::sync_active(self);
+        self.mode = Mode::Normal;
+    }
+
+    /// The open tabs as a session saves them, each with its Region.
+    fn session_tabs(&self) -> Vec<SessionTab> {
+        self.tabs
+            .iter()
+            .filter(|t| !matches!(t.service, Service::CliOutput(_)))
+            .map(|t| SessionTab {
+                service: format!("{:?}", t.service),
+                title: t.title.clone(),
+                breadcrumb: t.breadcrumb.clone(),
+                filter: match t.service {
+                    Service::CloudWatchLogGroups => {
+                        Some(self.log_groups_state.log_groups.filter.clone())
+                    }
+                    _ => None,
+                },
+                selected_item: None,
+                region: Some(
+                    crate::tab_runtime::context_of(self, t.id)
+                        .config
+                        .region
+                        .clone(),
+                )
+                .filter(|r| !r.is_empty()),
+            })
+            .collect()
+    }
+
     fn save_current_session(&mut self) {
         // If no tabs, delete the session if it exists
         if self.tabs.is_empty() {
@@ -8285,25 +8327,10 @@ impl App {
             return;
         }
 
+        let tabs = self.session_tabs();
         let session = if let Some(ref mut current) = self.current_session {
             // Update existing session
-            current.tabs = self
-                .tabs
-                .iter()
-                .filter(|t| !matches!(t.service, Service::CliOutput(_)))
-                .map(|t| SessionTab {
-                    service: format!("{:?}", t.service),
-                    title: t.title.clone(),
-                    breadcrumb: t.breadcrumb.clone(),
-                    filter: match t.service {
-                        Service::CloudWatchLogGroups => {
-                            Some(self.log_groups_state.log_groups.filter.clone())
-                        }
-                        _ => None,
-                    },
-                    selected_item: None,
-                })
-                .collect();
+            current.tabs = tabs;
             current.clone()
         } else {
             // Create new session
@@ -8313,23 +8340,7 @@ impl App {
                 self.aws.config.account_id.clone(),
                 self.aws.config.role_arn.clone(),
             );
-            session.tabs = self
-                .tabs
-                .iter()
-                .filter(|t| !matches!(t.service, Service::CliOutput(_)))
-                .map(|t| SessionTab {
-                    service: format!("{:?}", t.service),
-                    title: t.title.clone(),
-                    breadcrumb: t.breadcrumb.clone(),
-                    filter: match t.service {
-                        Service::CloudWatchLogGroups => {
-                            Some(self.log_groups_state.log_groups.filter.clone())
-                        }
-                        _ => None,
-                    },
-                    selected_item: None,
-                })
-                .collect();
+            session.tabs = tabs;
             self.current_session = Some(session.clone());
             session
         };
@@ -8768,12 +8779,206 @@ mod tab_filter_tests {
         app.handle_action(Action::FilterInput('s'));
         app.handle_action(Action::FilterInput('3'));
 
-        // Select the filtered tab
+        // Enter hands focus to the list, then opens the filtered tab
+        app.handle_action(Action::Select);
+        assert_eq!(app.mode, Mode::TabPicker);
+        assert!(!app.tab_filter_active);
         app.handle_action(Action::Select);
 
         assert_eq!(app.current_tab, 1); // Should select the S3 tab (index 1)
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.tab_filter, ""); // Filter should be cleared
+    }
+
+    #[test]
+    fn test_tab_picker_has_one_active_pane_like_the_service_picker() {
+        use crate::keymap::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::style::Color;
+        let mut app = test_app();
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        for service in [Service::S3Buckets, Service::SnsTopics] {
+            app.tabs.push(Tab {
+                id: TabId::new(),
+                service,
+                title: service.name().into(),
+                breadcrumb: service.name().into(),
+            });
+        }
+        app.current_tab = 0;
+        app.current_service = Service::S3Buckets;
+        let press = |app: &mut App, code: KeyCode| {
+            let key = KeyEvent::new(code, KeyModifiers::NONE);
+            if let Some(action) = handle_key(key, app.mode) {
+                app.handle_action(action);
+            }
+        };
+        // (filter border, list border, screen text)
+        let look = |app: &App| -> (Color, Color, String) {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 30)).unwrap();
+            terminal.draw(|f| crate::ui::render(f, app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let (width, height) = (buffer.area.width, buffer.area.height);
+            let title: Vec<&str> = vec!["T", "a", "b", "s", " ", "("];
+            let (x, y) = (0..height)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .find(|&(x, y)| {
+                    title.iter().enumerate().all(|(i, symbol)| {
+                        x + (i as u16) < width && buffer[(x + i as u16, y)].symbol() == *symbol
+                    })
+                })
+                .expect("tab list title");
+            let corner = (0..x)
+                .rev()
+                .find(|&cx| buffer[(cx, y)].symbol() == "╭")
+                .expect("tab list corner");
+            assert_eq!(buffer[(corner, y - 3)].symbol(), "╭", "filter sits above");
+            let text = buffer.content().iter().map(|c| c.symbol()).collect();
+            (buffer[(corner, y - 3)].fg, buffer[(corner, y)].fg, text)
+        };
+
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Char('b'));
+        assert_eq!(app.mode, Mode::TabPicker);
+        let (filter, list, text) = look(&app);
+        assert_eq!((filter, list), (Color::White, Color::Green), "list first");
+        assert!(text.contains(" NORMAL "));
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.tab_picker_selected, 1, "arrows move the list");
+
+        // Typing moves focus to the filter.
+        press(&mut app, KeyCode::Char('s'));
+        assert!(app.tab_filter_active);
+        assert_eq!(app.tab_filter, "s");
+        let (filter, list, text) = look(&app);
+        assert_eq!((filter, list), (Color::Green, Color::White), "filter only");
+        assert!(text.contains("s█"));
+        assert!(text.contains(" INSERT "));
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.tab_picker_selected, 0, "arrows stay off the list");
+
+        // Enter hands focus back to the list and keeps the picker open.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.mode, Mode::TabPicker);
+        assert_eq!(app.current_tab, 0);
+        let (filter, list, _) = look(&app);
+        assert_eq!((filter, list), (Color::White, Color::Green));
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.tab_picker_selected, 1);
+
+        // `i` focuses the filter without typing; Esc steps back, then closes.
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.tab_filter_active);
+        assert_eq!(app.tab_filter, "s");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode, Mode::TabPicker);
+        assert!(!app.tab_filter_active);
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.tab_filter, "s", "Backspace only edits a focused filter");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.current_tab, 0, "Esc does not switch tabs");
+
+        // The picker opens fresh: list focused, no old filter.
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Char('b'));
+        assert!(!app.tab_filter_active);
+        assert_eq!(app.tab_filter, "");
+        assert_eq!(app.tab_picker_selected, 0);
+    }
+    #[test]
+    fn test_tab_picker_shows_and_filters_by_each_tab_region() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = test_app();
+        app.aws.connected = true;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        let regions = ["us-east-1", "us-west-2", "eu-west-1"];
+        for (service, region) in [
+            Service::Ec2Instances,
+            Service::Ec2Instances,
+            Service::SnsTopics,
+        ]
+        .into_iter()
+        .zip(regions)
+        {
+            app.tabs.push(Tab {
+                id: TabId::new(),
+                service,
+                title: service.name().into(),
+                breadcrumb: service.name().into(),
+            });
+            app.current_tab = app.tabs.len() - 1;
+            app.current_service = service;
+            crate::tab_runtime::sync_active(&mut app);
+            if app.aws.config.region != region {
+                let aws = app.aws.in_region(region);
+                crate::tab_runtime::set_current_context(&mut app, aws);
+            }
+        }
+        app.handle_action(Action::OpenTabPicker);
+        let screen = |app: &App| {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 30)).unwrap();
+            terminal.draw(|f| crate::ui::render(f, app)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+        };
+        let text = screen(&app);
+        assert!(text.contains("Tabs (3/3)"), "{text}");
+        for region in regions {
+            assert!(text.contains(&format!("({region})")), "{region}");
+        }
+        // The Region stays readable on the highlighted row.
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 30)).unwrap();
+        terminal.draw(|f| crate::ui::render(f, &app)).unwrap();
+        let hidden: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|c| {
+                c.fg == ratatui::style::Color::DarkGray && c.bg == ratatui::style::Color::DarkGray
+            })
+            .map(|c| c.symbol())
+            .collect();
+        assert_eq!(hidden.trim(), "", "DarkGray text on the DarkGray highlight");
+        let type_text = |app: &mut App, text: &str| {
+            for c in text.chars() {
+                let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+                let action = crate::keymap::handle_key(key, app.mode).unwrap();
+                app.handle_action(action);
+            }
+        };
+        let picked = |app: &App| -> Vec<String> {
+            app.get_filtered_tabs()
+                .iter()
+                .map(|(_, tab)| app.tab_region(tab.id).to_string())
+                .collect()
+        };
+        type_text(&mut app, "west");
+        assert_eq!(picked(&app), ["us-west-2", "eu-west-1"]);
+        assert!(screen(&app).contains("Tabs (2/3)"));
+        type_text(&mut app, " ec2");
+        assert_eq!(picked(&app), ["us-west-2"], "every word must match");
+        app.tab_filter = "EU-".into();
+        assert_eq!(picked(&app), ["eu-west-1"], "any case");
+        app.tab_filter = "us-east-1".into();
+        assert_eq!(picked(&app), ["us-east-1"]);
+        // Enter leaves the filter, then opens the match in its own Region.
+        app.handle_action(Action::Select);
+        assert_eq!(app.mode, Mode::TabPicker);
+        app.handle_action(Action::Select);
+        assert_eq!(app.current_tab, 0);
+        assert_eq!(app.aws.config.region, "us-east-1");
     }
 }
 
@@ -9012,6 +9217,7 @@ mod region_latency_tests {
             role_arn: None,
             source_profile: None,
         };
+        // Every tab keeps its Region, even when the profile names another.
         let mut app = test_app();
         app.available_profiles = vec![profile("prod", Some("eu-west-1"))];
         app.mode = Mode::ProfilePicker;
@@ -9020,10 +9226,22 @@ mod region_latency_tests {
             app.context_request,
             Some(ContextRequest {
                 profile: Some("prod".into()),
-                region: Some("eu-west-1".into()),
+                region: Some("us-east-1".into()),
             })
         );
         assert_eq!(app.aws.profile, "test", "nothing changed yet");
+
+        // No current Region: the profile Region.
+        let mut app = test_app_no_region();
+        app.available_profiles = vec![profile("prod", Some("eu-west-1"))];
+        app.mode = Mode::ProfilePicker;
+        app.handle_action(Action::Select);
+        assert_eq!(
+            app.context_request
+                .as_ref()
+                .and_then(|r| r.region.as_deref()),
+            Some("eu-west-1")
+        );
 
         // No Region anywhere: the Region picker completes the request.
         let mut app = test_app_no_region();
@@ -9078,6 +9296,189 @@ mod region_latency_tests {
             "the open tab reloads at once"
         );
         assert_eq!(app.breadcrumbs(), "RDS > Databases");
+    }
+
+    /// A signed-in app with a VPC tab and an SNS tab, on the SNS tab.
+    fn two_tabs() -> App {
+        let mut app = test_app();
+        app.aws.connected = true;
+        app.aws.config.account_id = "111111111111".into();
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        for service in [Service::VpcVpcs, Service::SnsTopics] {
+            app.tabs.push(Tab {
+                id: TabId::new(),
+                service,
+                title: service.name().into(),
+                breadcrumb: service.name().into(),
+            });
+            app.current_tab = app.tabs.len() - 1;
+            app.current_service = service;
+            crate::tab_runtime::sync_active(&mut app);
+        }
+        app
+    }
+
+    fn pick_region(app: &mut App, code: &str) {
+        app.mode = Mode::RegionPicker;
+        app.region_filter_active = false;
+        app.region_picker_selected = app
+            .get_filtered_regions()
+            .iter()
+            .position(|r| r.code == code)
+            .unwrap();
+        app.handle_action(Action::Select);
+    }
+
+    #[test]
+    fn test_region_pick_moves_only_the_current_tab_without_a_request() {
+        let mut app = two_tabs();
+        let vpc = app.tabs[0].id;
+        app.handle_action(Action::PrevTab);
+        app.vpc_state.vpcs.items = vec![Default::default()];
+        app.handle_action(Action::NextTab);
+        pick_region(&mut app, "eu-west-1");
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.context_request.is_none(), "same sign-in, no connect");
+        assert!(app.context_changed, "the event loop reloads this tab");
+        assert_eq!(app.aws.config.region, "eu-west-1");
+        assert_eq!(app.aws.config.account_id, "111111111111");
+        assert!(matches!(
+            app.sns_state.load_status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        ));
+        assert_eq!(
+            crate::tab_runtime::context_of(&app, vpc).config.region,
+            "us-east-1"
+        );
+        // The tab bar names each tab Region once they differ.
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 10)).unwrap();
+        terminal.draw(|f| crate::ui::render(f, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains("VPC › VPCs (us-east-1)"), "{text}");
+        assert!(text.contains("SNS › Topics (eu-west-1)"), "{text}");
+        assert!(text.contains("Region: eu-west-1"));
+        app.handle_action(Action::PrevTab);
+        assert_eq!(app.aws.config.region, "us-east-1");
+        assert_eq!(
+            app.vpc_state.vpcs.items.len(),
+            1,
+            "the other tab kept its rows"
+        );
+        // Back in one Region, no tab names it.
+        pick_region(&mut app, "eu-west-1");
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 10)).unwrap();
+        terminal.draw(|f| crate::ui::render(f, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(!text.contains("(eu-west-1)"), "{text}");
+    }
+
+    #[test]
+    fn test_an_offline_region_pick_still_connects() {
+        let mut app = test_app();
+        pick_region(&mut app, "eu-west-1");
+        assert_eq!(
+            app.context_request
+                .as_ref()
+                .and_then(|r| r.region.as_deref()),
+            Some("eu-west-1")
+        );
+        assert_eq!(app.aws.config.region, "us-east-1", "nothing changed yet");
+    }
+
+    #[test]
+    fn test_replace_context_keeps_each_tab_region() {
+        let mut app = two_tabs();
+        let vpc = app.tabs[0].id;
+        pick_region(&mut app, "eu-west-1");
+        let mut next = AwsContext::offline("prod".into(), Some("eu-west-1".into()));
+        next.connected = true;
+        next.config.account_id = "222222222222".into();
+        app.replace_context(next);
+        assert_eq!(app.aws.config.region, "eu-west-1");
+        let other = crate::tab_runtime::context_of(&app, vpc);
+        assert_eq!(
+            other.config.region, "us-east-1",
+            "the other tab keeps its Region"
+        );
+        assert_eq!(other.profile, "prod");
+        assert_eq!(other.config.account_id, "222222222222");
+    }
+
+    #[test]
+    fn test_sessions_save_and_restore_each_tab_region() {
+        let mut app = two_tabs();
+        pick_region(&mut app, "eu-west-1");
+        let tabs = app.session_tabs();
+        assert_eq!(tabs[0].region.as_deref(), Some("us-east-1"));
+        assert_eq!(tabs[1].region.as_deref(), Some("eu-west-1"));
+        let mut session = Session::new(
+            "test".into(),
+            "us-east-1".into(),
+            "111111111111".into(),
+            String::new(),
+        );
+        session.tabs = tabs;
+        // A session saved before Regions were per tab uses its own Region.
+        session.tabs.push(SessionTab {
+            region: None,
+            ..session.tabs[0].clone()
+        });
+        let mut app = two_tabs();
+        app.load_session(session);
+        assert!(app.context_request.is_none(), "same profile, no connect");
+        let regions: Vec<String> = app
+            .tabs
+            .iter()
+            .map(|t| {
+                crate::tab_runtime::context_of(&app, t.id)
+                    .config
+                    .region
+                    .clone()
+            })
+            .collect();
+        assert_eq!(regions, ["us-east-1", "eu-west-1", "us-east-1"]);
+        assert_eq!(app.current_tab, 0);
+        assert_eq!(app.aws.config.region, "us-east-1");
+        // Another profile connects in the first tab Region and keeps the rest.
+        let mut session = Session::new(
+            "prod".into(),
+            "us-east-1".into(),
+            String::new(),
+            String::new(),
+        );
+        session.tabs = app.session_tabs();
+        let mut app = two_tabs();
+        app.load_session(session);
+        assert_eq!(
+            app.context_request,
+            Some(ContextRequest {
+                profile: Some("prod".into()),
+                region: Some("us-east-1".into()),
+            })
+        );
+        let mut next = AwsContext::offline("prod".into(), Some("us-east-1".into()));
+        next.connected = true;
+        app.replace_context(next);
+        let second = app.tabs[1].id;
+        assert_eq!(
+            crate::tab_runtime::context_of(&app, second).config.region,
+            "eu-west-1"
+        );
     }
 
     #[test]

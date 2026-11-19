@@ -164,8 +164,8 @@ pub fn console_url(app: &App) -> String {
         ),
         None => ("/cloudtrail/home", "/events".into()),
     };
-    ConsoleUrl::regional(&app.config.region, path)
-        .query("region", &app.config.region)
+    ConsoleUrl::regional(&app.aws.config.region, path)
+        .query("region", &app.aws.config.region)
         .fragment(route)
         .finish()
 }

@@ -594,16 +594,16 @@ pub fn console_url(app: &App) -> String {
     if let Some(func_name) = &app.lambda_state.current_function {
         if let Some(version) = &app.lambda_state.current_version {
             lambda::console_url_function_version(
-                &app.config.region,
+                &app.aws.config.region,
                 func_name,
                 version,
                 &app.lambda_state.detail_tab,
             )
         } else {
-            lambda::console_url_function_detail(&app.config.region, func_name)
+            lambda::console_url_function_detail(&app.aws.config.region, func_name)
         }
     } else {
-        lambda::console_url_functions(&app.config.region)
+        lambda::console_url_functions(&app.aws.config.region)
     }
 }
 

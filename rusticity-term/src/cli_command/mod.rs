@@ -23,9 +23,9 @@ pub(crate) fn invocation(app: &App) -> Result<Invocation, String> {
     render::invocation(
         &selected(app)?,
         Context {
-            profile: &app.profile,
-            region: &app.config.region,
-            account_id: &app.config.account_id,
+            profile: &app.aws.profile,
+            region: &app.aws.config.region,
+            account_id: &app.aws.config.account_id,
         },
     )
 }
@@ -90,7 +90,7 @@ fn selected(app: &App) -> Result<Target, String> {
                     id: topic.name.clone(),
                     name: topic.name.clone(),
                     arn: topic.arn.clone(),
-                    region: app.config.region.clone(),
+                    region: app.aws.config.region.clone(),
                 },
             ));
         }
@@ -142,7 +142,7 @@ fn selected(app: &App) -> Result<Target, String> {
             .iter()
             .find(|item| &item.name == bucket)
             .map(|bucket| bucket.region.clone())
-            .unwrap_or_else(|| app.config.region.clone());
+            .unwrap_or_else(|| app.aws.config.region.clone());
         return Ok(Target::S3Object {
             bucket: bucket.clone(),
             key,
@@ -171,9 +171,9 @@ fn command(app: &App) -> Result<String, String> {
     render::command(
         &selected(app)?,
         Context {
-            profile: &app.profile,
-            region: &app.config.region,
-            account_id: &app.config.account_id,
+            profile: &app.aws.profile,
+            region: &app.aws.config.region,
+            account_id: &app.aws.config.account_id,
         },
     )
 }

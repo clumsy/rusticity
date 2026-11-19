@@ -11,7 +11,7 @@ const RULE_ARN: &str = "arn:aws:events:us-east-2:123456789012:rule/orders/nightl
 
 fn app() -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-2".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::EventBridgeEventBuses;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -343,7 +343,7 @@ async fn esc_cancels_a_running_read_before_going_back() {
 #[tokio::test]
 async fn aws_context_change_drops_every_level() {
     let mut app = on_rule().await;
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(poll(&mut app).await);
     assert!(app.eventbridge_state.bus.is_none());
     assert!(app.eventbridge_state.buses.rows.items.is_empty());

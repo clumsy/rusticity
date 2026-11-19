@@ -563,7 +563,7 @@ pub async fn poll(app: &mut App) -> bool {
         return true;
     }
     if state.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         changed |= app.eventbridge_state.read.start(async move {
             EventBridgeClient::new(config)
                 .list_event_buses()
@@ -588,7 +588,7 @@ pub async fn poll(app: &mut App) -> bool {
     if let Some(scope) = rules_scope(app) {
         let bus = app.eventbridge_state.bus.as_mut().unwrap();
         if bus.read.is_pending() {
-            let config = app.config.clone();
+            let config = app.aws.config.clone();
             let name = bus.bus.name.clone();
             changed |= bus.read.start(async move {
                 EventBridgeClient::new(config)
@@ -612,7 +612,7 @@ pub async fn poll(app: &mut App) -> bool {
         }
     }
     if let Some(scope) = rule_scope(app) {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let rule = app
             .eventbridge_state
             .bus
@@ -668,7 +668,7 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 
 /// The console page of the level on screen.
 pub fn console_url(app: &App) -> String {
-    let region = &app.config.region;
+    let region = &app.aws.config.region;
     let url = ConsoleUrl::regional(region, "/events/home").query("region", region);
     match &app.eventbridge_state.bus {
         Some(BusView {

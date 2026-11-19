@@ -14,7 +14,7 @@ fn app(service: Service) -> App {
     app.current_service = service;
     app.service_selected = true;
     app.mode = crate::keymap::Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 

@@ -597,7 +597,7 @@ mod tab_owned_list {
         assert!(!app.rds_state.inventory.is_busy());
         assert!(screen(&app, 240, 45).contains("Cancelled"));
         let mut app = super::app();
-        app.config.region = "eu-west-1".into();
+        app.aws.config.region = "eu-west-1".into();
         assert!(inventory::poll(&mut app).await);
         assert!(app.rds_state.instances.items.is_empty());
     }

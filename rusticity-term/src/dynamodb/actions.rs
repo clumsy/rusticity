@@ -329,12 +329,12 @@ pub fn console_url(app: &App) -> String {
     use crate::dynamodb;
     if let Some(name) = &app.dynamodb_state.current_table {
         return dynamodb::console_url_table(
-            &app.config.region,
+            &app.aws.config.region,
             name,
             app.dynamodb_state.detail_tab.console_tab(),
         );
     }
-    dynamodb::console_url_tables(&app.config.region)
+    dynamodb::console_url_tables(&app.aws.config.region)
 }
 
 // ── Select / go back / detail tabs ───────────────────────────────────────────

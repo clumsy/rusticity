@@ -20,19 +20,19 @@ pub fn console_url(app: &App) -> String {
         {
             // A confirmed subscription deep-links to its own regional route; the
             // subscription ARN is a raw value encoded exactly once.
-            return ConsoleUrl::regional(&app.config.region, "/sns/v3/home")
-                .query("region", &app.config.region)
+            return ConsoleUrl::regional(&app.aws.config.region, "/sns/v3/home")
+                .query("region", &app.aws.config.region)
                 .fragment(format!(
                     "/subscription/{}",
                     component(&subscription.subscription_arn)
                 ))
                 .finish();
         }
-        return super::console_url(&app.config.region, Some(&topic.arn));
+        return super::console_url(&app.aws.config.region, Some(&topic.arn));
     }
     // The topics inventory opens the list, regardless of its highlighted row.
     // Deep links belong only to the entered topic/subscriptions view above.
-    super::console_url(&app.config.region, None)
+    super::console_url(&app.aws.config.region, None)
 }
 pub fn go_to_page(app: &mut App, page: usize) {
     if super::subscriptions::active(app) {

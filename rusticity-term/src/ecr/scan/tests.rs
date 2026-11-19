@@ -335,10 +335,10 @@ async fn tasks_cancel_on_tab_change_escape_and_context_changes() {
             task,
         });
         match change {
-            0 => app.profile = "other".into(),
-            1 => app.config.region = "eu-west-1".into(),
-            2 => app.config.account_id = "other".into(),
-            3 => app.config.role_arn = "other".into(),
+            0 => app.aws.profile = "other".into(),
+            1 => app.aws.config.region = "eu-west-1".into(),
+            2 => app.aws.config.account_id = "other".into(),
+            3 => app.aws.config.role_arn = "other".into(),
             4 => app.current_service = Service::S3Buckets,
             5 => app.ecr_state.current_repository = Some("other".into()),
             6 => app.current_tab += 1,

@@ -536,7 +536,7 @@ pub async fn poll(app: &mut App) -> bool {
     let mut changed = false;
     // Do not clone request inputs or construct a read on idle poll cycles.
     if state.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let key_arn = state.source.as_ref().unwrap().key_arn.clone();
         changed = state.read.start(async move {
             let client = KmsClient::new(config);

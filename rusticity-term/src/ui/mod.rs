@@ -599,23 +599,23 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
     let now = chrono::Utc::now();
     let timestamp = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let (identity_label, identity_value) = if app.config.role_arn.is_empty() {
+    let (identity_label, identity_value) = if app.aws.config.role_arn.is_empty() {
         ("Identity:", "N/A".to_string())
-    } else if let Some(role_part) = app.config.role_arn.split("assumed-role/").nth(1) {
+    } else if let Some(role_part) = app.aws.config.role_arn.split("assumed-role/").nth(1) {
         (
             "Role:",
             role_part.split('/').next().unwrap_or("N/A").to_string(),
         )
-    } else if let Some(user_part) = app.config.role_arn.split(":user/").nth(1) {
+    } else if let Some(user_part) = app.aws.config.role_arn.split(":user/").nth(1) {
         ("User:", user_part.to_string())
     } else {
         ("Identity:", "N/A".to_string())
     };
 
-    let region_display = if app.config.region_auto_detected {
-        format!(" {} ⚡ ⋮ ", app.config.region)
+    let region_display = if app.aws.config.region_auto_detected {
+        format!(" {} ⚡ ⋮ ", app.aws.config.region)
     } else {
-        format!(" {} ⋮ ", app.config.region)
+        format!(" {} ⋮ ", app.aws.config.region)
     };
 
     let info_spans = vec![
@@ -626,7 +626,7 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" {} ⋮ ", app.profile),
+            format!(" {} ⋮ ", app.aws.profile),
             Style::default().fg(Color::White),
         ),
         Span::styled(
@@ -636,7 +636,7 @@ fn render_tabs_row(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" {} ⋮ ", app.config.account_id),
+            format!(" {} ⋮ ", app.aws.config.account_id),
             Style::default().fg(Color::White),
         ),
         Span::styled(
@@ -4102,7 +4102,7 @@ mod tests {
     fn test_lambda_console_url() {
         let mut app = test_app_no_region();
         app.current_service = Service::LambdaFunctions;
-        app.config.region = "us-east-1".to_string();
+        app.aws.config.region = "us-east-1".to_string();
 
         // List view
         let url = app.get_console_url();

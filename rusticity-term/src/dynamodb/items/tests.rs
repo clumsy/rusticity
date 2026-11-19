@@ -238,7 +238,7 @@ fn dropdowns_and_refresh_reset_cursor_but_local_filter_and_page_size_do_not() {
 #[test]
 fn live_context_changes_disable_load_more_and_schedule_a_fresh_request() {
     let mut app = app();
-    app.profile = "other-profile".into();
+    app.aws.profile = "other-profile".into();
     assert!(!can_load_more(&app));
     assert!(needs_load(&app));
     assert!(!results_complete(&app));
@@ -394,9 +394,9 @@ fn unstarted_failed_loading_or_stale_results_never_claim_a_known_total() {
     app.dynamodb_state.items_loading = true;
     assert!(!results_complete(&app));
     app.dynamodb_state.items_loading = false;
-    app.profile = "changed".into();
+    app.aws.profile = "changed".into();
     assert!(!results_complete(&app));
-    app.profile = "test".into();
+    app.aws.profile = "test".into();
     assert!(results_complete(&app));
     app.dynamodb_state.clear_items_result();
     assert!(!results_complete(&app));

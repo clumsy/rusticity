@@ -508,7 +508,7 @@ pub async fn poll(app: &mut App) -> bool {
     let state = &mut app.ec2_state;
     let mut changed = false;
     if state.detail.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let id = state.current_instance.clone().unwrap_or_default();
         changed = state.detail.read.start(async move {
             Ec2Client::new(config)

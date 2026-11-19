@@ -723,11 +723,11 @@ pub fn console_url(app: &App) -> String {
             .find(|s| &s.name == stack_name)
         {
             return cfn::console_url_stack_detail_with_tab(
-                &app.config.region,
+                &app.aws.config.region,
                 &stack.stack_id,
                 &app.cfn_state.detail_tab,
             );
         }
     }
-    cfn::console_url_stacks(&app.config.region)
+    cfn::console_url_stacks(&app.aws.config.region)
 }

@@ -279,7 +279,7 @@ pub fn filtered_tags(app: &App) -> Vec<&QueueTag> {
 
 pub fn filtered_subscriptions(app: &App) -> Vec<&SnsSubscription> {
     let region_filter = if app.sqs_state.subscription_region_filter.is_empty() {
-        &app.region
+        &app.aws.config.region
     } else {
         &app.sqs_state.subscription_region_filter
     };
@@ -309,7 +309,7 @@ pub fn filtered_eventbridge_pipes(app: &App) -> Vec<&EventBridgePipe> {
 }
 
 pub async fn load_sqs_queues(app: &mut App) -> anyhow::Result<()> {
-    let queues = app.sqs_client.list_queues("").await?;
+    let queues = app.aws.sqs_client.list_queues("").await?;
     app.sqs_state.queues.items = queue_rows(queues);
     Ok(())
 }
@@ -351,8 +351,8 @@ pub(crate) fn queue_rows(queues: Vec<rusticity_core::sqs::SqsQueue>) -> Vec<Queu
 }
 
 pub async fn load_lambda_triggers(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
-    let queue_arn = app.sqs_client.get_queue_arn(queue_url).await?;
-    let triggers = app.sqs_client.list_lambda_triggers(&queue_arn).await?;
+    let queue_arn = app.aws.sqs_client.get_queue_arn(queue_url).await?;
+    let triggers = app.aws.sqs_client.list_lambda_triggers(&queue_arn).await?;
 
     app.sqs_state.triggers.items = triggers
         .into_iter()
@@ -374,46 +374,60 @@ pub async fn load_lambda_triggers(app: &mut App, queue_url: &str) -> anyhow::Res
 }
 
 pub async fn load_metrics(app: &mut App, queue_name: &str) -> anyhow::Result<()> {
-    let metrics = app.sqs_client.get_queue_metrics(queue_name).await?;
+    let metrics = app.aws.sqs_client.get_queue_metrics(queue_name).await?;
     app.sqs_state.metric_data = metrics;
 
-    let delayed_metrics = app.sqs_client.get_queue_delayed_metrics(queue_name).await?;
+    let delayed_metrics = app
+        .aws
+        .sqs_client
+        .get_queue_delayed_metrics(queue_name)
+        .await?;
     app.sqs_state.metric_data_delayed = delayed_metrics;
 
     let not_visible_metrics = app
+        .aws
         .sqs_client
         .get_queue_not_visible_metrics(queue_name)
         .await?;
     app.sqs_state.metric_data_not_visible = not_visible_metrics;
 
-    let visible_metrics = app.sqs_client.get_queue_visible_metrics(queue_name).await?;
+    let visible_metrics = app
+        .aws
+        .sqs_client
+        .get_queue_visible_metrics(queue_name)
+        .await?;
     app.sqs_state.metric_data_visible = visible_metrics;
 
     let empty_receives_metrics = app
+        .aws
         .sqs_client
         .get_queue_empty_receives_metrics(queue_name)
         .await?;
     app.sqs_state.metric_data_empty_receives = empty_receives_metrics;
 
     let messages_deleted_metrics = app
+        .aws
         .sqs_client
         .get_queue_messages_deleted_metrics(queue_name)
         .await?;
     app.sqs_state.metric_data_messages_deleted = messages_deleted_metrics;
 
     let messages_received_metrics = app
+        .aws
         .sqs_client
         .get_queue_messages_received_metrics(queue_name)
         .await?;
     app.sqs_state.metric_data_messages_received = messages_received_metrics;
 
     let messages_sent_metrics = app
+        .aws
         .sqs_client
         .get_queue_messages_sent_metrics(queue_name)
         .await?;
     app.sqs_state.metric_data_messages_sent = messages_sent_metrics;
 
     let sent_message_size_metrics = app
+        .aws
         .sqs_client
         .get_queue_sent_message_size_metrics(queue_name)
         .await?;
@@ -423,8 +437,8 @@ pub async fn load_metrics(app: &mut App, queue_name: &str) -> anyhow::Result<()>
 }
 
 pub async fn load_pipes(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
-    let queue_arn = app.sqs_client.get_queue_arn(queue_url).await?;
-    let pipes = app.sqs_client.list_pipes(&queue_arn).await?;
+    let queue_arn = app.aws.sqs_client.get_queue_arn(queue_url).await?;
+    let pipes = app.aws.sqs_client.list_pipes(&queue_arn).await?;
 
     app.sqs_state.pipes.items = pipes
         .into_iter()
@@ -445,7 +459,7 @@ pub async fn load_pipes(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
 }
 
 pub async fn load_tags(app: &mut App, queue_url: &str) -> anyhow::Result<()> {
-    let tags = app.sqs_client.list_tags(queue_url).await?;
+    let tags = app.aws.sqs_client.list_tags(queue_url).await?;
 
     app.sqs_state.tags.items = tags
         .into_iter()
@@ -1034,7 +1048,7 @@ fn render_subscription_filter(
     pagination: &str,
 ) {
     let region_text = if app.sqs_state.subscription_region_filter.is_empty() {
-        format!("Subscription region: {}", app.region)
+        format!("Subscription region: {}", app.aws.config.region)
     } else {
         format!(
             "Subscription region: {}",

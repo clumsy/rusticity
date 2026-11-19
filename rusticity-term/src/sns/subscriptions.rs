@@ -217,7 +217,7 @@ pub async fn poll(app: &mut App) -> bool {
         state.read.request(current_scope.clone());
     }
     if state.table.loading && state.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let topic_arn = topic.arn.clone();
         if state.read.start(async move {
             SnsClient::new(config)

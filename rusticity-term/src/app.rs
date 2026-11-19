@@ -2,6 +2,7 @@ use crate::apig::api::Column as ApigColumn;
 use crate::apig::resource::Column as ResourceColumn;
 use crate::apig::route::Column as RouteColumn;
 pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
+use crate::aws_context::{AwsContext, ContextRequest};
 use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
 use crate::clipboard::ClipboardState;
 use crate::cloudtrail::{CloudTrailEvent, CloudTrailEventColumn, EventResourceColumn};
@@ -102,12 +103,6 @@ use crate::vpc::actions as vpc_actions;
 use rusticity_core::dynamodb::DdbItemsPage;
 #[cfg(test)]
 use rusticity_core::LogStream;
-use rusticity_core::{
-    AlarmsClient, ApiGatewayClient, AwsConfig, CloudFormationClient, CloudTrailClient,
-    CloudWatchClient, DynamoDbClient, Ec2Client, EcrClient, EfsClient, FsxClient, IamClient,
-    KmsClient, LambdaClient, S3Client, SnsClient, SqsClient,
-};
-use rusticity_core::{RdsClient, SecretsManagerClient, VpcClient};
 
 #[derive(Clone)]
 pub struct Tab {
@@ -124,27 +119,14 @@ pub struct Tab {
 pub struct App {
     pub running: bool,
     pub mode: Mode,
-    pub config: AwsConfig,
-    pub cloudwatch_client: CloudWatchClient,
-    pub cloudtrail_client: CloudTrailClient,
-    pub s3_client: S3Client,
-    pub sqs_client: SqsClient,
-    pub sns_client: SnsClient,
-    pub secretsmanager_client: SecretsManagerClient,
-    pub stepfunctions_client: rusticity_core::StepFunctionsClient,
-    pub alarms_client: AlarmsClient,
-    pub ec2_client: Ec2Client,
-    pub ecr_client: EcrClient,
-    pub kms_client: KmsClient,
-    pub efs_client: EfsClient,
-    pub fsx_client: FsxClient,
-    pub rds_client: RdsClient,
-    pub vpc_client: VpcClient,
-    pub dynamodb_client: DynamoDbClient,
-    pub apig_client: ApiGatewayClient,
-    pub iam_client: IamClient,
-    pub lambda_client: LambdaClient,
-    pub cloudformation_client: CloudFormationClient,
+    /// Profile, Region, account, role and every service client, as one
+    /// value; see [`crate::aws_context`].
+    pub aws: crate::aws_context::AwsContext,
+    /// A profile or Region the user picked; the event loop connects it and
+    /// swaps it in with [`App::replace_context`].
+    pub context_request: Option<crate::aws_context::ContextRequest>,
+    /// A profile picked without a Region, waiting for the Region picker.
+    pub pending_profile: Option<String>,
     pub current_service: Service,
     pub tabs: Vec<Tab>,
     pub current_tab: usize,
@@ -183,8 +165,6 @@ pub struct App {
     pub iam_state: IamState,
     pub service_picker: ServicePickerState,
     pub service_selected: bool,
-    pub profile: String,
-    pub region: String,
     pub region_selector_index: usize,
     pub cw_log_group_visible_column_ids: Vec<ColumnId>,
     pub cw_log_group_column_ids: Vec<ColumnId>,
@@ -650,307 +630,20 @@ impl App {
         }
     }
 
+    /// Sign in with `profile` in `region` and start on the service picker.
     pub async fn new(profile: Option<String>, region: Option<String>) -> anyhow::Result<Self> {
-        let profile_name = profile.or_else(|| std::env::var("AWS_PROFILE").ok())
-            .ok_or_else(|| anyhow::anyhow!("No AWS profile specified. Set AWS_PROFILE environment variable or select a profile."))?;
-
-        std::env::set_var("AWS_PROFILE", &profile_name);
-
-        let config = AwsConfig::new(region).await?;
-        let cloudwatch_client = CloudWatchClient::new(config.clone()).await?;
-        let cloudtrail_client = CloudTrailClient::new(config.clone());
-        let s3_client = S3Client::new(config.clone());
-        let sqs_client = SqsClient::new(config.clone());
-        let sns_client = SnsClient::new(config.clone());
-        let secretsmanager_client = SecretsManagerClient::new(config.clone());
-        let stepfunctions_client = rusticity_core::StepFunctionsClient::new(config.clone());
-        let alarms_client = AlarmsClient::new(config.clone());
-        let ec2_client = Ec2Client::new(config.clone());
-        let ecr_client = EcrClient::new(config.clone());
-        let apig_client = ApiGatewayClient::new(config.clone());
-        let iam_client = IamClient::new(config.clone());
-        let kms_client = KmsClient::new(config.clone());
-        let efs_client = EfsClient::new(config.clone());
-        let fsx_client = FsxClient::new(config.clone());
-        let rds_client = RdsClient::new(config.clone());
-        let vpc_client = VpcClient::new(config.clone());
-        let dynamodb_client = DynamoDbClient::new(config.clone());
-        let lambda_client = LambdaClient::new(config.clone());
-        let cloudformation_client = CloudFormationClient::new(config.clone());
-        let region_name = config.region.clone();
-
-        Ok(Self {
-            running: true,
-            mode: Mode::ServicePicker,
-            config,
-            cloudwatch_client,
-            cloudtrail_client,
-            s3_client,
-            sqs_client,
-            sns_client,
-            secretsmanager_client,
-            stepfunctions_client,
-            alarms_client,
-            ec2_client,
-            ecr_client,
-            kms_client,
-            efs_client,
-            fsx_client,
-            rds_client,
-            vpc_client,
-            dynamodb_client,
-            apig_client,
-            iam_client,
-            lambda_client,
-            cloudformation_client,
-            current_service: Service::CloudWatchLogGroups,
-            tabs: Vec::new(),
-            current_tab: 0,
-            tab_runtime: TabRuntime::default(),
-            tab_picker_selected: 0,
-            tab_filter: String::new(),
-            pending_key: None,
-            log_groups_state: CloudWatchLogGroupsState::new(),
-            insights_state: CloudWatchInsightsState::new(),
-            alarms_state: CloudWatchAlarmsState::new(),
-            cloudtrail_state: CloudTrailState {
-                table: TableState::new(),
-                input_focus: InputFocus::Filter,
-                current_event: None,
-                event_json_scroll: 0,
-                detail_focus: CloudTrailDetailFocus::Resources,
-                resources_expanded_index: None,
-                active_event_name_filter: None,
-            },
-            s3_state: S3State::new(),
-            sqs_state: SqsState::new(),
-            sns_state: SnsState::default(),
-            secretsmanager_state: SecretsManagerState::default(),
-            acm_state: AcmState::default(),
-            eventbridge_state: crate::eventbridge::State::default(),
-            load_balancers_state: Default::default(),
-            target_groups_state: Default::default(),
-            stepfunctions_state: crate::ui::stepfunctions::State::default(),
-            ec2_state: Ec2State::default(),
-            ecr_state: EcrState::new(),
-            kms_state: KmsState::new(),
-            efs_state: EfsState::new(),
-            fsx_state: FsxState::new(),
-            rds_state: RdsState::default(),
-            vpc_state: VpcState::default(),
-            resource_finder: crate::finder::State::default(),
-            dynamodb_state: DynamoDbState::new(),
-            apig_state: ApigState::new(),
-            lambda_state: LambdaState::new(),
-            lambda_application_state: LambdaApplicationState::new(),
-            cfn_state: CfnState::new(),
-            iam_state: IamState::new(),
-            service_picker: ServicePickerState::new(),
-            service_selected: false,
-            profile: profile_name,
-            region: region_name,
-            region_selector_index: 0,
-            cw_log_group_visible_column_ids: LogGroupColumn::default_visible(),
-            cw_log_group_column_ids: LogGroupColumn::ids(),
-            column_selector_index: 0,
-            cw_log_stream_visible_column_ids: StreamColumn::default_visible(),
-            cw_log_stream_column_ids: StreamColumn::ids(),
-            cw_log_event_visible_column_ids: EventColumn::default_visible(),
-            cw_log_event_column_ids: EventColumn::ids(),
-            cw_log_tag_visible_column_ids: crate::cw::TagColumn::ids(),
-            cw_log_tag_column_ids: crate::cw::TagColumn::ids(),
-            cw_alarm_visible_column_ids: [
-                AlarmColumn::Name,
-                AlarmColumn::State,
-                AlarmColumn::LastStateUpdate,
-                AlarmColumn::Conditions,
-                AlarmColumn::Actions,
-            ]
-            .iter()
-            .map(|c| c.id())
-            .collect(),
-            cw_alarm_column_ids: AlarmColumn::ids(),
-            cloudtrail_event_visible_column_ids: [
-                CloudTrailEventColumn::EventName,
-                CloudTrailEventColumn::EventTime,
-                CloudTrailEventColumn::Username,
-                CloudTrailEventColumn::EventSource,
-                CloudTrailEventColumn::ResourceType,
-                CloudTrailEventColumn::ResourceName,
-            ]
-            .iter()
-            .map(|c| c.id())
-            .collect(),
-            cloudtrail_event_column_ids: CloudTrailEventColumn::ids(),
-            cloudtrail_resource_visible_column_ids: EventResourceColumn::ids(),
-            cloudtrail_resource_column_ids: EventResourceColumn::ids(),
-            s3_bucket_visible_column_ids: S3BucketColumn::ids(),
-            s3_bucket_column_ids: S3BucketColumn::ids(),
-            sqs_visible_column_ids: [
-                SqsColumn::Name,
-                SqsColumn::Type,
-                SqsColumn::Created,
-                SqsColumn::MessagesAvailable,
-                SqsColumn::MessagesInFlight,
-                SqsColumn::Encryption,
-                SqsColumn::ContentBasedDeduplication,
-            ]
-            .iter()
-            .map(|c| c.id())
-            .collect(),
-            sqs_column_ids: SqsColumn::ids(),
-            ec2_visible_column_ids: [
-                Ec2Column::Name,
-                Ec2Column::InstanceId,
-                Ec2Column::InstanceState,
-                Ec2Column::InstanceType,
-                Ec2Column::StatusCheck,
-                Ec2Column::AlarmStatus,
-                Ec2Column::AvailabilityZone,
-                Ec2Column::PublicIpv4Dns,
-                Ec2Column::PublicIpv4Address,
-                Ec2Column::ElasticIp,
-                Ec2Column::Ipv6Ips,
-                Ec2Column::Monitoring,
-                Ec2Column::SecurityGroupName,
-                Ec2Column::KeyName,
-                Ec2Column::LaunchTime,
-                Ec2Column::PlatformDetails,
-            ]
-            .iter()
-            .map(|c| c.id())
-            .collect(),
-            ec2_column_ids: Ec2Column::ids(),
-            ecr_repo_visible_column_ids: EcrColumn::ids(),
-            ecr_repo_column_ids: EcrColumn::ids(),
-            ecr_image_visible_column_ids: EcrImageColumn::ids(),
-            ecr_image_column_ids: EcrImageColumn::ids(),
-            efs_visible_column_ids: EfsColumn::default_visible_ids(),
-            efs_column_ids: EfsColumn::ids(),
-            fsx_visible_column_ids: FsxColumn::default_visible_ids(),
-            fsx_column_ids: FsxColumn::ids(),
-            dynamodb_visible_column_ids: DynamoDbColumn::default_visible_ids(),
-            dynamodb_column_ids: DynamoDbColumn::ids(),
-            apig_api_visible_column_ids: ApigColumn::ids(),
-            apig_api_column_ids: ApigColumn::ids(),
-            apig_route_visible_column_ids: RouteColumn::all().iter().map(|c| c.id()).collect(),
-            apig_route_column_ids: RouteColumn::all().iter().map(|c| c.id()).collect(),
-            apig_resource_visible_column_ids: ResourceColumn::all()
-                .iter()
-                .map(|c| c.id())
-                .collect(),
-            apig_resource_column_ids: ResourceColumn::all().iter().map(|c| c.id()).collect(),
-            lambda_application_visible_column_ids: LambdaApplicationColumn::visible(),
-            lambda_application_column_ids: LambdaApplicationColumn::ids(),
-            lambda_deployment_visible_column_ids: DeploymentColumn::ids(),
-            lambda_deployment_column_ids: DeploymentColumn::ids(),
-            lambda_resource_visible_column_ids: crate::lambda::ResourceColumn::ids(),
-            lambda_resource_column_ids: crate::lambda::ResourceColumn::ids(),
-            cfn_visible_column_ids: [
-                CfnColumn::Name,
-                CfnColumn::Status,
-                CfnColumn::CreatedTime,
-                CfnColumn::Description,
-            ]
-            .iter()
-            .map(|c| c.id())
-            .collect(),
-            cfn_column_ids: CfnColumn::ids(),
-            cfn_parameter_visible_column_ids: parameter_column_ids(),
-            cfn_parameter_column_ids: parameter_column_ids(),
-            cfn_output_visible_column_ids: output_column_ids(),
-            cfn_output_column_ids: output_column_ids(),
-            cfn_resource_visible_column_ids: resource_column_ids(),
-            cfn_resource_column_ids: resource_column_ids(),
-            cfn_event_visible_column_ids: event_visible_column_ids(),
-            cfn_event_column_ids: event_column_ids(),
-            cfn_change_set_visible_column_ids: change_set_visible_column_ids(),
-            cfn_change_set_column_ids: change_set_column_ids(),
-            iam_user_visible_column_ids: UserColumn::visible(),
-            iam_user_column_ids: UserColumn::ids(),
-            iam_role_visible_column_ids: RoleColumn::visible(),
-            iam_role_column_ids: RoleColumn::ids(),
-            iam_group_visible_column_ids: vec![
-                "Group name".to_string(),
-                "Users".to_string(),
-                "Permissions".to_string(),
-                "Creation time".to_string(),
-            ],
-            iam_group_column_ids: vec![
-                "Group name".to_string(),
-                "Path".to_string(),
-                "Users".to_string(),
-                "Permissions".to_string(),
-                "Creation time".to_string(),
-            ],
-            iam_policy_visible_column_ids: vec![
-                "Policy name".to_string(),
-                "Type".to_string(),
-                "Attached via".to_string(),
-            ],
-            iam_policy_column_ids: vec![
-                "Policy name".to_string(),
-                "Type".to_string(),
-                "Attached via".to_string(),
-                "Attached entities".to_string(),
-                "Description".to_string(),
-                "Creation time".to_string(),
-                "Edited time".to_string(),
-            ],
-            preference_section: Preferences::Columns,
-            view_mode: ViewMode::List,
-            error_message: None,
-            error_scroll: 0,
-            page_input: String::new(),
-            calendar_date: None,
-            calendar_selecting: CalendarField::StartDate,
-            cursor_pos: 0,
-            current_session: None,
-            sessions: Vec::new(),
-            session_picker_selected: 0,
-            session_filter: String::new(),
-            session_filter_active: false,
-            region_filter: String::new(),
-            region_filter_active: false,
-            region_picker_selected: 0,
-            region_latencies: std::collections::HashMap::new(),
-            profile_filter: String::new(),
-            profile_filter_active: false,
-            profile_picker_selected: 0,
-            available_profiles: Vec::new(),
-            clipboard: ClipboardState::default(),
-            bookmarks: crate::bookmarks::State::default(),
-            cli_output: crate::cli_output::State::default(),
-            text_viewer: crate::text_viewer::State::default(),
-        })
+        let aws = crate::aws_context::AwsContext::connect(profile, region).await?;
+        Ok(Self::with_context(aws))
     }
 
-    pub fn new_without_client(profile: String, region: Option<String>) -> Self {
-        let config = AwsConfig::dummy(region.clone());
+    /// The app for `aws`, with every view empty.
+    pub fn with_context(aws: crate::aws_context::AwsContext) -> Self {
         Self {
+            aws,
+            context_request: None,
+            pending_profile: None,
             running: true,
             mode: Mode::ServicePicker,
-            config: config.clone(),
-            cloudwatch_client: CloudWatchClient::dummy(config.clone()),
-            cloudtrail_client: CloudTrailClient::new(config.clone()),
-            s3_client: S3Client::new(config.clone()),
-            sqs_client: SqsClient::new(config.clone()),
-            sns_client: SnsClient::new(config.clone()),
-            secretsmanager_client: SecretsManagerClient::new(config.clone()),
-            stepfunctions_client: rusticity_core::StepFunctionsClient::new(config.clone()),
-            alarms_client: AlarmsClient::new(config.clone()),
-            ec2_client: Ec2Client::new(config.clone()),
-            ecr_client: EcrClient::new(config.clone()),
-            kms_client: KmsClient::new(config.clone()),
-            efs_client: EfsClient::new(config.clone()),
-            fsx_client: FsxClient::new(config.clone()),
-            rds_client: RdsClient::new(config.clone()),
-            vpc_client: VpcClient::new(config.clone()),
-            dynamodb_client: DynamoDbClient::new(config.clone()),
-            apig_client: ApiGatewayClient::new(config.clone()),
-            iam_client: IamClient::new(config.clone()),
-            lambda_client: LambdaClient::new(config.clone()),
-            cloudformation_client: CloudFormationClient::new(config.clone()),
             current_service: Service::CloudWatchLogGroups,
             tabs: Vec::new(),
             current_tab: 0,
@@ -961,7 +654,6 @@ impl App {
             log_groups_state: CloudWatchLogGroupsState::new(),
             insights_state: CloudWatchInsightsState::new(),
             alarms_state: CloudWatchAlarmsState::new(),
-            s3_state: S3State::new(),
             cloudtrail_state: CloudTrailState {
                 table: TableState::new(),
                 input_focus: InputFocus::Filter,
@@ -971,6 +663,7 @@ impl App {
                 resources_expanded_index: None,
                 active_event_name_filter: None,
             },
+            s3_state: S3State::new(),
             sqs_state: SqsState::new(),
             sns_state: SnsState::default(),
             secretsmanager_state: SecretsManagerState::default(),
@@ -995,13 +688,10 @@ impl App {
             iam_state: IamState::new(),
             service_picker: ServicePickerState::new(),
             service_selected: false,
-            profile,
-            region: region.unwrap_or_default(),
             region_selector_index: 0,
             cw_log_group_visible_column_ids: LogGroupColumn::default_visible(),
             cw_log_group_column_ids: LogGroupColumn::ids(),
             column_selector_index: 0,
-            preference_section: Preferences::Columns,
             cw_log_stream_visible_column_ids: StreamColumn::default_visible(),
             cw_log_stream_column_ids: StreamColumn::ids(),
             cw_log_event_visible_column_ids: EventColumn::default_visible(),
@@ -1019,7 +709,6 @@ impl App {
             .map(|c| c.id())
             .collect(),
             cw_alarm_column_ids: AlarmColumn::ids(),
-            s3_bucket_visible_column_ids: S3BucketColumn::ids(),
             cloudtrail_event_visible_column_ids: [
                 CloudTrailEventColumn::EventName,
                 CloudTrailEventColumn::EventTime,
@@ -1034,6 +723,7 @@ impl App {
             cloudtrail_event_column_ids: CloudTrailEventColumn::ids(),
             cloudtrail_resource_visible_column_ids: EventResourceColumn::ids(),
             cloudtrail_resource_column_ids: EventResourceColumn::ids(),
+            s3_bucket_visible_column_ids: S3BucketColumn::ids(),
             s3_bucket_column_ids: S3BucketColumn::ids(),
             sqs_visible_column_ids: [
                 SqsColumn::Name,
@@ -1080,8 +770,6 @@ impl App {
             fsx_column_ids: FsxColumn::ids(),
             dynamodb_visible_column_ids: DynamoDbColumn::default_visible_ids(),
             dynamodb_column_ids: DynamoDbColumn::ids(),
-            lambda_application_visible_column_ids: LambdaApplicationColumn::visible(),
-            lambda_application_column_ids: LambdaApplicationColumn::ids(),
             apig_api_visible_column_ids: ApigColumn::ids(),
             apig_api_column_ids: ApigColumn::ids(),
             apig_route_visible_column_ids: RouteColumn::all().iter().map(|c| c.id()).collect(),
@@ -1091,6 +779,8 @@ impl App {
                 .map(|c| c.id())
                 .collect(),
             apig_resource_column_ids: ResourceColumn::all().iter().map(|c| c.id()).collect(),
+            lambda_application_visible_column_ids: LambdaApplicationColumn::visible(),
+            lambda_application_column_ids: LambdaApplicationColumn::ids(),
             lambda_deployment_visible_column_ids: DeploymentColumn::ids(),
             lambda_deployment_column_ids: DeploymentColumn::ids(),
             lambda_resource_visible_column_ids: crate::lambda::ResourceColumn::ids(),
@@ -1105,7 +795,6 @@ impl App {
             .map(|c| c.id())
             .collect(),
             cfn_column_ids: CfnColumn::ids(),
-            iam_user_visible_column_ids: UserColumn::visible(),
             cfn_parameter_visible_column_ids: parameter_column_ids(),
             cfn_parameter_column_ids: parameter_column_ids(),
             cfn_output_visible_column_ids: output_column_ids(),
@@ -1116,6 +805,7 @@ impl App {
             cfn_event_column_ids: event_column_ids(),
             cfn_change_set_visible_column_ids: change_set_visible_column_ids(),
             cfn_change_set_column_ids: change_set_column_ids(),
+            iam_user_visible_column_ids: UserColumn::visible(),
             iam_user_column_ids: UserColumn::ids(),
             iam_role_visible_column_ids: RoleColumn::visible(),
             iam_role_column_ids: RoleColumn::ids(),
@@ -1146,6 +836,7 @@ impl App {
                 "Creation time".to_string(),
                 "Edited time".to_string(),
             ],
+            preference_section: Preferences::Columns,
             view_mode: ViewMode::List,
             error_message: None,
             error_scroll: 0,
@@ -1171,6 +862,51 @@ impl App {
             cli_output: crate::cli_output::State::default(),
             text_viewer: crate::text_viewer::State::default(),
         }
+    }
+
+    /// Ask the event loop to connect `profile` in `region`, unless that is
+    /// already the current context.
+    pub(crate) fn request_context(&mut self, profile: String, region: String) {
+        if profile == self.aws.profile && region == self.aws.config.region {
+            return;
+        }
+        self.context_request = Some(ContextRequest {
+            profile: Some(profile),
+            region: Some(region).filter(|r| !r.is_empty()),
+        });
+    }
+
+    /// Swap in a connected context, whole. Every view starts empty and each
+    /// tab reloads in the new context; the tabs, the bookmarks, the session
+    /// and the profile and Region pickers carry over. Nothing read in the old
+    /// context stays on screen.
+    pub fn replace_context(&mut self, aws: AwsContext) {
+        let mut next = App::with_context(aws);
+        next.tabs = std::mem::take(&mut self.tabs);
+        next.current_tab = self.current_tab.min(next.tabs.len().saturating_sub(1));
+        next.current_service = self.current_service;
+        next.service_selected = self.service_selected && !next.tabs.is_empty();
+        next.mode = if next.service_selected {
+            Mode::Normal
+        } else {
+            Mode::ServicePicker
+        };
+        next.bookmarks = std::mem::take(&mut self.bookmarks);
+        next.current_session = self.current_session.take();
+        next.sessions = std::mem::take(&mut self.sessions);
+        next.available_profiles = std::mem::take(&mut self.available_profiles);
+        next.region_latencies = std::mem::take(&mut self.region_latencies);
+        for tab in &mut next.tabs {
+            tab.breadcrumb = tab.title.clone();
+        }
+        *self = next;
+        crate::tab_runtime::sync_active(self);
+        self.update_current_tab_breadcrumb();
+    }
+
+    /// The app with an offline context: no credentials, no AWS calls.
+    pub fn new_without_client(profile: String, region: Option<String>) -> Self {
+        Self::with_context(crate::aws_context::AwsContext::offline(profile, region))
     }
 
     /// Public entry point: keeps the per-tab state window in sync around the
@@ -1515,11 +1251,9 @@ impl App {
                 let filtered_sessions = self.get_filtered_sessions();
                 if let Some(&session) = filtered_sessions.get(self.session_picker_selected) {
                     let session = session.clone();
-                    // Load the session
-                    self.profile = session.profile.clone();
-                    self.region = session.region.clone();
-                    self.config.account_id = session.account_id.clone();
-                    self.config.role_arn = session.role_arn.clone();
+                    // A session in another profile or Region connects it; the
+                    // account and role come from that connection, not the file.
+                    self.request_context(session.profile.clone(), session.region.clone());
 
                     // Clear existing tabs and load session tabs
                     self.tabs.clear();
@@ -3257,7 +2991,7 @@ impl App {
                             .get(self.log_groups_state.selected_stream)
                         {
                             return cw::logs::console_url_stream(
-                                &self.config.region,
+                                &self.aws.config.region,
                                 &group.name,
                                 &stream.name,
                             );
@@ -3265,19 +2999,19 @@ impl App {
                     }
                 } else if self.view_mode == ViewMode::Detail {
                     if let Some(group) = selected_log_group(self) {
-                        return cw::logs::console_url_detail(&self.config.region, &group.name);
+                        return cw::logs::console_url_detail(&self.aws.config.region, &group.name);
                     }
                 }
-                cw::logs::console_url_list(&self.config.region)
+                cw::logs::console_url_list(&self.aws.config.region)
             }
             Service::CloudWatchInsights => cw::insights::console_url(
-                &self.config.region,
-                &self.config.account_id,
+                &self.aws.config.region,
+                &self.aws.config.account_id,
                 &self.insights_state.insights.query_text,
                 &self.insights_state.insights.selected_log_groups,
             ),
             Service::CloudWatchAlarms => cw::alarms::console_url(
-                &self.config.region,
+                &self.aws.config.region,
                 self.alarms_state.current_alarm.as_deref(),
             ),
             Service::CloudTrailEvents => crate::cloudtrail::actions::console_url(self),
@@ -4226,10 +3960,10 @@ impl App {
                 // Save current session before changing region
                 if !self.tabs.is_empty() {
                     let mut session = Session::new(
-                        self.profile.clone(),
-                        self.region.clone(),
-                        self.config.account_id.clone(),
-                        self.config.role_arn.clone(),
+                        self.aws.profile.clone(),
+                        self.aws.config.region.clone(),
+                        self.aws.config.account_id.clone(),
+                        self.aws.config.role_arn.clone(),
                     );
 
                     for tab in self
@@ -4249,32 +3983,51 @@ impl App {
                     let _ = session.save();
                 }
 
-                self.region = region.code.to_string();
-                self.config.region = region.code.to_string();
-
-                // Close all tabs - region change invalidates all data
-                self.tabs.clear();
-                self.current_tab = 0;
-                self.service_selected = false;
-
-                self.mode = Mode::Normal;
+                // Connect the Region; every tab reloads in it once connected.
+                let profile = self
+                    .pending_profile
+                    .take()
+                    .unwrap_or_else(|| self.aws.profile.clone());
+                self.context_request = Some(ContextRequest {
+                    profile: Some(profile).filter(|p| !p.is_empty()),
+                    region: Some(region.code.to_string()),
+                });
+                self.mode = if self.service_selected {
+                    Mode::Normal
+                } else {
+                    Mode::ServicePicker
+                };
             }
         } else if self.mode == Mode::ProfilePicker {
             let filtered = self.get_filtered_profiles();
             if let Some(profile) = filtered.get(self.profile_picker_selected) {
                 let profile_name = profile.name.clone();
-                let profile_region = profile.region.clone();
-
-                self.profile = profile_name.clone();
-                std::env::set_var("AWS_PROFILE", &profile_name);
-
-                // Use profile's region if available
-                if let Some(region) = profile_region {
-                    self.region = region;
+                // The profile Region, else the current one; with neither, the
+                // Region picker completes the request.
+                let region = profile
+                    .region
+                    .clone()
+                    .or_else(|| Some(self.aws.config.region.clone()))
+                    .filter(|r| !r.is_empty());
+                match region {
+                    Some(region) => {
+                        self.context_request = Some(ContextRequest {
+                            profile: Some(profile_name),
+                            region: Some(region),
+                        });
+                        self.mode = if self.service_selected {
+                            Mode::Normal
+                        } else {
+                            Mode::ServicePicker
+                        };
+                    }
+                    None => {
+                        self.pending_profile = Some(profile_name);
+                        self.region_filter.clear();
+                        self.region_picker_selected = 0;
+                        self.mode = Mode::RegionPicker;
+                    }
                 }
-
-                self.mode = Mode::Normal;
-                // Note: Changing profile requires reconnecting to AWS
             }
         } else if self.mode == Mode::ServicePicker {
             // If filter is active (INSERT mode), exit filter mode instead of selecting
@@ -4374,11 +4127,7 @@ impl App {
 
                 // Load the selected session
                 self.current_session = Some(session.clone());
-                self.profile = session.profile.clone();
-                self.region = session.region.clone();
-                self.config.region = session.region.clone();
-                self.config.account_id = session.account_id.clone();
-                self.config.role_arn = session.role_arn.clone();
+                self.request_context(session.profile.clone(), session.region.clone());
 
                 // Restore tabs
                 self.tabs = session
@@ -4589,12 +4338,13 @@ impl App {
     }
 
     pub async fn load_log_groups(&mut self) -> anyhow::Result<()> {
-        self.log_groups_state.log_groups.items = self.cloudwatch_client.list_log_groups().await?;
+        self.log_groups_state.log_groups.items =
+            self.aws.cloudwatch_client.list_log_groups().await?;
         Ok(())
     }
 
     pub async fn load_alarms(&mut self) -> anyhow::Result<()> {
-        let alarm_data = self.alarms_client.list_alarms().await?;
+        let alarm_data = self.aws.alarms_client.list_alarms().await?;
         self.alarms_state.table.items = alarm_data
             .into_iter()
             .map(|d| Alarm {
@@ -4642,6 +4392,7 @@ impl App {
             let end_time = chrono::Utc::now();
             let start_time = end_time - chrono::TimeDelta::hours(72);
             let data = self
+                .aws
                 .alarms_client
                 .get_metric_math_data(&sub_metrics, start_time, end_time)
                 .await?;
@@ -4653,6 +4404,7 @@ impl App {
     pub async fn load_cloudtrail_events(&mut self) -> anyhow::Result<()> {
         let filter = self.cloudtrail_state.active_event_name_filter.clone();
         let (events, next_token) = self
+            .aws
             .cloudtrail_client
             .lookup_events(None, None, filter)
             .await?;
@@ -4703,6 +4455,7 @@ impl App {
             let filter = self.cloudtrail_state.active_event_name_filter.clone();
             // Just load the next batch of events
             let (events, next_token) = self
+                .aws
                 .cloudtrail_client
                 .lookup_events(None, Some(token), filter)
                 .await?;
@@ -4761,14 +4514,14 @@ impl App {
             {
                 if bucket.region.is_empty() {
                     // Fetch the actual region
-                    let region = self.s3_client.get_bucket_location(bucket_name).await?;
+                    let region = self.aws.s3_client.get_bucket_location(bucket_name).await?;
                     bucket.region = region.clone();
                     region
                 } else {
                     bucket.region.clone()
                 }
             } else {
-                self.config.region.clone()
+                self.aws.config.region.clone()
             };
 
             let prefix = self
@@ -4778,6 +4531,7 @@ impl App {
                 .cloned()
                 .unwrap_or_default();
             let objects = self
+                .aws
                 .s3_client
                 .list_objects(bucket_name, &bucket_region, &prefix)
                 .await?;
@@ -4814,7 +4568,7 @@ impl App {
         let bucket_region = match stored_region {
             Some(r) => r,
             None => {
-                let r = self.s3_client.get_bucket_location(&bucket_name).await?;
+                let r = self.aws.s3_client.get_bucket_location(&bucket_name).await?;
                 // Cache the discovered region back into the bucket
                 if let Some(b) = self
                     .s3_state
@@ -4829,6 +4583,7 @@ impl App {
             }
         };
         let objects = self
+            .aws
             .s3_client
             .list_objects(&bucket_name, &bucket_region, "")
             .await?;
@@ -4909,7 +4664,7 @@ impl App {
         let bucket_region = match stored_region {
             Some(r) => r,
             None => {
-                let r = self.s3_client.get_bucket_location(&bucket_name).await?;
+                let r = self.aws.s3_client.get_bucket_location(&bucket_name).await?;
                 if let Some(b) = self
                     .s3_state
                     .buckets
@@ -4923,6 +4678,7 @@ impl App {
             }
         };
         let objects = self
+            .aws
             .s3_client
             .list_objects(&bucket_name, &bucket_region, &prefix)
             .await?;
@@ -4942,8 +4698,8 @@ impl App {
 
     pub async fn load_ecr_repositories(&mut self) -> anyhow::Result<()> {
         let repos = match self.ecr_state.tab {
-            EcrTab::Private => self.ecr_client.list_private_repositories().await?,
-            EcrTab::Public => self.ecr_client.list_public_repositories().await?,
+            EcrTab::Private => self.aws.ecr_client.list_private_repositories().await?,
+            EcrTab::Public => self.aws.ecr_client.list_public_repositories().await?,
         };
 
         self.ecr_state.repositories.items = repos
@@ -4965,7 +4721,7 @@ impl App {
     }
 
     pub async fn load_kms_keys(&mut self) -> anyhow::Result<()> {
-        let keys = self.kms_client.list_keys().await?;
+        let keys = self.aws.kms_client.list_keys().await?;
         self.kms_state.keys.items = keys
             .into_iter()
             .map(|k| KmsKey {
@@ -4990,7 +4746,7 @@ impl App {
     }
 
     pub async fn load_efs_file_systems(&mut self) -> anyhow::Result<()> {
-        let file_systems = self.efs_client.list_file_systems().await?;
+        let file_systems = self.aws.efs_client.list_file_systems().await?;
         self.efs_state.file_systems.items = file_systems
             .into_iter()
             .map(|f| EfsFileSystem {
@@ -5025,13 +4781,13 @@ impl App {
     }
 
     pub async fn load_dynamodb_tables(&mut self) -> anyhow::Result<()> {
-        let tables = self.dynamodb_client.list_tables().await?;
+        let tables = self.aws.dynamodb_client.list_tables().await?;
         self.dynamodb_state.tables.items = tables;
         Ok(())
     }
 
     pub async fn load_dynamodb_backups(&mut self, table_name: &str) -> anyhow::Result<()> {
-        let backups = self.dynamodb_client.list_backups(table_name).await?;
+        let backups = self.aws.dynamodb_client.list_backups(table_name).await?;
         self.dynamodb_state.backups.items = backups;
         self.dynamodb_state.backups.selected = 0;
         self.dynamodb_state.backups.expanded_item = None;
@@ -5051,7 +4807,8 @@ impl App {
         };
         let result = match request.operation {
             ItemOperation::Scan => {
-                self.dynamodb_client
+                self.aws
+                    .dynamodb_client
                     .scan_items(
                         &request.table,
                         request.index.as_deref(),
@@ -5066,7 +4823,8 @@ impl App {
                 if value.is_empty() {
                     Ok(DdbItemsPage::default())
                 } else if let Some(pk) = request.keys.first() {
-                    self.dynamodb_client
+                    self.aws
+                        .dynamodb_client
                         .query_items(
                             &request.table,
                             request.index.as_deref(),
@@ -5098,7 +4856,7 @@ impl App {
     }
 
     pub async fn load_dynamodb_tags(&mut self, table_arn: &str) -> anyhow::Result<()> {
-        let tags = self.dynamodb_client.list_tags(table_arn).await?;
+        let tags = self.aws.dynamodb_client.list_tags(table_arn).await?;
         self.dynamodb_state.tags_table.items = tags;
         self.dynamodb_state.tags_table.selected = 0;
         self.dynamodb_state.tags_table.expanded_item = None;
@@ -5108,6 +4866,7 @@ impl App {
     /// CloudWatch metrics for the Monitor tab.
     pub async fn load_dynamodb_metrics(&mut self, table_name: &str) -> anyhow::Result<()> {
         self.dynamodb_state.metrics = self
+            .aws
             .dynamodb_client
             .get_monitoring_metrics(table_name)
             .await?;
@@ -5120,24 +4879,34 @@ impl App {
         table_arn: &str,
         stream_arn: &str,
     ) -> anyhow::Result<()> {
-        self.dynamodb_state.table_policy =
-            self.dynamodb_client.get_resource_policy(table_arn).await?;
+        self.dynamodb_state.table_policy = self
+            .aws
+            .dynamodb_client
+            .get_resource_policy(table_arn)
+            .await?;
         self.dynamodb_state.stream_policy = if stream_arn.is_empty() {
             None
         } else {
-            self.dynamodb_client.get_resource_policy(stream_arn).await?
+            self.aws
+                .dynamodb_client
+                .get_resource_policy(stream_arn)
+                .await?
         };
         Ok(())
     }
 
     pub async fn load_dynamodb_settings(&mut self, table_name: &str) -> anyhow::Result<()> {
-        self.dynamodb_state.settings = self.dynamodb_client.describe_settings(table_name).await?;
+        self.dynamodb_state.settings = self
+            .aws
+            .dynamodb_client
+            .describe_settings(table_name)
+            .await?;
         Ok(())
     }
 
     pub async fn load_sns_topics(&mut self) -> anyhow::Result<()> {
         self.sns_state.topics.loading = true;
-        let result = self.sns_client.list_topics().await;
+        let result = self.aws.sns_client.list_topics().await;
         self.sns_state.topics.loading = false;
         // A failed read must not discard the previously loaded inventory.
         self.sns_state.topics.items = result?;
@@ -5147,7 +4916,7 @@ impl App {
 
     pub async fn load_stepfunctions(&mut self) -> anyhow::Result<()> {
         self.stepfunctions_state.machines.loading = true;
-        let result = self.stepfunctions_client.list_state_machines().await;
+        let result = self.aws.stepfunctions_client.list_state_machines().await;
         self.stepfunctions_state.machines.loading = false;
         self.stepfunctions_state.machines.items = result?;
         self.stepfunctions_state.machines.reset();
@@ -5155,13 +4924,13 @@ impl App {
     }
 
     pub async fn load_fsx_file_systems(&mut self) -> anyhow::Result<()> {
-        let file_systems = self.fsx_client.list_file_systems().await?;
+        let file_systems = self.aws.fsx_client.list_file_systems().await?;
         self.fsx_state.file_systems.items = file_systems;
         Ok(())
     }
 
     pub async fn load_fsx_backups(&mut self, file_system_id: &str) -> anyhow::Result<()> {
-        let backups = self.fsx_client.describe_backups(file_system_id).await?;
+        let backups = self.aws.fsx_client.describe_backups(file_system_id).await?;
         self.fsx_state.backups.items = backups;
         self.fsx_state.backups.selected = 0;
         self.fsx_state.backups.expanded_item = None;
@@ -5169,7 +4938,7 @@ impl App {
     }
 
     pub async fn load_apis(&mut self) -> anyhow::Result<()> {
-        let apis = self.apig_client.list_rest_apis().await?;
+        let apis = self.aws.apig_client.list_rest_apis().await?;
 
         self.apig_state.apis.items = apis
             .into_iter()
@@ -5259,7 +5028,7 @@ impl App {
     pub async fn load_ecr_images(&mut self) -> anyhow::Result<()> {
         if let Some(repo_name) = &self.ecr_state.current_repository {
             if let Some(repo_uri) = &self.ecr_state.current_repository_uri {
-                let images = self.ecr_client.list_images(repo_name, repo_uri).await?;
+                let images = self.aws.ecr_client.list_images(repo_name, repo_uri).await?;
 
                 self.ecr_state.images.items = images
                     .into_iter()
@@ -5285,6 +5054,7 @@ impl App {
 
     pub async fn load_cloudformation_stacks(&mut self) -> anyhow::Result<()> {
         let stacks = self
+            .aws
             .cloudformation_client
             .list_stacks(self.cfn_state.view_nested)
             .await?;
@@ -5324,7 +5094,11 @@ impl App {
     }
 
     pub async fn load_cfn_template(&mut self, stack_name: &str) -> anyhow::Result<()> {
-        let template = self.cloudformation_client.get_template(stack_name).await?;
+        let template = self
+            .aws
+            .cloudformation_client
+            .get_template(stack_name)
+            .await?;
         self.cfn_state.template_body = template;
         self.cfn_state.template_scroll = 0;
         Ok(())
@@ -5332,6 +5106,7 @@ impl App {
 
     pub async fn load_cfn_parameters(&mut self, stack_name: &str) -> anyhow::Result<()> {
         let mut parameters = self
+            .aws
             .cloudformation_client
             .get_stack_parameters(stack_name)
             .await?;
@@ -5343,6 +5118,7 @@ impl App {
 
     pub async fn load_cfn_outputs(&mut self, stack_name: &str) -> anyhow::Result<()> {
         let outputs = self
+            .aws
             .cloudformation_client
             .get_stack_outputs(stack_name)
             .await?;
@@ -5353,6 +5129,7 @@ impl App {
 
     pub async fn load_cfn_resources(&mut self, stack_name: &str) -> anyhow::Result<()> {
         let resources = self
+            .aws
             .cloudformation_client
             .get_stack_resources(stack_name)
             .await?;
@@ -5363,6 +5140,7 @@ impl App {
 
     pub async fn load_cfn_events(&mut self, stack_name: &str) -> anyhow::Result<()> {
         let events = self
+            .aws
             .cloudformation_client
             .list_stack_events(stack_name)
             .await?;
@@ -5373,6 +5151,7 @@ impl App {
 
     pub async fn load_cfn_change_sets(&mut self, stack_name: &str) -> anyhow::Result<()> {
         let change_sets = self
+            .aws
             .cloudformation_client
             .list_change_sets(stack_name)
             .await?;
@@ -5384,6 +5163,7 @@ impl App {
     pub async fn load_role_policies(&mut self, role_name: &str) -> anyhow::Result<()> {
         // Load attached (managed) policies
         let attached_policies = self
+            .aws
             .iam_client
             .list_attached_role_policies(role_name)
             .await
@@ -5392,7 +5172,8 @@ impl App {
         let mut policies: Vec<IamPolicy> = Vec::new();
         for p in attached_policies {
             let (creation_time, edited_time) = if let Some(arn) = p.policy_arn() {
-                self.iam_client
+                self.aws
+                    .iam_client
                     .get_policy_metadata(arn)
                     .await
                     .unwrap_or_else(|_| ("-".to_string(), "-".to_string()))
@@ -5413,6 +5194,7 @@ impl App {
 
         // Load inline policies
         let inline_policy_names = self
+            .aws
             .iam_client
             .list_role_policies(role_name)
             .await
@@ -5438,6 +5220,7 @@ impl App {
 
     pub async fn load_group_policies(&mut self, group_name: &str) -> anyhow::Result<()> {
         let attached_policies = self
+            .aws
             .iam_client
             .list_attached_group_policies(group_name)
             .await
@@ -5458,6 +5241,7 @@ impl App {
             .collect();
 
         let inline_policy_names = self
+            .aws
             .iam_client
             .list_group_policies(group_name)
             .await
@@ -5483,6 +5267,7 @@ impl App {
 
     pub async fn load_group_users(&mut self, group_name: &str) -> anyhow::Result<()> {
         let users = self
+            .aws
             .iam_client
             .get_group_users(group_name)
             .await
@@ -5529,13 +5314,15 @@ impl App {
 
         let document = if let Some(policy_arn) = &policy.policy_arn {
             // Managed policy - use get_policy_version
-            self.iam_client
+            self.aws
+                .iam_client
                 .get_policy_version(policy_arn)
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?
         } else {
             // Inline policy - use get_role_policy
-            self.iam_client
+            self.aws
+                .iam_client
                 .get_role_policy(role_name, policy_name)
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?
@@ -5548,6 +5335,7 @@ impl App {
 
     pub async fn load_trust_policy(&mut self, role_name: &str) -> anyhow::Result<()> {
         let document = self
+            .aws
             .iam_client
             .get_role(role_name)
             .await
@@ -5568,6 +5356,7 @@ impl App {
 
     pub async fn load_role_tags(&mut self, role_name: &str) -> anyhow::Result<()> {
         let tags = self
+            .aws
             .iam_client
             .list_role_tags(role_name)
             .await
@@ -5582,6 +5371,7 @@ impl App {
 
     pub async fn load_user_tags(&mut self, user_name: &str) -> anyhow::Result<()> {
         let tags = self
+            .aws
             .iam_client
             .list_user_tags(user_name)
             .await
@@ -5601,8 +5391,11 @@ impl App {
             .items
             .get(self.log_groups_state.log_groups.selected)
         {
-            self.log_groups_state.log_streams =
-                self.cloudwatch_client.list_log_streams(&group.name).await?;
+            self.log_groups_state.log_streams = self
+                .aws
+                .cloudwatch_client
+                .list_log_streams(&group.name)
+                .await?;
             self.log_groups_state.selected_stream = 0;
         }
         Ok(())
@@ -5622,18 +5415,22 @@ impl App {
                 arn.clone()
             } else {
                 // Construct ARN from log group name
-                let account_id = if self.config.account_id.is_empty() {
+                let account_id = if self.aws.config.account_id.is_empty() {
                     "*"
                 } else {
-                    &self.config.account_id
+                    &self.aws.config.account_id
                 };
                 format!(
                     "arn:aws:logs:{}:{}:log-group:{}",
-                    self.config.region, account_id, group.name
+                    self.aws.config.region, account_id, group.name
                 )
             };
 
-            let tags = self.cloudwatch_client.list_tags_for_log_group(&arn).await?;
+            let tags = self
+                .aws
+                .cloudwatch_client
+                .list_tags_for_log_group(&arn)
+                .await?;
             self.log_groups_state.tags.items = tags;
             self.log_groups_state.tags.selected = 0;
             self.log_groups_state.tags.scroll_offset = 0;
@@ -5669,6 +5466,7 @@ impl App {
                     };
 
                 let (mut events, has_more, token) = self
+                    .aws
                     .cloudwatch_client
                     .get_log_events(
                         &group.name,
@@ -5721,6 +5519,7 @@ impl App {
         let start_time = now - duration_ms;
 
         let query_id = self
+            .aws
             .cloudwatch_client
             .start_query(
                 self.insights_state.insights.selected_log_groups.clone(),
@@ -5733,7 +5532,11 @@ impl App {
         // Poll for results
         for _ in 0..60 {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let (status, results) = self.cloudwatch_client.get_query_results(&query_id).await?;
+            let (status, results) = self
+                .aws
+                .cloudwatch_client
+                .get_query_results(&query_id)
+                .await?;
 
             if status == "Complete" {
                 self.insights_state.insights.query_results = results;
@@ -6796,20 +6599,20 @@ mod tests {
             let profile_name = profile.name.clone();
             let profile_region = profile.region.clone();
 
-            app.profile = profile_name;
+            app.aws.profile = profile_name;
             if let Some(region) = profile_region {
-                app.region = region;
+                app.aws.config.region = region;
             }
         }
 
-        assert_eq!(app.profile, "test-profile");
-        assert_eq!(app.region, "eu-west-1");
+        assert_eq!(app.aws.profile, "test-profile");
+        assert_eq!(app.aws.config.region, "eu-west-1");
     }
 
     #[test]
     fn test_profile_without_region_keeps_unknown() {
         let mut app = test_app_no_region();
-        let initial_region = app.region.clone();
+        let initial_region = app.aws.config.region.clone();
 
         app.available_profiles = vec![AwsProfile {
             name: "test-profile".to_string(),
@@ -6826,14 +6629,14 @@ mod tests {
             let profile_name = profile.name.clone();
             let profile_region = profile.region.clone();
 
-            app.profile = profile_name;
+            app.aws.profile = profile_name;
             if let Some(region) = profile_region {
-                app.region = region;
+                app.aws.config.region = region;
             }
         }
 
-        assert_eq!(app.profile, "test-profile");
-        assert_eq!(app.region, initial_region); // Should keep initial region
+        assert_eq!(app.aws.profile, "test-profile");
+        assert_eq!(app.aws.config.region, initial_region); // Should keep initial region
     }
 
     #[test]
@@ -6865,7 +6668,7 @@ mod tests {
 
         let filtered = app.get_filtered_regions();
         if let Some(region) = filtered.first() {
-            app.region = region.code.to_string();
+            app.aws.config.region = region.code.to_string();
             app.tabs.clear();
             app.current_tab = 0;
             app.service_selected = false;
@@ -6875,13 +6678,13 @@ mod tests {
         assert_eq!(app.tabs.len(), 0);
         assert_eq!(app.current_tab, 0);
         assert!(!app.service_selected);
-        assert_eq!(app.region, "eu-west-1");
+        assert_eq!(app.aws.config.region, "eu-west-1");
     }
 
     #[test]
     fn test_region_picker_can_be_closed_without_selection() {
         let mut app = test_app();
-        let initial_region = app.region.clone();
+        let initial_region = app.aws.config.region.clone();
 
         app.mode = Mode::RegionPicker;
 
@@ -6889,7 +6692,7 @@ mod tests {
         app.mode = Mode::Normal;
 
         // Region should not change
-        assert_eq!(app.region, initial_region);
+        assert_eq!(app.aws.config.region, initial_region);
     }
 
     #[test]
@@ -7342,19 +7145,28 @@ mod tests {
         app.handle_action(Action::Select);
 
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.profile, "prod-profile");
-        assert_eq!(app.region, "us-west-2");
-        assert_eq!(app.config.account_id, "123456789");
         assert_eq!(app.tabs.len(), 1);
         assert_eq!(app.tabs[0].title, "Log Groups");
+        // The session context is connected, not copied: until then the
+        // current one stays whole, and the account never comes from the file.
+        assert_eq!(
+            app.context_request,
+            Some(ContextRequest {
+                profile: Some("prod-profile".into()),
+                region: Some("us-west-2".into()),
+            })
+        );
+        assert_eq!(app.aws.profile, "test");
+        assert_eq!(app.aws.config.region, "us-east-1");
+        assert!(app.aws.config.account_id.is_empty());
     }
 
     #[test]
     fn test_save_session_creates_session() {
         let mut app =
             App::new_without_client("test-profile".to_string(), Some("us-east-1".to_string()));
-        app.config.account_id = "123456789".to_string();
-        app.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
+        app.aws.config.account_id = "123456789".to_string();
+        app.aws.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
 
         app.tabs.push(Tab {
             id: TabId::new(),
@@ -7380,8 +7192,8 @@ mod tests {
     fn test_save_session_updates_existing() {
         let mut app =
             App::new_without_client("test-profile".to_string(), Some("us-east-1".to_string()));
-        app.config.account_id = "123456789".to_string();
-        app.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
+        app.aws.config.account_id = "123456789".to_string();
+        app.aws.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
 
         app.current_session = Some(Session {
             id: "existing".to_string(),
@@ -7414,7 +7226,7 @@ mod tests {
     fn test_save_session_skips_empty_tabs() {
         let mut app =
             App::new_without_client("test-profile".to_string(), Some("us-east-1".to_string()));
-        app.config.account_id = "123456789".to_string();
+        app.aws.config.account_id = "123456789".to_string();
 
         app.save_current_session();
 
@@ -7425,8 +7237,8 @@ mod tests {
     fn test_save_session_deletes_when_tabs_closed() {
         let mut app =
             App::new_without_client("test-profile".to_string(), Some("us-east-1".to_string()));
-        app.config.account_id = "123456789".to_string();
-        app.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
+        app.aws.config.account_id = "123456789".to_string();
+        app.aws.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
 
         // Create a session with tabs
         app.current_session = Some(Session {
@@ -7449,8 +7261,8 @@ mod tests {
     fn test_closing_all_tabs_deletes_session() {
         let mut app =
             App::new_without_client("test-profile".to_string(), Some("us-east-1".to_string()));
-        app.config.account_id = "123456789".to_string();
-        app.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
+        app.aws.config.account_id = "123456789".to_string();
+        app.aws.config.role_arn = "arn:aws:iam::123456789:role/test".to_string();
 
         // Add a tab
         app.tabs.push(Tab {
@@ -7516,10 +7328,10 @@ mod tests {
 
         if let Ok(app) = result {
             // If credentials are available, verify they're loaded
-            assert!(!app.config.account_id.is_empty());
-            assert!(!app.config.role_arn.is_empty());
-            assert_eq!(app.profile, "default");
-            assert_eq!(app.config.region, "us-east-1");
+            assert!(!app.aws.config.account_id.is_empty());
+            assert!(!app.aws.config.role_arn.is_empty());
+            assert_eq!(app.aws.profile, "default");
+            assert_eq!(app.aws.config.region, "us-east-1");
         }
         // If no credentials, test passes (can't test without real AWS creds)
     }
@@ -8496,10 +8308,10 @@ impl App {
         } else {
             // Create new session
             let mut session = Session::new(
-                self.profile.clone(),
-                self.region.clone(),
-                self.config.account_id.clone(),
-                self.config.role_arn.clone(),
+                self.aws.profile.clone(),
+                self.aws.config.region.clone(),
+                self.aws.config.account_id.clone(),
+                self.aws.config.role_arn.clone(),
             );
             session.tabs = self
                 .tabs
@@ -9142,7 +8954,7 @@ mod region_latency_tests {
         app.mode = Mode::RegionPicker;
         app.region_filter_active = true; // INSERT mode — typing in filter
         app.region_filter = "us".to_string();
-        let original_region = app.region.clone();
+        let original_region = app.aws.config.region.clone();
 
         // Enter must exit INSERT mode, not select
         app.handle_action(Action::Select);
@@ -9157,7 +8969,7 @@ mod region_latency_tests {
             "Must stay in RegionPicker, not close it"
         );
         assert_eq!(
-            app.region, original_region,
+            app.aws.config.region, original_region,
             "Region must NOT change when Enter is pressed in INSERT mode"
         );
     }
@@ -9172,12 +8984,100 @@ mod region_latency_tests {
 
         app.handle_action(Action::Select);
 
-        // Should have selected and closed picker (mode changed)
-        assert_eq!(
+        // Closes the picker and asks for the Region; the context changes only
+        // once it connects.
+        assert_ne!(
             app.mode,
-            Mode::Normal,
+            Mode::RegionPicker,
             "Must close picker after selecting region in NORMAL mode"
         );
+        let picked = app.get_filtered_regions()[0].code.to_string();
+        assert_eq!(
+            app.context_request,
+            Some(ContextRequest {
+                profile: Some("test".into()),
+                region: Some(picked),
+            })
+        );
+        assert_eq!(app.aws.config.region, "us-east-1", "nothing changed yet");
+    }
+
+    #[test]
+    fn test_profile_pick_asks_for_its_region_or_opens_the_region_picker() {
+        use crate::aws::profile::Profile;
+        let profile = |name: &str, region: Option<&str>| Profile {
+            name: name.into(),
+            region: region.map(str::to_string),
+            account: None,
+            role_arn: None,
+            source_profile: None,
+        };
+        let mut app = test_app();
+        app.available_profiles = vec![profile("prod", Some("eu-west-1"))];
+        app.mode = Mode::ProfilePicker;
+        app.handle_action(Action::Select);
+        assert_eq!(
+            app.context_request,
+            Some(ContextRequest {
+                profile: Some("prod".into()),
+                region: Some("eu-west-1".into()),
+            })
+        );
+        assert_eq!(app.aws.profile, "test", "nothing changed yet");
+
+        // No Region anywhere: the Region picker completes the request.
+        let mut app = test_app_no_region();
+        app.available_profiles = vec![profile("prod", None)];
+        app.mode = Mode::ProfilePicker;
+        app.handle_action(Action::Select);
+        assert_eq!(app.mode, Mode::RegionPicker);
+        assert!(app.context_request.is_none());
+        app.handle_action(Action::Select);
+        let request = app.context_request.clone().unwrap();
+        assert_eq!(request.profile.as_deref(), Some("prod"));
+        assert!(request.region.is_some());
+        assert!(app.pending_profile.is_none());
+    }
+
+    #[test]
+    fn test_replace_context_swaps_it_whole_and_keeps_only_the_tabs_and_bookmarks() {
+        let mut app = test_app();
+        app.aws.config.account_id = "111111111111".into();
+        app.tabs.push(Tab {
+            id: TabId::new(),
+            service: Service::RdsInstances,
+            title: "RDS › Databases".into(),
+            breadcrumb: "RDS > Databases > orders".into(),
+        });
+        app.current_service = Service::RdsInstances;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        crate::tab_runtime::sync_active(&mut app);
+        app.rds_state.instances.items = vec![Default::default()];
+        app.log_groups_state.log_groups.filter = "old".into();
+        let tab = app.tabs[0].id;
+
+        let mut next = AwsContext::offline("prod".into(), Some("eu-west-1".into()));
+        next.config.account_id = "222222222222".into();
+        app.replace_context(next);
+
+        assert_eq!(app.aws.profile, "prod");
+        assert_eq!(app.aws.config.region, "eu-west-1");
+        assert_eq!(app.aws.config.account_id, "222222222222");
+        assert_eq!(app.tabs[0].id, tab, "the tab carries over");
+        assert_eq!(app.current_service, Service::RdsInstances);
+        assert_eq!(app.mode, Mode::Normal);
+        // Nothing read in the old context stays.
+        assert!(app.rds_state.instances.items.is_empty());
+        assert!(app.log_groups_state.log_groups.filter.is_empty());
+        assert!(
+            matches!(
+                app.rds_state.load_status(),
+                crate::async_read::ReadStatus::Loading { .. }
+            ),
+            "the open tab reloads at once"
+        );
+        assert_eq!(app.breadcrumbs(), "RDS > Databases");
     }
 
     #[test]
@@ -9941,7 +9841,7 @@ mod region_latency_tests {
         app.current_service = Service::EcrRepositories;
         app.service_selected = true;
         app.mode = Mode::Normal;
-        app.config.account_id = "123456789012".to_string();
+        app.aws.config.account_id = "123456789012".to_string();
 
         // Test repository list URL
         let url = app.get_console_url();
@@ -17131,7 +17031,7 @@ mod lambda_version_tab_tests {
 
     #[test]
     fn test_s3_bucket_preview_uses_bucket_region_not_config_region() {
-        // Regression: load_bucket_preview was falling back to self.config.region when
+        // Regression: load_bucket_preview was falling back to self.aws.config.region when
         // the bucket's stored region was empty (which it always is from list_buckets).
         // This caused IllegalLocationConstraintException for cross-region buckets.
         // The fix: resolve the actual region via get_bucket_location when region is empty.
@@ -17140,7 +17040,7 @@ mod lambda_version_tab_tests {
         // not the app's configured region.
         use S3Bucket;
         let mut app = test_app();
-        app.config.region = "ap-southeast-3".to_string(); // user's configured region
+        app.aws.config.region = "ap-southeast-3".to_string(); // user's configured region
 
         // Bucket is actually in us-east-1 — different from app region
         app.s3_state.buckets.items = vec![S3Bucket {
@@ -17158,7 +17058,7 @@ mod lambda_version_tab_tests {
             .find(|b| b.name == "my-bucket")
             .unwrap();
         let effective_region = if bucket.region.is_empty() {
-            app.config.region.as_str()
+            app.aws.config.region.as_str()
         } else {
             bucket.region.as_str()
         };
@@ -18580,7 +18480,7 @@ mod lambda_version_tab_tests {
 
         let mut app = test_app();
         app.current_service = Service::ApiGatewayApis;
-        app.config.region = "us-east-1".to_string();
+        app.aws.config.region = "us-east-1".to_string();
 
         // Test API list URL
         let url = app.get_console_url();
@@ -18626,7 +18526,7 @@ mod lambda_version_tab_tests {
 
         let mut app = test_app();
         app.current_service = Service::ApiGatewayApis;
-        app.config.region = "us-east-1".to_string();
+        app.aws.config.region = "us-east-1".to_string();
 
         // Test resources URL with selection
         app.apig_state.current_api = Some(RestApi {
@@ -18667,7 +18567,7 @@ mod lambda_version_tab_tests {
 
         let mut app = test_app();
         app.current_service = Service::ApiGatewayApis;
-        app.config.region = "us-east-1".to_string();
+        app.aws.config.region = "us-east-1".to_string();
 
         app.apig_state.current_api = Some(RestApi {
             id: "2todvod3n0".to_string(),

@@ -10,7 +10,7 @@ use crate::{
 
 fn app_with_tab(service: Service) -> (App, TabId) {
     let mut app = App::new_without_client("beta".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     let id = TabId::new();
     app.tabs.push(Tab {
         id,
@@ -182,7 +182,7 @@ macro_rules! inventory_contract {
                 let (mut app, _) = app_with_tab($service);
                 finish(&mut app, Ok(rows())).await;
                 enter(&mut app);
-                app.config.region = "eu-west-1".into();
+                app.aws.config.region = "eu-west-1".into();
                 tab_runtime::poll(&mut app).await;
                 assert!(app.$state.$table.items.is_empty());
                 assert!(!entered(&app));

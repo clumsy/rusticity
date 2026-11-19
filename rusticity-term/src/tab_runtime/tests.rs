@@ -404,7 +404,7 @@ async fn aws_context_change_clears_ready_background_data_before_next_draw() {
     let b = push_tab(&mut app, Service::VpcVpcs);
     sync_active(&mut app);
     assert_eq!(status_for(&app, a), ReadStatus::Ready);
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     sync_active(&mut app);
     assert_eq!(app.tabs[app.current_tab].id, b);
     assert_eq!(status_for(&app, a), ReadStatus::Idle);

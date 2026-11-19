@@ -16,7 +16,7 @@ fn app(service: Service) -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-1".into()));
     app.current_service = service;
     app.service_selected = true;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 

@@ -701,12 +701,12 @@ fn sqs(app: &App) -> Result<Option<Target>, String> {
         .strip_prefix("https://")
         .and_then(|s| s.split_once('/'))
         .ok_or("The queue URL is malformed")?;
-    let suffix = if app.config.region.starts_with("cn-") {
+    let suffix = if app.aws.config.region.starts_with("cn-") {
         "amazonaws.com.cn"
     } else {
         "amazonaws.com"
     };
-    if host != format!("sqs.{}.{suffix}", app.config.region) {
+    if host != format!("sqs.{}.{suffix}", app.aws.config.region) {
         return Err("The queue URL does not match the active Region's AWS endpoint".into());
     }
     let (account, name) = path.split_once('/').ok_or("The queue URL is malformed")?;
@@ -719,10 +719,10 @@ fn sqs(app: &App) -> Result<Option<Target>, String> {
     }
     let arn = format!(
         "arn:{}:sqs:{}:{account}:{name}",
-        crate::console::partition(&app.config.region),
-        app.config.region
+        crate::console::partition(&app.aws.config.region),
+        app.aws.config.region
     );
-    let parent = scope_resource(ResourceKind::Queue, name, &arn, &app.config.region);
+    let parent = scope_resource(ResourceKind::Queue, name, &arn, &app.aws.config.region);
     match app.sqs_state.detail_tab {
         QueueDetailTab::Tagging => Ok(Some(view("sqs list-queue-tags", json!({"QueueUrl":queue}), None, Some(parent)))),
         QueueDetailTab::LambdaTriggers => {

@@ -14,8 +14,8 @@ pub fn selected_arn(app: &App) -> Option<String> {
 }
 pub fn console_url(app: &App) -> String {
     match &app.secretsmanager_state.detail.source {
-        Some(secret) => super::console_url_secret(&app.config.region, &secret.name),
-        None => super::console_url(&app.config.region),
+        Some(secret) => super::console_url_secret(&app.aws.config.region, &secret.name),
+        None => super::console_url(&app.aws.config.region),
     }
 }
 pub fn go_to_page(app: &mut App, page: usize) {

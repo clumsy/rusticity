@@ -35,7 +35,7 @@ impl Drop for Temp {
 
 fn app(temp: &Temp) -> App {
     let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::SnsTopics;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -219,13 +219,13 @@ async fn cross_context_auth_failure_or_account_mismatch_preserves_current_app() 
             if !wrong_account {
                 anyhow::bail!("authentication failed");
             }
-            let mut replacement = App::new_without_client(profile, Some(region));
+            let mut replacement = crate::aws_context::AwsContext::offline(profile, Some(region));
             replacement.config.account_id = "999999999999".into();
             Ok(replacement)
         })
         .await;
         assert!(result.is_err());
-        assert_eq!(app.profile, "test");
+        assert_eq!(app.aws.profile, "test");
         assert_eq!(app.tabs[0].id, old_id);
         assert_eq!(app.sns_state.topics.filter, "chosen");
     }
@@ -241,13 +241,13 @@ async fn cross_profile_open_uses_saved_profile_and_preserves_bookmark_store() {
     open_with(&mut app, |profile, region| async move {
         assert_eq!(profile, "other-profile");
         assert_eq!(region, "us-east-1");
-        let mut replacement = App::new_without_client(profile, Some(region));
+        let mut replacement = crate::aws_context::AwsContext::offline(profile, Some(region));
         replacement.config.account_id = "123456789012".into();
         Ok(replacement)
     })
     .await
     .unwrap();
-    assert_eq!(app.profile, "other-profile");
+    assert_eq!(app.aws.profile, "other-profile");
     assert_eq!(app.bookmarks.path.as_ref(), Some(&temp.file()));
     assert!(app.sns_state.inventory.is_pending());
 }
@@ -323,7 +323,7 @@ async fn legacy_inventory_only_bookmark_is_refused_before_reconnecting() {
     .await
     .unwrap_err();
     assert!(error.to_string().contains("no dedicated resource view"));
-    assert_eq!(app.profile, "test");
+    assert_eq!(app.aws.profile, "test");
     assert_eq!(app.tabs.len(), 1);
 }
 

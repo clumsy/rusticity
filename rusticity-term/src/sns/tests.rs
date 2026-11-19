@@ -25,7 +25,7 @@ fn app() -> App {
         title: app.current_service.name().into(),
         breadcrumb: app.current_service.name().into(),
     });
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.sns_state.topics.items = (0..25)
         .rev()
         .map(|i| {
@@ -149,7 +149,7 @@ fn sns_topics_ctrl_o_never_deep_links_to_a_highlighted_or_expanded_row() {
     ] {
         for view in [ViewMode::List, ViewMode::Detail, ViewMode::Events] {
             let mut app = app();
-            app.config.region = region.into();
+            app.aws.config.region = region.into();
             app.view_mode = view;
             let expected =
                 format!("https://{region}.console.{domain}/sns/v3/home?region={region}#/topics");

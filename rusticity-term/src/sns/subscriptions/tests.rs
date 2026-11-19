@@ -18,7 +18,7 @@ fn app() -> App {
         title: app.current_service.name().into(),
         breadcrumb: app.current_service.name().into(),
     });
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.sns_state.topics.items = vec![
         SnsTopic::from_arn("arn:aws:sns:us-east-1:123456789012:other").unwrap(),
         SnsTopic::from_arn(TOPIC).unwrap(),
@@ -324,10 +324,10 @@ async fn escape_context_switch_and_service_change_abort_pending_task() {
         }));
         tokio::task::yield_now().await;
         match case {
-            0 => app.profile = "other".into(),
-            1 => app.config.region = "eu-west-1".into(),
-            2 => app.config.account_id = "other".into(),
-            3 => app.config.role_arn = "other".into(),
+            0 => app.aws.profile = "other".into(),
+            1 => app.aws.config.region = "eu-west-1".into(),
+            2 => app.aws.config.account_id = "other".into(),
+            3 => app.aws.config.role_arn = "other".into(),
             4 => app.current_service = Service::S3Buckets,
             _ => press(&mut app, KeyCode::Esc, KeyModifiers::NONE),
         }
@@ -394,7 +394,7 @@ fn returning_from_subscriptions_restores_topics_list_console_link() {
 fn refresh_cannot_rebind_old_subscriptions_to_a_changed_context() {
     let mut app = loaded();
     assert!(!app.sns_state.subscriptions.table.items.is_empty());
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     // Refresh may arrive before the next poll. It must discard the old view,
     // not bless cached rows under the newly selected AWS identity.
     press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);

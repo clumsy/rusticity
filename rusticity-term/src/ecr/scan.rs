@@ -225,10 +225,10 @@ fn scope(app: &App) -> String {
     format!(
         "{:?}",
         (
-            &app.profile,
-            &app.config.region,
-            &app.config.account_id,
-            &app.config.role_arn,
+            &app.aws.profile,
+            &app.aws.config.region,
+            &app.aws.config.account_id,
+            &app.aws.config.role_arn,
             &app.ecr_state.current_repository,
             app.ecr_state.tab,
             app.current_tab
@@ -349,7 +349,7 @@ pub async fn poll(app: &mut App) -> bool {
     let state = &mut app.ecr_state.scan;
     let mut changed = false;
     if let Some(tab) = state.pending.take() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let repo = app.ecr_state.current_repository.clone().unwrap();
         let view = state.view.as_ref().unwrap();
         let digest = view.digest.clone();

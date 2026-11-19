@@ -153,7 +153,7 @@ async fn completed_preview_is_applied_and_scope_changes_abort_stale_work() {
         key: "note.json".into(),
         scope: captured,
     });
-    app.profile = "other-profile".into();
+    app.aws.profile = "other-profile".into();
     assert!(poll(&mut app).await);
     tokio::task::yield_now().await;
     assert!(abort.is_finished());

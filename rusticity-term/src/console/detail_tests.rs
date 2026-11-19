@@ -16,7 +16,7 @@ const REGION: &str = "eu-west-1";
 
 fn app() -> App {
     let mut app = App::new_without_client("test".into(), Some(REGION.into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 

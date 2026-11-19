@@ -36,7 +36,7 @@ pub fn selected(app: &App) -> Option<Resource> {
         return None;
     }
 
-    let region = app.config.region.as_str();
+    let region = app.aws.config.region.as_str();
 
     match app.current_service {
         // Certificates have no resource view, so they are never a bookmark,

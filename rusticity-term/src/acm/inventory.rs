@@ -66,7 +66,7 @@ pub async fn poll(app: &mut App) -> bool {
     }
     let mut changed = false;
     if state.inventory.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         changed = app.acm_state.inventory.start(async move {
             AcmClient::new(config)
                 .list_certificates()

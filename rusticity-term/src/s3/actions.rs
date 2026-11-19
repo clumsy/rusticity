@@ -124,9 +124,9 @@ pub fn console_url(app: &App) -> String {
     use crate::s3;
     if let Some(bucket_name) = &app.s3_state.current_bucket {
         let prefix = app.s3_state.prefix_stack.join("");
-        s3::console_url_bucket(&app.config.region, bucket_name, &prefix)
+        s3::console_url_bucket(&app.aws.config.region, bucket_name, &prefix)
     } else {
-        s3::console_url_buckets(&app.config.region)
+        s3::console_url_buckets(&app.aws.config.region)
     }
 }
 

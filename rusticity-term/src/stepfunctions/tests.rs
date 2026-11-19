@@ -41,7 +41,7 @@ fn app() -> App {
     app.current_service = Service::StepFunctionsStateMachines;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = ACCOUNT.into();
+    app.aws.config.account_id = ACCOUNT.into();
     app.stepfunctions_state.machines.items = (0..25)
         .rev()
         .map(|i| {
@@ -209,7 +209,7 @@ fn ctrl_o_from_inventory_always_opens_regional_list_never_a_row() {
     ] {
         for view in [ViewMode::List, ViewMode::Detail, ViewMode::Events] {
             let mut app = self::app();
-            app.config.region = region.into();
+            app.aws.config.region = region.into();
             app.view_mode = view;
             let expected = format!(
                 "https://{region}.console.{domain}/states/home?region={region}#/statemachines"
@@ -321,7 +321,7 @@ async fn standard_poll_aborts_on_scope_change_and_preserves_cli_tab() {
 
     // A profile/region/account/role change aborts and closes.
     app.current_service = Service::StepFunctionsStateMachines;
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(super::executions::poll(&mut app).await);
     assert!(app.stepfunctions_state.executions.machine.is_none());
 }
@@ -761,7 +761,7 @@ fn refresh_cannot_rebind_old_executions_to_a_changed_context() {
     app.stepfunctions_state.machines.filter = "wf-024".into();
     app.handle_action(Action::Select);
     app.stepfunctions_state.executions.table.items = vec![exec("old", "SUCCEEDED", Some(1000))];
-    app.config.role_arn = "arn:aws:iam::123456789012:role/other".into();
+    app.aws.config.role_arn = "arn:aws:iam::123456789012:role/other".into();
     app.handle_action(Action::Refresh);
     assert!(app.stepfunctions_state.executions.machine.is_none());
     assert!(app.stepfunctions_state.executions.table.items.is_empty());

@@ -252,23 +252,27 @@ pub fn console_url(app: &App) -> String {
     use crate::ecr;
     if let Some(repo_name) = &app.ecr_state.current_repository {
         if app.ecr_state.tab == crate::ui::ecr::Tab::Public {
-            return ecr::console_url_public_repository(&app.config.region, repo_name);
+            return ecr::console_url_public_repository(&app.aws.config.region, repo_name);
         }
         if let Some(view) = &app.ecr_state.scan.view {
             if !view.digest.is_empty() {
                 return ecr::console_url_private_image(
-                    &app.config.region,
-                    &app.config.account_id,
+                    &app.aws.config.region,
+                    &app.aws.config.account_id,
                     repo_name,
                     &view.digest,
                 );
             }
         }
-        ecr::console_url_private_repository(&app.config.region, &app.config.account_id, repo_name)
+        ecr::console_url_private_repository(
+            &app.aws.config.region,
+            &app.aws.config.account_id,
+            repo_name,
+        )
     } else if app.ecr_state.tab == crate::ui::ecr::Tab::Public {
-        ecr::console_url_public_repositories(&app.config.region)
+        ecr::console_url_public_repositories(&app.aws.config.region)
     } else {
-        ecr::console_url_repositories(&app.config.region)
+        ecr::console_url_repositories(&app.aws.config.region)
     }
 }
 
@@ -282,7 +286,7 @@ mod console_tests {
 
     fn image_app() -> App {
         let mut app = App::new_without_client("test".into(), Some("eu-west-1".into()));
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         app.current_service = Service::EcrRepositories;
         app.service_selected = true;
         app.mode = Mode::Normal;

@@ -60,7 +60,7 @@ pub(crate) fn mark_loaded(app: &mut App) {
 
 pub async fn poll(app: &mut App) -> bool {
     let scope = scope(app);
-    let config = app.config.clone();
+    let config = app.aws.config.clone();
     let options =
         crate::rds::instance::Column::inventory_options(&app.rds_state.visible_column_ids);
     let state = &mut app.rds_state;

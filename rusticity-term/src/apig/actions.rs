@@ -297,7 +297,7 @@ pub fn console_url(app: &App) -> String {
                     app.apig_state.resources.selected,
                     &mut 0,
                 );
-                apig::console_url_resources(&app.config.region, &api.id, resource_id.as_deref())
+                apig::console_url_resources(&app.aws.config.region, &api.id, resource_id.as_deref())
             } else {
                 let (filtered_items, filtered_children) = crate::ui::apig::filter_tree_items(
                     &app.apig_state.routes.items,
@@ -321,13 +321,13 @@ pub fn console_url(app: &App) -> String {
                 } else {
                     None
                 };
-                apig::console_url_routes(&app.config.region, &api.id, route_id.as_deref())
+                apig::console_url_routes(&app.aws.config.region, &api.id, route_id.as_deref())
             }
         } else {
-            apig::console_url_api(&app.config.region, &api.id)
+            apig::console_url_api(&app.aws.config.region, &api.id)
         }
     } else {
-        apig::console_url_apis(&app.config.region)
+        apig::console_url_apis(&app.aws.config.region)
     }
 }
 

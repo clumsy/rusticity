@@ -411,7 +411,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
 /// Drive the read of the level on screen; called for the owning tab only.
 pub async fn poll(app: &mut App) -> bool {
     let scope = list_scope(app);
-    let config = app.config.clone();
+    let config = app.aws.config.clone();
     let state = &mut app.target_groups_state;
     let changed = state
         .inventory
@@ -430,7 +430,7 @@ pub async fn poll(app: &mut App) -> bool {
     let Some(scope) = view_scope(app) else {
         return changed;
     };
-    let config = app.config.clone();
+    let config = app.aws.config.clone();
     let view = app.target_groups_state.view.as_mut().unwrap();
     if !view.read.matches_scope(&scope) {
         // AWS context or owner moved: drop the page with no late repaint.
@@ -465,7 +465,7 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 
 /// The console page of the level on screen.
 pub fn console_url(app: &App) -> String {
-    let region = &app.config.region;
+    let region = &app.aws.config.region;
     let url = ConsoleUrl::regional(region, "/ec2/home").query("region", region);
     match &app.target_groups_state.view {
         Some(view) => url

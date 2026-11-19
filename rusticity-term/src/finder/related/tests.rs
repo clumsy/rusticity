@@ -6,7 +6,7 @@
 //! - Empty/stale inventory → `None`
 //! - Detail parent takes precedence over subtable selection
 //! - Filtered/sorted selection is used (not raw index)
-//! - Region is scoped from `app.config.region`
+//! - Region is scoped from `app.aws.config.region`
 //! - ARNs are populated from stored data where available
 //! - Lambda qualifiers produce qualified ids/ARNs (alias priority)
 //! - CloudTrail → None, Lambda Applications → Stack only with explicit stack_id

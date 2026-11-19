@@ -6,8 +6,8 @@ use crate::ui::rds::filtered_instances;
 
 pub fn console_url(app: &App) -> String {
     match &app.rds_state.detail.source {
-        Some(instance) => rds::console_url_instance(&app.config.region, &instance.identifier),
-        None => rds::console_url_instances(&app.config.region),
+        Some(instance) => rds::console_url_instance(&app.aws.config.region, &instance.identifier),
+        None => rds::console_url_instances(&app.aws.config.region),
     }
 }
 

@@ -830,12 +830,12 @@ pub fn yank_roles(app: &App) {
 pub fn yank_groups(app: &App) {
     use crate::iam;
     if let Some(group_name) = &app.iam_state.current_group {
-        let arn = iam::format_arn(&app.config.account_id, "group", group_name);
+        let arn = iam::format_arn(&app.aws.config.account_id, "group", group_name);
         app.clipboard.request_text(&arn);
     } else {
         let filtered = filtered_iam_groups(app);
         if let Some(group) = app.iam_state.groups.get_selected(&filtered) {
-            let arn = iam::format_arn(&app.config.account_id, "group", &group.group_name);
+            let arn = iam::format_arn(&app.aws.config.account_id, "group", &group.group_name);
             app.clipboard.request_text(&arn);
         }
     }
@@ -940,9 +940,9 @@ pub fn console_url_users(app: &App) -> String {
             UserTab::SecurityCredentials => "security_credentials",
             UserTab::LastAccessed => "access_advisor",
         };
-        iam::console_url_user_detail(&app.config.region, user_name, section)
+        iam::console_url_user_detail(&app.aws.config.region, user_name, section)
     } else {
-        iam::console_url_users(&app.config.region)
+        iam::console_url_users(&app.aws.config.region)
     }
 }
 
@@ -950,7 +950,7 @@ pub fn console_url_roles(app: &App) -> String {
     use crate::iam;
     if let Some(policy_name) = &app.iam_state.current_policy {
         if let Some(role_name) = &app.iam_state.current_role {
-            return iam::console_url_role_policy(&app.config.region, role_name, policy_name);
+            return iam::console_url_role_policy(&app.aws.config.region, role_name, policy_name);
         }
     }
     if let Some(role_name) = &app.iam_state.current_role {
@@ -961,13 +961,13 @@ pub fn console_url_roles(app: &App) -> String {
             RoleTab::LastAccessed => "access_advisor",
             RoleTab::RevokeSessions => "revoke_sessions",
         };
-        iam::console_url_role_detail(&app.config.region, role_name, section)
+        iam::console_url_role_detail(&app.aws.config.region, role_name, section)
     } else {
-        iam::console_url_roles(&app.config.region)
+        iam::console_url_roles(&app.aws.config.region)
     }
 }
 
 pub fn console_url_groups(app: &App) -> String {
     use crate::iam;
-    iam::console_url_groups(&app.config.region)
+    iam::console_url_groups(&app.aws.config.region)
 }

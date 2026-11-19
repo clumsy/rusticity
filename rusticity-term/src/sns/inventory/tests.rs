@@ -12,7 +12,7 @@ fn app() -> App {
     app.current_service = Service::SnsTopics;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 
@@ -130,7 +130,7 @@ async fn result_from_a_different_aws_context_is_rejected_and_data_never_goes_sta
         .start(async move { Ok(vec![topic("from-old-region")]) }));
     tokio::task::yield_now().await;
 
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     // poll must drop the obsolete scope's result, leaving no stale rows.
     poll(&mut app).await;
     assert!(app.sns_state.topics.items.is_empty());

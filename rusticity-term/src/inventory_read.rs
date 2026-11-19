@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(settle(&mut inv, &mut table, &scope0).await, Some(true));
         assert_eq!(table.items, [7, 8]);
         assert_eq!(inv.status(&table), ReadStatus::Ready);
-        app.config.region = "eu-west-1".into();
+        app.aws.config.region = "eu-west-1".into();
         assert_eq!(settle(&mut inv, &mut table, &scope(&app)).await, None);
         assert!(table.items.is_empty());
     }

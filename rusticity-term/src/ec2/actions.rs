@@ -182,8 +182,8 @@ pub fn console_url(app: &App) -> String {
         Some(id) => format!("InstanceDetails:instanceId={}", component(id)),
         None => "Instances:".into(),
     };
-    ConsoleUrl::regional(&app.config.region, "/ec2/home")
-        .query("region", &app.config.region)
+    ConsoleUrl::regional(&app.aws.config.region, "/ec2/home")
+        .query("region", &app.aws.config.region)
         .fragment(route)
         .finish()
 }

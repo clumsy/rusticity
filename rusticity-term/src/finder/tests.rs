@@ -155,12 +155,12 @@ fn finder_profile_region_and_credentials_changes_drop_cached_results() {
     app.resource_finder
         .rows
         .push(resource(ResourceKind::Table, "orders"));
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     open(&mut app);
     assert!(app.resource_finder.rows.is_empty());
     assert!(!Arc::ptr_eq(&first_cache, &app.resource_finder.cache));
     let cache = app.resource_finder.cache.clone();
-    app.profile = "other".into();
+    app.aws.profile = "other".into();
     open(&mut app);
     assert!(!Arc::ptr_eq(&cache, &app.resource_finder.cache));
 }
@@ -232,7 +232,7 @@ async fn finder_rejects_cross_region_targets_without_changing_context() {
     target.region = "eu-west-1".into();
     assert!(navigation::open_resource(&mut app, target).await.is_err());
     assert_eq!(app.current_service, old_service);
-    assert_eq!(app.config.region, "us-east-2");
+    assert_eq!(app.aws.config.region, "us-east-2");
 }
 
 fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
@@ -353,7 +353,7 @@ async fn finder_focus_switches_preserve_search_and_accept_streaming_results() {
 fn finder_renders_exactly_one_active_pane_and_no_duplicate_context_in_title() {
     use ratatui::{backend::TestBackend, prelude::*, Terminal};
     let mut app = app();
-    app.profile = "finder-test-profile".into();
+    app.aws.profile = "finder-test-profile".into();
     open(&mut app);
     app.resource_finder.rows = vec![resource(ResourceKind::Table, "orders")];
     for focus in [Focus::Filter, Focus::Table] {
@@ -583,7 +583,7 @@ fn related_partial_results_are_not_cached_and_keep_warnings_during_filtering() {
 #[test]
 fn related_unknown_and_foreign_resources_stay_visible_but_do_not_open_wrong_inventory() {
     let mut app = related_app();
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     let reference =
         Resource::from_arn("arn:aws:ec2:us-east-2:123456789012:subnet/subnet-1").unwrap();
     let foreign =
@@ -619,7 +619,7 @@ async fn related_starts_without_minimum_query_and_cancels_on_escape_or_scope_cha
     assert!(app.resource_finder.running.is_none());
     assert_eq!(app.sqs_state.current_queue.as_deref(), Some("orders"));
     open_related(&mut app);
-    app.profile = "another-account".into();
+    app.aws.profile = "another-account".into();
     poll(&mut app);
     assert_eq!(app.mode, Mode::Normal);
     assert!(app.resource_finder.related_source.is_none());
@@ -685,7 +685,7 @@ fn multi_region_results_keep_their_region_and_never_collapse_across_regions() {
 #[test]
 fn a_result_from_another_region_explains_how_to_open_it() {
     let mut app = app();
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     let other = Resource {
         kind: ResourceKind::Topic,
         id: "orders".into(),
@@ -693,7 +693,7 @@ fn a_result_from_another_region_explains_how_to_open_it() {
         arn: "arn:aws:sns:eu-west-1:123456789012:orders".into(),
         region: "eu-west-1".into(),
     };
-    let error = navigation::validate_scope(&app.config, &other)
+    let error = navigation::validate_scope(&app.aws.config, &other)
         .unwrap_err()
         .to_string();
     assert!(error.contains("eu-west-1") && error.contains("Space, r") && error.contains("Ctrl+B"));
@@ -713,7 +713,7 @@ fn region_qualifier_errors_show_in_the_finder_instead_of_searching() {
 #[test]
 fn a_result_from_another_region_can_be_bookmarked() {
     let mut app = app();
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     open(&mut app);
     app.resource_finder.rows = vec![Resource {
         kind: ResourceKind::Topic,
@@ -740,7 +740,7 @@ mod open_in_its_region {
     }
 
     fn finder_on(app: &mut App, row: Resource) {
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         open(app);
         app.resource_finder.rows = vec![row];
         app.resource_finder.focus = Focus::Table;
@@ -764,7 +764,10 @@ mod open_in_its_region {
         );
         app.handle_action(Action::Select);
         assert_eq!(app.resource_finder.pending_open, Some(other()));
-        assert_eq!(app.config.region, "us-east-2", "the switch happens on open");
+        assert_eq!(
+            app.aws.config.region, "us-east-2",
+            "the switch happens on open"
+        );
     }
 
     #[test]
@@ -802,19 +805,19 @@ mod open_in_its_region {
     #[tokio::test]
     async fn the_open_switches_every_tab_to_the_resource_region() {
         let mut app = app();
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         let tabs = app.tabs.len();
         let enter =
             navigation::open_from_finder_with(&mut app, other(), |profile, region| async move {
                 assert_eq!((profile.as_str(), region.as_str()), ("test", "eu-west-1"));
-                let mut next = App::new_without_client(profile, Some(region));
+                let mut next = crate::aws_context::AwsContext::offline(profile, Some(region));
                 next.config.account_id = "123456789012".into();
                 Ok(next)
             })
             .await
             .unwrap();
         assert!(!enter, "the topic opens on completion of its read");
-        assert_eq!(app.config.region, "eu-west-1");
+        assert_eq!(app.aws.config.region, "eu-west-1");
         assert_eq!(app.current_service, Service::SnsTopics);
         assert_eq!(app.tabs.len(), tabs + 1, "old tabs kept, one opened");
     }
@@ -823,7 +826,7 @@ mod open_in_its_region {
     async fn a_different_account_or_failed_sign_in_keeps_the_current_app() {
         for fail in [false, true] {
             let mut app = app();
-            app.config.account_id = "123456789012".into();
+            app.aws.config.account_id = "123456789012".into();
             let service = app.current_service;
             let result = navigation::open_from_finder_with(
                 &mut app,
@@ -832,14 +835,14 @@ mod open_in_its_region {
                     if fail {
                         anyhow::bail!("ExpiredToken");
                     }
-                    let mut next = App::new_without_client(profile, Some(region));
+                    let mut next = crate::aws_context::AwsContext::offline(profile, Some(region));
                     next.config.account_id = "210987654321".into();
                     Ok(next)
                 },
             )
             .await;
             assert!(result.is_err());
-            assert_eq!(app.config.region, "us-east-2");
+            assert_eq!(app.aws.config.region, "us-east-2");
             assert_eq!(app.current_service, service);
         }
     }
@@ -847,7 +850,7 @@ mod open_in_its_region {
     #[tokio::test]
     async fn a_current_region_result_opens_without_reconnecting() {
         let mut app = app();
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         let mut here = other();
         here.region = "us-east-2".into();
         here.arn = "arn:aws:sns:us-east-2:123456789012:orders".into();

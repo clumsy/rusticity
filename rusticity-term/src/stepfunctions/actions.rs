@@ -32,7 +32,7 @@ pub fn console_url(app: &App) -> String {
         .machine
         .as_ref()
         .map(|machine| machine.arn.as_str());
-    super::console_url(&app.config.region, entered)
+    super::console_url(&app.aws.config.region, entered)
 }
 
 pub fn go_to_page(app: &mut App, page: usize) {

@@ -45,7 +45,7 @@ fn rows() -> Vec<Certificate> {
 /// An ACM tab bound in the tab runtime, with its first read queued.
 fn app() -> (App, TabId) {
     let mut app = App::new_without_client("beta".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     let id = TabId::new();
     app.tabs.push(Tab {
         id,
@@ -264,7 +264,7 @@ async fn esc_cancels_the_read_without_showing_older_rows() {
 #[tokio::test]
 async fn aws_context_change_drops_rows() {
     let (mut app, _) = loaded().await;
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(inventory::poll(&mut app).await);
     assert!(app.acm_state.certificates.items.is_empty());
 }

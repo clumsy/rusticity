@@ -356,12 +356,12 @@ pub fn console_url(app: &App) -> String {
     use crate::lambda;
     if let Some(app_name) = &app.lambda_application_state.current_application {
         lambda::console_url_application_detail(
-            &app.config.region,
+            &app.aws.config.region,
             app_name,
             &app.lambda_application_state.detail_tab,
         )
     } else {
-        lambda::console_url_applications(&app.config.region)
+        lambda::console_url_applications(&app.aws.config.region)
     }
 }
 

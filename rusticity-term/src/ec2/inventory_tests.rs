@@ -8,7 +8,7 @@ use ratatui::{backend::TestBackend, Terminal};
 
 fn app() -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-2".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::Ec2Instances;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -98,7 +98,7 @@ async fn esc_cancels_and_context_change_drops_rows() {
     let mut app = self::app();
     inventory::request(&mut app);
     finish(&mut app, Ok(vec![instance("i-0a", "running")])).await;
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(inventory::poll(&mut app).await);
     assert!(app.ec2_state.table.items.is_empty());
 }

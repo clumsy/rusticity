@@ -5,7 +5,7 @@ use crate::ui::vpc::filtered_vpcs;
 use crate::vpc;
 
 pub fn console_url(app: &App) -> String {
-    vpc::console_url(&app.config.region)
+    vpc::console_url(&app.aws.config.region)
 }
 
 pub fn selected_arn(app: &App) -> Option<String> {

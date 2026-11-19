@@ -322,9 +322,9 @@ pub fn breadcrumb() -> Vec<String> {
 pub fn console_url(app: &App) -> String {
     use crate::sqs::{console_url_queue_detail, console_url_queues};
     if let Some(queue_url) = &app.sqs_state.current_queue {
-        console_url_queue_detail(&app.config.region, queue_url)
+        console_url_queue_detail(&app.aws.config.region, queue_url)
     } else {
-        console_url_queues(&app.config.region)
+        console_url_queues(&app.aws.config.region)
     }
 }
 

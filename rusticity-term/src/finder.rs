@@ -110,7 +110,10 @@ impl State {
     fn scope(app: &App) -> String {
         format!(
             "{}|{}|{}|{}",
-            app.profile, app.config.region, app.config.account_id, app.config.role_arn
+            app.aws.profile,
+            app.aws.config.region,
+            app.aws.config.account_id,
+            app.aws.config.role_arn
         )
     }
     pub fn cancel(&mut self) {
@@ -448,16 +451,16 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
                 }
                 let confirmed = confirm.is_some_and(|(pending, _)| pending == resource);
                 if !confirmed
-                    && navigation::validate_account(&app.config, &resource).is_ok()
-                    && navigation::other_region(&app.config, &resource).is_some()
+                    && navigation::validate_account(&app.aws.config, &resource).is_ok()
+                    && navigation::other_region(&app.aws.config, &resource).is_some()
                 {
-                    finder.confirm_region = Some((resource, app.config.region.clone()));
+                    finder.confirm_region = Some((resource, app.aws.config.region.clone()));
                     return true;
                 }
                 let check = if confirmed {
-                    navigation::validate_account(&app.config, &resource)
+                    navigation::validate_account(&app.aws.config, &resource)
                 } else {
-                    navigation::validate_scope(&app.config, &resource)
+                    navigation::validate_scope(&app.aws.config, &resource)
                 };
                 if let Err(error) = check {
                     let warning = error.to_string();
@@ -499,7 +502,7 @@ pub fn poll(app: &mut App) {
         let source = finder.related_source.clone().expect("related source");
         let (tx, receiver) = mpsc::channel(32);
         let task = tokio::spawn(rusticity_core::related::discover(
-            app.config.clone(),
+            app.aws.config.clone(),
             source,
             tx,
         ));
@@ -513,7 +516,7 @@ pub fn poll(app: &mut App) {
     } else if !finder.started && finder.changed.elapsed() >= DEBOUNCE {
         if let Some(query) = finder.query.clone().filter(SearchQuery::ready) {
             let (tx, receiver) = mpsc::channel(32);
-            let config = app.config.clone();
+            let config = app.aws.config.clone();
             let cache = finder.cache.clone();
             let task = tokio::spawn(finder::search_regions(config, query, cache, tx));
             finder.running = Some(RunningSearch {

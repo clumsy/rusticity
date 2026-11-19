@@ -363,12 +363,12 @@ pub fn console_url(app: &App) -> String {
     // In detail view, link to the current file system's active tab.
     if let Some(fs_id) = &app.efs_state.current_file_system {
         return efs::console_url_file_system_with_tab(
-            &app.config.region,
+            &app.aws.config.region,
             fs_id,
             app.efs_state.detail_tab,
         );
     }
-    efs::console_url_file_systems(&app.config.region)
+    efs::console_url_file_systems(&app.aws.config.region)
 }
 
 // ── Column preferences ────────────────────────────────────────────────────────

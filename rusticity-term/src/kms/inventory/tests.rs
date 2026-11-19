@@ -10,7 +10,7 @@ fn app() -> App {
     app.current_service = Service::KmsKeys;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.kms_state.tab = Tab::CustomerManaged;
     app
 }
@@ -175,7 +175,7 @@ async fn result_from_a_different_aws_context_is_rejected() {
         .start(async move { Ok(vec![ui_key("old-profile", "alias/old")]) }));
     tokio::task::yield_now().await;
 
-    app.profile = "other".into();
+    app.aws.profile = "other".into();
     poll(&mut app).await;
     assert!(app.kms_state.keys.items.is_empty());
     assert!(!app.kms_state.inventory.matches_scope(&scope(&app)));

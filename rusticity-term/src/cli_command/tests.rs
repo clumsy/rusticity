@@ -9,7 +9,7 @@ fn app(service: Service) -> App {
     app.current_service = service;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 fn press(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
@@ -242,12 +242,12 @@ fn current_profile_changes_are_reflected_and_foreign_finder_accounts_are_refused
     let mut app = app(Service::SnsTopics);
     app.sns_state.topics.items = vec![topic("chosen")];
     assert!(copy(&mut app).contains("--profile='beta'"));
-    app.profile = "different".into();
+    app.aws.profile = "different".into();
     assert!(copy(&mut app).contains("--profile='different'"));
     app.mode = Mode::ResourceFinder;
     app.resource_finder.focus = Focus::Table;
     app.resource_finder.rows = vec![Resource::from_arn(&topic("chosen").arn).unwrap()];
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     press(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
     assert!(app
         .clipboard
@@ -386,6 +386,6 @@ fn sqs_nested_table_commands_use_entered_url_not_highlighted_row() {
         ["lambda", "list-event-source-mappings"]
     );
     assert!(invocation.args[3].contains("arn:aws:sqs:us-east-1:123456789012:orders"));
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     assert!(super::invocation(&app).is_err());
 }

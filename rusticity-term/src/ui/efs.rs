@@ -175,6 +175,7 @@ impl crate::ui::monitoring::MonitoringState for State {
 /// Load the file system's access points into app state.
 pub async fn load_access_points(app: &mut App, file_system_id: &str) -> anyhow::Result<()> {
     let items = app
+        .aws
         .efs_client
         .describe_access_points(file_system_id)
         .await?;
@@ -187,6 +188,7 @@ pub async fn load_access_points(app: &mut App, file_system_id: &str) -> anyhow::
 /// Load the file system's mount targets (Network tab) into app state.
 pub async fn load_mount_targets(app: &mut App, file_system_id: &str) -> anyhow::Result<()> {
     let items = app
+        .aws
         .efs_client
         .describe_mount_targets(file_system_id)
         .await?;
@@ -198,7 +200,7 @@ pub async fn load_mount_targets(app: &mut App, file_system_id: &str) -> anyhow::
 
 /// Load the file system's replication configuration text into app state.
 pub async fn load_replication(app: &mut App, file_system_id: &str) -> anyhow::Result<()> {
-    let replication = app.efs_client.get_replication(file_system_id).await?;
+    let replication = app.aws.efs_client.get_replication(file_system_id).await?;
     app.efs_state.replication_document = replication.unwrap_or_default();
     Ok(())
 }
@@ -206,6 +208,7 @@ pub async fn load_replication(app: &mut App, file_system_id: &str) -> anyhow::Re
 /// Load the file system's resource policy JSON into app state.
 pub async fn load_policy(app: &mut App, file_system_id: &str) -> anyhow::Result<()> {
     let policy = app
+        .aws
         .efs_client
         .get_file_system_policy(file_system_id)
         .await?;
@@ -217,6 +220,7 @@ pub async fn load_policy(app: &mut App, file_system_id: &str) -> anyhow::Result<
 /// Load the EFS monitoring metrics for the given file system into app state.
 pub async fn load_metrics(app: &mut App, file_system_id: &str) -> anyhow::Result<()> {
     let data = app
+        .aws
         .efs_client
         .get_monitoring_metrics(file_system_id)
         .await?;

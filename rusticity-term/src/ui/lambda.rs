@@ -1380,7 +1380,7 @@ pub fn filtered_lambda_applications(app: &App) -> Vec<&LambdaApplication> {
 }
 
 pub async fn load_lambda_functions(app: &mut App) -> anyhow::Result<()> {
-    let functions = app.lambda_client.list_functions().await?;
+    let functions = app.aws.lambda_client.list_functions().await?;
     app.lambda_state.table.items = function_rows(functions);
     Ok(())
 }
@@ -1430,7 +1430,7 @@ pub(crate) fn function_rows(
 }
 
 pub async fn load_lambda_applications(app: &mut App) -> anyhow::Result<()> {
-    let applications = app.lambda_client.list_applications().await?;
+    let applications = app.aws.lambda_client.list_applications().await?;
     let mut applications: Vec<LambdaApplication> = applications
         .into_iter()
         .map(|a| LambdaApplication {
@@ -1447,7 +1447,7 @@ pub async fn load_lambda_applications(app: &mut App) -> anyhow::Result<()> {
 }
 
 pub async fn load_lambda_versions(app: &mut App, function_name: &str) -> anyhow::Result<()> {
-    let versions = app.lambda_client.list_versions(function_name).await?;
+    let versions = app.aws.lambda_client.list_versions(function_name).await?;
     let mut versions: Vec<Version> = versions
         .into_iter()
         .map(|v| Version {
@@ -1471,7 +1471,7 @@ pub async fn load_lambda_versions(app: &mut App, function_name: &str) -> anyhow:
 }
 
 pub async fn load_lambda_aliases(app: &mut App, function_name: &str) -> anyhow::Result<()> {
-    let aliases = app.lambda_client.list_aliases(function_name).await?;
+    let aliases = app.aws.lambda_client.list_aliases(function_name).await?;
     let mut aliases: Vec<Alias> = aliases
         .into_iter()
         .map(|a| Alias {
@@ -1500,30 +1500,38 @@ pub async fn load_lambda_metrics(
     let resource_ref = resource.as_deref();
 
     let invocations = app
+        .aws
         .lambda_client
         .get_invocations_metric(function_name, resource_ref)
         .await?;
     app.lambda_state.metric_data_invocations = invocations.clone();
 
     let duration_min = app
+        .aws
         .lambda_client
         .get_duration_metric(function_name, Statistic::Minimum)
         .await?;
     app.lambda_state.metric_data_duration_min = duration_min;
 
     let duration_avg = app
+        .aws
         .lambda_client
         .get_duration_metric(function_name, Statistic::Average)
         .await?;
     app.lambda_state.metric_data_duration_avg = duration_avg;
 
     let duration_max = app
+        .aws
         .lambda_client
         .get_duration_metric(function_name, Statistic::Maximum)
         .await?;
     app.lambda_state.metric_data_duration_max = duration_max;
 
-    let errors = app.lambda_client.get_errors_metric(function_name).await?;
+    let errors = app
+        .aws
+        .lambda_client
+        .get_errors_metric(function_name)
+        .await?;
     app.lambda_state.metric_data_errors = errors.clone();
 
     let mut success_rate = Vec::new();
@@ -1539,66 +1547,77 @@ pub async fn load_lambda_metrics(
     app.lambda_state.metric_data_success_rate = success_rate;
 
     let throttles = app
+        .aws
         .lambda_client
         .get_throttles_metric(function_name)
         .await?;
     app.lambda_state.metric_data_throttles = throttles;
 
     let concurrent_executions = app
+        .aws
         .lambda_client
         .get_concurrent_executions_metric(function_name)
         .await?;
     app.lambda_state.metric_data_concurrent_executions = concurrent_executions;
 
     let recursive_invocations_dropped = app
+        .aws
         .lambda_client
         .get_recursive_invocations_dropped_metric(function_name)
         .await?;
     app.lambda_state.metric_data_recursive_invocations_dropped = recursive_invocations_dropped;
 
     let async_event_age_min = app
+        .aws
         .lambda_client
         .get_async_event_age_metric(function_name, Statistic::Minimum)
         .await?;
     app.lambda_state.metric_data_async_event_age_min = async_event_age_min;
 
     let async_event_age_avg = app
+        .aws
         .lambda_client
         .get_async_event_age_metric(function_name, Statistic::Average)
         .await?;
     app.lambda_state.metric_data_async_event_age_avg = async_event_age_avg;
 
     let async_event_age_max = app
+        .aws
         .lambda_client
         .get_async_event_age_metric(function_name, Statistic::Maximum)
         .await?;
     app.lambda_state.metric_data_async_event_age_max = async_event_age_max;
 
     let async_events_received = app
+        .aws
         .lambda_client
         .get_async_events_received_metric(function_name)
         .await?;
     app.lambda_state.metric_data_async_events_received = async_events_received;
 
     let async_events_dropped = app
+        .aws
         .lambda_client
         .get_async_events_dropped_metric(function_name)
         .await?;
     app.lambda_state.metric_data_async_events_dropped = async_events_dropped;
 
     let destination_delivery_failures = app
+        .aws
         .lambda_client
         .get_destination_delivery_failures_metric(function_name)
         .await?;
     app.lambda_state.metric_data_destination_delivery_failures = destination_delivery_failures;
 
     let dead_letter_errors = app
+        .aws
         .lambda_client
         .get_dead_letter_errors_metric(function_name)
         .await?;
     app.lambda_state.metric_data_dead_letter_errors = dead_letter_errors;
 
     let iterator_age = app
+        .aws
         .lambda_client
         .get_iterator_age_metric(function_name)
         .await?;

@@ -159,8 +159,8 @@ async fn start_without_a_request_never_spawns_a_future() {
 #[test]
 fn app_scope_captures_identity_and_explicit_resource_not_row_selection() {
     let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
-    app.config.role_arn = "role".into();
+    app.aws.config.account_id = "123456789012".into();
+    app.aws.config.role_arn = "role".into();
     assert_eq!(ReadScope::from_app(&app, "resource"), scope("resource"));
     app.sns_state.topics.selected = usize::MAX;
     assert_eq!(ReadScope::from_app(&app, "resource"), scope("resource"));

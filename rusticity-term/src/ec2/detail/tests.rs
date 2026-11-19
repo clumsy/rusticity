@@ -25,7 +25,7 @@ fn row(id: &str) -> Ec2Instance {
 
 fn app() -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-2".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::Ec2Instances;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -339,7 +339,7 @@ async fn refresh_clears_everything_and_a_failure_never_restores_it() {
 async fn aws_context_change_closes_the_page() {
     let mut app = app();
     press(&mut app, KeyCode::Enter);
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(poll(&mut app).await);
     assert!(!active(&app));
     assert!(app.ec2_state.tags.items.is_empty());

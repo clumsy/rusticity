@@ -300,7 +300,7 @@ mod choice_tables {
     #[test]
     fn eventbridge_rules_sort_by_their_cells() {
         let mut app = App::new_without_client("beta".into(), Some("us-east-2".into()));
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         app.service_selected = true;
         app.current_service = Service::EventBridgeEventBuses;
         app.mode = Mode::Normal;

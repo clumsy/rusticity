@@ -102,7 +102,7 @@ pub async fn poll(app: &mut App) -> bool {
 
     let mut changed = false;
     if state.inventory.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let state = &mut app.sns_state;
         if state.inventory.start(async move {
             match tokio::time::timeout(READ_TIMEOUT, SnsClient::new(config).list_topics()).await {

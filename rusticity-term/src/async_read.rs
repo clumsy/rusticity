@@ -39,10 +39,10 @@ impl ReadScope {
                 .get(app.current_tab)
                 .filter(|tab| tab.service == app.current_service)
                 .map(|tab| tab.id),
-            profile: app.profile.clone(),
-            region: app.config.region.clone(),
-            account: app.config.account_id.clone(),
-            role: app.config.role_arn.clone(),
+            profile: app.aws.profile.clone(),
+            region: app.aws.config.region.clone(),
+            account: app.aws.config.account_id.clone(),
+            role: app.aws.config.role_arn.clone(),
             resource: resource.into(),
         }
     }

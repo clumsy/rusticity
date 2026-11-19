@@ -1337,7 +1337,7 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
 
 // S3-specific helper functions
 pub async fn load_s3_buckets(app: &mut App) -> anyhow::Result<()> {
-    let buckets = app.s3_client.list_buckets().await?;
+    let buckets = app.aws.s3_client.list_buckets().await?;
     app.s3_state.buckets.items = buckets
         .into_iter()
         .map(|(name, region, date)| AppS3Bucket {

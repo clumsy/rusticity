@@ -102,7 +102,7 @@ fn log_group_scope(app: &App) -> Option<Resource> {
         id: group.name.clone(),
         name: group.name.clone(),
         arn,
-        region: app.config.region.clone(),
+        region: app.aws.config.region.clone(),
     })
 }
 
@@ -273,7 +273,7 @@ fn table_scope(app: &App, table: &rusticity_core::dynamodb::DdbTable) -> Resourc
         id: table.name.clone(),
         name: table.name.clone(),
         arn: table.table_arn.clone(),
-        region: app.config.region.clone(),
+        region: app.aws.config.region.clone(),
     }
 }
 
@@ -408,7 +408,7 @@ fn function_scope(app: &App, name: &str) -> Resource {
         id: name.to_string(),
         name: name.to_string(),
         arn: String::new(),
-        region: app.config.region.clone(),
+        region: app.aws.config.region.clone(),
     }
 }
 
@@ -456,7 +456,7 @@ fn stack_scope(app: &App, name: &str) -> Resource {
         id: name.to_string(),
         name: name.to_string(),
         arn: String::new(),
-        region: app.config.region.clone(),
+        region: app.aws.config.region.clone(),
     }
 }
 

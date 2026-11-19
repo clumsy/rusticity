@@ -22,7 +22,7 @@ fn row(name: &str, arn: &str) -> SecretMetadata {
 
 fn app() -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::SecretsManagerSecrets;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -432,7 +432,7 @@ async fn refresh_clears_every_section_before_the_next_draw() {
 async fn aws_context_change_closes_the_detail_without_repainting_it() {
     let mut app = app();
     open_first(&mut app);
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(poll(&mut app).await);
     assert!(!active(&app));
     assert!(app.secretsmanager_state.detail.source.is_none());
@@ -440,7 +440,7 @@ async fn aws_context_change_closes_the_detail_without_repainting_it() {
     let mut app = self::app();
     open_first(&mut app);
     finish(&mut app, Ok(detail(Ok(versions())))).await;
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     press(&mut app, KeyCode::Enter); // table toggle on summary is a no-op
     act(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     assert!(

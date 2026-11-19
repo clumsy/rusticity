@@ -102,14 +102,14 @@ fn selected(app: &App) -> anyhow::Result<Bookmark> {
         );
     }
     let region = if resource.region.is_empty() || resource.region == "global" {
-        app.config.region.clone()
+        app.aws.config.region.clone()
     } else {
         resource.region.clone()
     };
     Bookmark::new(
-        app.profile.clone(),
+        app.aws.profile.clone(),
         region,
-        app.config.account_id.clone(),
+        app.aws.config.account_id.clone(),
         resource,
     )
 }
@@ -259,13 +259,16 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
 /// context. Build a replacement off-screen and validate its account first, so
 /// failed authentication / wrong-profile resolution leaves the current app intact.
 pub async fn open_pending(app: &mut App) -> anyhow::Result<bool> {
-    open_with(app, |profile, region| App::new(Some(profile), Some(region))).await
+    open_with(app, |profile, region| {
+        crate::aws_context::AwsContext::connect(Some(profile), Some(region))
+    })
+    .await
 }
 
 async fn open_with<F, Fut>(app: &mut App, connect: F) -> anyhow::Result<bool>
 where
     F: FnOnce(String, String) -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<App>>,
+    Fut: std::future::Future<Output = anyhow::Result<crate::aws_context::AwsContext>>,
 {
     let Some(entry) = app.bookmarks.pending_open.take() else {
         return Ok(false);
@@ -276,7 +279,7 @@ where
             "This bookmark has no dedicated resource view. It can be removed from the picker."
         );
     }
-    let replacing = app.profile != entry.profile || app.config.region != entry.region;
+    let replacing = app.aws.profile != entry.profile || app.aws.config.region != entry.region;
     if replacing {
         crate::finder::navigation::switch_context(
             app,
@@ -285,23 +288,23 @@ where
         )
         .await?;
     } else {
-        validate_open(app, &entry)?;
+        validate_open(&app.aws, &entry)?;
     }
     let enter = crate::finder::navigation::open_resource(app, entry.resource).await?;
     app.bookmarks.return_mode = None;
     Ok(enter)
 }
 
-fn validate_open(app: &App, entry: &Bookmark) -> anyhow::Result<()> {
-    if app.config.account_id != entry.account_id {
+fn validate_open(aws: &crate::aws_context::AwsContext, entry: &Bookmark) -> anyhow::Result<()> {
+    if aws.config.account_id != entry.account_id {
         anyhow::bail!(
             "Bookmark expects account {}, but profile {} resolved to {}. No resource was opened.",
             entry.account_id,
             entry.profile,
-            app.config.account_id
+            aws.config.account_id
         );
     }
-    crate::finder::navigation::validate_scope(&app.config, &entry.resource)
+    crate::finder::navigation::validate_scope(&aws.config, &entry.resource)
 }
 
 #[cfg(test)]

@@ -498,7 +498,7 @@ fn render_api_detail(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub async fn load_routes(app: &mut App, api_id: &str) -> anyhow::Result<()> {
-    let client = rusticity_core::apig::ApiGatewayClient::new(app.config.clone());
+    let client = rusticity_core::apig::ApiGatewayClient::new(app.aws.config.clone());
     let routes = client.list_routes(api_id).await?;
 
     let route_items: Vec<Route> = routes
@@ -704,7 +704,7 @@ pub fn build_route_hierarchy(routes: Vec<Route>) -> (Vec<Route>, HashMap<String,
 }
 
 pub async fn load_resources(app: &mut App, api_id: &str) -> anyhow::Result<()> {
-    let client = rusticity_core::apig::ApiGatewayClient::new(app.config.clone());
+    let client = rusticity_core::apig::ApiGatewayClient::new(app.aws.config.clone());
     let resources = client.list_resources(api_id).await?;
 
     let resource_items: Vec<ApigResource> = resources

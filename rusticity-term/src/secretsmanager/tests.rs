@@ -33,7 +33,7 @@ fn app() -> App {
     app.current_service = Service::SecretsManagerSecrets;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.secretsmanager_state.secrets.items = (0..25).rev().map(secret).collect();
     inventory::mark_loaded(&mut app);
     app

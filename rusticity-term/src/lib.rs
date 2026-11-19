@@ -3,6 +3,7 @@ pub mod apig;
 pub mod app;
 mod async_read;
 pub mod aws;
+pub mod aws_context;
 pub mod bookmarks;
 pub mod cfn;
 pub mod cli_command;

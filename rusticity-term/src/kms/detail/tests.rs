@@ -56,7 +56,7 @@ const ARN: &str = "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56e
 
 fn app() -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-1".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = Service::KmsKeys;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -318,7 +318,7 @@ async fn context_change_cancels_detail_with_no_late_repaint() {
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert!(active(&app));
     // Simulate a region change (scope moves out from under the detail).
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(poll(&mut app).await, "poll reports the teardown");
     assert!(app.kms_state.detail.view().is_none());
     assert!(app.kms_state.detail.source.is_none());
@@ -481,10 +481,10 @@ async fn esc_and_scope_changes_abort_inflight_task_and_discard_data() {
         tokio::task::yield_now().await;
         match change {
             0 => act(&mut app, KeyCode::Esc, KeyModifiers::NONE),
-            1 => app.profile = "other".into(),
-            2 => app.config.region = "eu-west-1".into(),
-            3 => app.config.account_id = "999999999999".into(),
-            _ => app.config.role_arn = "arn:aws:iam::123456789012:role/other".into(),
+            1 => app.aws.profile = "other".into(),
+            2 => app.aws.config.region = "eu-west-1".into(),
+            3 => app.aws.config.account_id = "999999999999".into(),
+            _ => app.aws.config.role_arn = "arn:aws:iam::123456789012:role/other".into(),
         }
         if change != 0 {
             assert!(poll(&mut app).await);
@@ -676,7 +676,7 @@ fn refresh_cannot_rebind_old_key_metadata_to_a_changed_context() {
     let mut app = app();
     act(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     apply(&mut app, detail(Ok(vec![]), Ok(vec![])));
-    app.profile = "other".into();
+    app.aws.profile = "other".into();
     act(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     assert!(app.kms_state.detail.source.is_none());
     assert!(app.kms_state.detail.view().is_none());

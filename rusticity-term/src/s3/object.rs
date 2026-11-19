@@ -83,10 +83,10 @@ pub fn active(app: &App) -> bool {
 fn scope(app: &App) -> String {
     format!(
         "{}|{}|{}|{}|{:?}|{:?}",
-        app.profile,
-        app.config.region,
-        app.config.account_id,
-        app.config.role_arn,
+        app.aws.profile,
+        app.aws.config.region,
+        app.aws.config.account_id,
+        app.aws.config.role_arn,
         app.s3_state.current_bucket,
         app.s3_state.prefix_stack
     )
@@ -261,7 +261,7 @@ pub async fn poll(app: &mut App) -> bool {
         changed = true;
     }
     if let Some(request) = state.pending.take() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let key = request.key.clone();
         let scope = request.scope.clone();
         let task = tokio::spawn(async move {

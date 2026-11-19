@@ -60,7 +60,7 @@ pub(crate) fn mark_loaded(app: &mut App) {
 
 pub async fn poll(app: &mut App) -> bool {
     let scope = scope(app);
-    let config = app.config.clone();
+    let config = app.aws.config.clone();
     let state = &mut app.vpc_state;
     let changed = state
         .inventory

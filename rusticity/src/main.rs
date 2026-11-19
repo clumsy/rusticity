@@ -232,12 +232,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 || matches!(app.current_service, Service::CloudWatchLogGroups | Service::CloudWatchInsights));
                         let should_retry = matches!(action, rusticity_term::keymap::Action::RetryLoad)
                             && !(items_view && app.dynamodb_state.items_failed) && !inventory_view;
-                        let is_profile_select = should_load && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
-                        let is_region_select = should_load && app.mode == rusticity_term::keymap::Mode::RegionPicker && !app.region_filter_active;
                         let is_profile_refresh = should_refresh && app.mode == rusticity_term::keymap::Mode::ProfilePicker;
                         let prev_loading = app.log_groups_state.loading;
                         let prev_view_mode = app.view_mode;
-                        let prev_service_selected = app.service_selected;
+                        let mut prev_service_selected = app.service_selected;
                         let prev_service = app.current_service;
                         let prev_current_role = app.iam_state.current_role.clone();
                         let prev_current_group = app.iam_state.current_group.clone();
@@ -248,6 +246,33 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         let prev_current_tab = app.current_tab;
 
                         app.handle_action(action);
+                        if should_retry {
+                            // Retry from the error modal reconnects the current context.
+                            let request = app.aws.request();
+                            app.context_request.get_or_insert(request);
+                        }
+                        // A profile, Region or session pick connects off-screen and
+                        // swaps the whole context; a failure leaves everything as is.
+                        if let Some(request) = app.context_request.take() {
+                            app.log_groups_state.loading = true;
+                            app.log_groups_state.loading_message = "Connecting to AWS...".to_string();
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            match rusticity_term::aws_context::AwsContext::connect_bounded(request).await {
+                                Ok(aws) => {
+                                    app.replace_context(aws);
+                                    // Every legacy loader below reloads the open service.
+                                    prev_service_selected = false;
+                                }
+                                Err(e) => {
+                                    app.pending_profile = None;
+                                    app.error_message = Some(format!("Failed to connect: {:#}", e));
+                                    app.error_scroll = 0;
+                                    app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                                }
+                            }
+                            app.log_groups_state.loading = false;
+                            app.log_groups_state.loading_message.clear();
+                        }
                         let opened_new_tab = rusticity_term::tab_runtime::opened_new_tab(&app, &prev_tabs);
                         if rusticity_term::tab_runtime::restored_existing_tab(&app, &prev_tabs, prev_current_tab) {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
@@ -616,7 +641,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                             .find(|&p| p >= min_period)
                                             .unwrap_or(3600)
                                             .max(alarm.period) as i32;
-                                        match app.alarms_client.get_metric_statistics(
+                                        match app.aws.alarms_client.get_metric_statistics(
                                             rusticity_core::MetricStatsRequest {
                                                 namespace: &ns,
                                                 metric_name: &mn,
@@ -1248,144 +1273,6 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
                         if prev_view_mode != app.view_mode {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
-
-                        // Handle profile change - reconnect with new credentials
-                        if is_profile_select {
-                            let profile_name = app.profile.clone();
-
-                            // Check if we have a region
-                            if app.region.is_empty() {
-                                // No region - open region picker
-                                app.measure_region_latencies();
-                                app.mode = rusticity_term::keymap::Mode::RegionPicker;
-                            } else {
-                                // Have region - reconnect
-                                app.log_groups_state.loading = true;
-                                app.log_groups_state.loading_message = "Connecting with new profile...".to_string();
-                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-
-                                let new_app_result = App::new(
-                                    Some(profile_name.clone()),
-                                    Some(app.region.clone())
-                                ).await;
-
-                                match new_app_result {
-                                    Ok(mut new_app) => {
-                                        new_app.profile = profile_name;
-                                        app = new_app;
-                                    },
-                                    Err(e) => {
-                                        app.error_message = Some(format!("Failed to connect: {:#}", e));
-                                        app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                    }
-                                }
-                                app.log_groups_state.loading = false;
-                                app.log_groups_state.loading_message.clear();
-                            }
-                        }
-
-                        // Handle region change - reconnect to get identity and reload content
-                        if is_region_select {
-                            app.log_groups_state.loading = true;
-                            app.log_groups_state.loading_message = "Connecting with new region...".to_string();
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-
-                            let profile_name = app.profile.clone();
-                            let region_name = app.region.clone();
-                            let new_app_result = App::new(
-                                Some(profile_name.clone()),
-                                Some(region_name.clone())
-                            ).await;
-
-                            match new_app_result {
-                                Ok(mut new_app) => {
-                                    new_app.profile = profile_name;
-                                    // Restore previous service context if there was one
-                                    if prev_service_selected {
-                                        new_app.current_service = prev_service;
-                                        new_app.service_selected = true;
-                                        new_app.mode = rusticity_term::keymap::Mode::Normal;
-                                        // Force data reload — region changed, all cached data is stale.
-                                        // Set loading=true for the restored service so the load
-                                        // condition triggers even though service didn't "change".
-                                        match prev_service {
-                                            rusticity_term::app::Service::EcrRepositories => {
-                                                new_app.ecr_state.repositories.loading = true;
-                                            }
-                                            rusticity_term::app::Service::KmsKeys => {
-                                                new_app.kms_state.keys.loading = true;
-                                            }
-                                            rusticity_term::app::Service::EfsFileSystems => {
-                                                new_app.efs_state.file_systems.loading = true;
-                                            }
-                                            Service::SnsTopics => {
-                                                new_app.sns_state.topics.loading = true;
-                                            }
-                                            Service::StepFunctionsStateMachines => {
-                                                new_app.stepfunctions_state.machines.loading = true;
-                                            }
-                                            rusticity_term::app::Service::FsxFileSystems => {
-                                                new_app.fsx_state.file_systems.loading = true;
-                                            }
-                                            rusticity_term::app::Service::LambdaApplications => {
-                                                new_app.lambda_application_state.table.loading = true;
-                                            }
-                                            rusticity_term::app::Service::CloudFormationStacks => {
-                                                new_app.cfn_state.table.loading = true;
-                                            }
-                                            _ => {
-                                                // Other services reload via log_groups_state.loading
-                                                new_app.log_groups_state.loading = true;
-                                            }
-                                        }
-                                        // Restore session tabs so they remain visible after region change
-                                        new_app.tabs = prev_tabs;
-                                        new_app.current_tab = prev_current_tab;
-                                    }
-                                    app = new_app;
-                                },
-                                Err(e) => {
-                                    app.error_message = Some(format!("Failed to connect: {:#}", e));
-                                    app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                }
-                            }
-                            app.log_groups_state.loading = false;
-                            app.log_groups_state.loading_message.clear();
-                        }
-
-                        if should_retry {
-                            app.log_groups_state.loading_message = "Reconnecting to AWS...".to_string();
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-
-                            let new_app_result = App::new(
-                                Some(app.profile.clone()),
-                                Some(app.config.region.clone())
-                            ).await;
-
-                            match new_app_result {
-                                Ok(new_app) => {
-                                    app = new_app;
-                                    app.log_groups_state.loading = true;
-                                    app.log_groups_state.loading_message = "Loading log groups...".to_string();
-                                    terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                                    if let Err(e) = app.load_log_groups().await {
-                                        app.error_message = Some(format!("{:#}", e));
-                                        app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                    }
-                                    app.log_groups_state.loading = false;
-                                    app.log_groups_state.loading_message.clear();
-                                    app.log_groups_state.loading_message.clear();
-                                },
-                                Err(e) => {
-                                    app.error_message = Some(format!("{:#}", e));
-                                    app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                                }
-                            }
                         }
 
                         if should_refresh {

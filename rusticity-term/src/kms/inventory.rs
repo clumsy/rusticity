@@ -94,7 +94,7 @@ pub async fn poll(app: &mut App) -> bool {
 
     let mut changed = false;
     if state.inventory.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let state = &mut app.kms_state;
         if state.inventory.start(async move {
             match tokio::time::timeout(READ_TIMEOUT, KmsClient::new(config).list_keys()).await {

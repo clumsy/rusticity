@@ -362,7 +362,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
                         "ARN: ",
                         format!(
                             "arn:aws:iam::{}:group/{}",
-                            app.config.account_id, group.group_name
+                            app.aws.config.account_id, group.group_name
                         ),
                     ),
                 ],
@@ -1404,6 +1404,7 @@ pub fn filtered_last_accessed(app: &App) -> Vec<&LastAccessedService> {
 
 pub async fn load_iam_users(app: &mut App) -> anyhow::Result<()> {
     let users = app
+        .aws
         .iam_client
         .list_users()
         .await
@@ -1414,11 +1415,13 @@ pub async fn load_iam_users(app: &mut App) -> anyhow::Result<()> {
         let user_name = u.user_name().to_string();
 
         let has_console = app
+            .aws
             .iam_client
             .get_login_profile(&user_name)
             .await
             .unwrap_or(false);
         let access_key_count = app
+            .aws
             .iam_client
             .list_access_keys(&user_name)
             .await
@@ -1459,6 +1462,7 @@ pub async fn load_iam_users(app: &mut App) -> anyhow::Result<()> {
 
 pub async fn load_iam_roles(app: &mut App) -> anyhow::Result<()> {
     let roles = app
+        .aws
         .iam_client
         .list_roles()
         .await
@@ -1564,6 +1568,7 @@ pub async fn load_iam_roles(app: &mut App) -> anyhow::Result<()> {
 
 pub async fn load_iam_user_groups(app: &mut App) -> anyhow::Result<()> {
     let groups = app
+        .aws
         .iam_client
         .list_groups()
         .await
@@ -1579,7 +1584,7 @@ pub async fn load_iam_user_groups(app: &mut App) -> anyhow::Result<()> {
         };
 
         let group_name = g.group_name().to_string();
-        let user_count = app.iam_client.get_group(&group_name).await.unwrap_or(0);
+        let user_count = app.aws.iam_client.get_group(&group_name).await.unwrap_or(0);
 
         iam_groups.push(IamGroup {
             group_name,

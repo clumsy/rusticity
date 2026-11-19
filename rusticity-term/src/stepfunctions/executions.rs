@@ -498,7 +498,7 @@ pub async fn poll(app: &mut App) -> bool {
         state.read.request(current_scope.clone());
     }
     if state.table.loading && state.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let machine = machine.clone();
         if state.read.start(async move {
             StepFunctionsClient::new(config)
@@ -627,7 +627,7 @@ mod lifecycle_tests {
 
     fn app() -> App {
         let mut app = App::new_without_client("test".into(), Some("us-east-1".into()));
-        app.config.account_id = "123456789012".into();
+        app.aws.config.account_id = "123456789012".into();
         app.current_service = Service::StepFunctionsStateMachines;
         app.service_selected = true;
         app.mode = Mode::Normal;
@@ -737,10 +737,10 @@ mod lifecycle_tests {
             tokio::task::yield_now().await;
             match change {
                 0 => app.handle_action(Action::GoBack),
-                1 => app.profile = "other".into(),
-                2 => app.config.region = "eu-west-1".into(),
-                3 => app.config.account_id = "999999999999".into(),
-                _ => app.config.role_arn = "arn:aws:iam::123456789012:role/other".into(),
+                1 => app.aws.profile = "other".into(),
+                2 => app.aws.config.region = "eu-west-1".into(),
+                3 => app.aws.config.account_id = "999999999999".into(),
+                _ => app.aws.config.role_arn = "arn:aws:iam::123456789012:role/other".into(),
             }
             if change != 0 {
                 assert!(poll(&mut app).await);

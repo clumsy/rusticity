@@ -14,7 +14,7 @@ pub fn selected_arn(app: &App) -> Option<String> {
 }
 
 pub fn console_url(app: &App) -> String {
-    super::console_url(&app.config.region)
+    super::console_url(&app.aws.config.region)
 }
 
 pub fn go_to_page(app: &mut App, page: usize) {

@@ -8,7 +8,7 @@ fn app() -> App {
     app.mode = Mode::Normal;
     app.service_selected = true;
     app.current_service = Service::SnsTopics;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.sns_state.topics.items =
         vec![
             rusticity_core::SnsTopic::from_arn("arn:aws:sns:us-east-1:123456789012:test").unwrap(),
@@ -187,7 +187,7 @@ async fn errors_refresh_and_context_changes_never_retarget_a_captured_command() 
     press(&mut app, KeyCode::Char('r'), KeyModifiers::CONTROL);
     assert!(view(&app).read.is_pending());
     assert_eq!(view(&app).invocation.as_ref().unwrap().args, args);
-    app.profile = "other".into();
+    app.aws.profile = "other".into();
     assert!(poll(&mut app).await);
     assert!(view(&app).invocation.is_none());
     assert!(!app.cli_output.busy());
@@ -335,7 +335,7 @@ async fn context_change_discards_ready_cli_output_and_does_not_rerun() {
     let read = &mut app.cli_output.views.get_mut(&id).unwrap().read;
     assert!(read.start(async { Ok("obsolete output from old context".into()) }));
     tokio::task::yield_now().await;
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     assert!(poll(&mut app).await);
     assert!(view(&app).failed);
     assert!(view(&app).text.contains("AWS context changed"));

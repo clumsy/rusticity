@@ -206,9 +206,9 @@ pub fn breadcrumb(app: &App) -> Vec<String> {
 pub fn console_url(app: &App) -> String {
     use crate::fsx;
     if let Some(fs_id) = &app.fsx_state.current_file_system {
-        return fsx::console_url_file_system(&app.config.region, fs_id);
+        return fsx::console_url_file_system(&app.aws.config.region, fs_id);
     }
-    fsx::console_url_file_systems(&app.config.region)
+    fsx::console_url_file_systems(&app.aws.config.region)
 }
 
 // ── Select / go back / detail tabs ───────────────────────────────────────────

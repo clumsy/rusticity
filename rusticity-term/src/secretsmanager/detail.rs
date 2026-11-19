@@ -410,7 +410,7 @@ pub async fn poll(app: &mut App) -> bool {
     let state = &mut app.secretsmanager_state.detail;
     let mut changed = false;
     if state.read.is_pending() {
-        let config = app.config.clone();
+        let config = app.aws.config.clone();
         let arn = state.source.as_ref().unwrap().arn.clone();
         changed = state.read.start(async move {
             SecretsManagerClient::new(config)

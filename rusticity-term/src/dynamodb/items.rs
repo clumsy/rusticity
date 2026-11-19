@@ -25,10 +25,10 @@ pub fn context(app: &App) -> Option<ItemRequestContext> {
     let table = dynamodb::current_table(app)?;
     let state = &app.dynamodb_state;
     Some(ItemRequestContext {
-        profile: app.profile.clone(),
-        region: app.config.region.clone(),
-        account_id: app.config.account_id.clone(),
-        role_arn: app.config.role_arn.clone(),
+        profile: app.aws.profile.clone(),
+        region: app.aws.config.region.clone(),
+        account_id: app.aws.config.account_id.clone(),
+        role_arn: app.aws.config.role_arn.clone(),
         table: table.name.clone(),
         index: dynamodb::selected_item_index(table, state.item_index),
         keys: dynamodb::selected_key_attributes(table, state.item_index),

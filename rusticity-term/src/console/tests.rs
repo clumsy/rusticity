@@ -154,7 +154,7 @@ fn action_routes_keep_list_detail_and_context_behavior_without_opening_browser()
     assert!(app
         .get_console_url()
         .ends_with("#InstanceDetails:instanceId=i-123"));
-    app.config.region = "cn-north-1".into();
+    app.aws.config.region = "cn-north-1".into();
     assert_eq!(app.get_console_url(), "https://cn-north-1.console.amazonaws.cn/ec2/home?region=cn-north-1#InstanceDetails:instanceId=i-123");
     app.current_service = Service::SecretsManagerSecrets;
     app.secretsmanager_state.secrets.items = vec![rusticity_core::SecretMetadata {

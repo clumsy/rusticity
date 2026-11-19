@@ -45,7 +45,7 @@ fn tg(name: &str, arn: &str, target_type: &str) -> TargetGroup {
 
 fn app(service: Service) -> App {
     let mut app = App::new_without_client("beta".into(), Some("us-east-2".into()));
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app.current_service = service;
     app.service_selected = true;
     app.mode = Mode::Normal;
@@ -395,7 +395,7 @@ async fn refresh_clears_everything_and_a_failure_never_restores_it() {
 async fn aws_context_change_closes_the_page() {
     let mut app = app(Service::Ec2LoadBalancers);
     press(&mut app, KeyCode::Enter);
-    app.config.region = "eu-west-1".into();
+    app.aws.config.region = "eu-west-1".into();
     assert!(load_balancers::poll(&mut app).await);
     assert!(app.load_balancers_state.view.is_none());
 }

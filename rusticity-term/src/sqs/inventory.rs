@@ -54,7 +54,7 @@ pub fn handle_action(app: &mut App, action: &Action) -> bool {
 
 pub async fn poll(app: &mut App) -> bool {
     let scope = scope(app);
-    let config = app.config.clone();
+    let config = app.aws.config.clone();
     let state = &mut app.sqs_state;
     let fetch = move || async move {
         SqsClient::new(config)

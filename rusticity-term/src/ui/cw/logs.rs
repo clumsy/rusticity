@@ -354,7 +354,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
     let detail_height = if let Some(group) = selected_log_group(app) {
         let arn = format!(
             "arn:aws:logs:{}:{}:log-group:{}:*",
-            app.config.region, app.config.account_id, group.name
+            app.aws.config.region, app.aws.config.account_id, group.name
         );
         let creation_time = group
             .creation_time
@@ -423,7 +423,7 @@ pub fn render_group_detail(frame: &mut Frame, app: &App, area: Rect) {
 
         let arn = format!(
             "arn:aws:logs:{}:{}:log-group:{}:*",
-            app.config.region, app.config.account_id, group.name
+            app.aws.config.region, app.aws.config.account_id, group.name
         );
         let creation_time = group
             .creation_time

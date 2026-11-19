@@ -136,11 +136,11 @@ pub fn console_url(app: &App) -> String {
     use crate::kms;
     use crate::ui::kms::Tab;
     if let Some(key) = &app.kms_state.detail.source {
-        return kms::console_url_key(&app.config.region, &key.key_id);
+        return kms::console_url_key(&app.aws.config.region, &key.key_id);
     }
     match app.kms_state.tab {
-        Tab::AwsManaged => kms::console_url_aws_managed_keys(&app.config.region),
-        Tab::CustomerManaged => kms::console_url_keys(&app.config.region),
+        Tab::AwsManaged => kms::console_url_aws_managed_keys(&app.aws.config.region),
+        Tab::CustomerManaged => kms::console_url_keys(&app.aws.config.region),
     }
 }
 

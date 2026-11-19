@@ -9,7 +9,7 @@ fn app() -> App {
     app.current_service = Service::StepFunctionsStateMachines;
     app.service_selected = true;
     app.mode = Mode::Normal;
-    app.config.account_id = "123456789012".into();
+    app.aws.config.account_id = "123456789012".into();
     app
 }
 
@@ -132,7 +132,7 @@ async fn result_from_a_different_aws_context_is_rejected() {
         .start(async move { Ok(vec![machine("from-old-account")]) }));
     tokio::task::yield_now().await;
 
-    app.config.account_id = "999999999999".into();
+    app.aws.config.account_id = "999999999999".into();
     poll(&mut app).await;
     assert!(app.stepfunctions_state.machines.items.is_empty());
     assert!(!app

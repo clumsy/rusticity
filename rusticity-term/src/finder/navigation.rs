@@ -1,5 +1,6 @@
 //! Open finder results through existing service loaders and views.
 use crate::app::{App, Service, Tab, ViewMode};
+use crate::aws_context::AwsContext;
 use crate::keymap::Mode;
 use crate::ui;
 use anyhow::{bail, Result};
@@ -144,21 +145,17 @@ pub fn validate_scope(config: &rusticity_core::AwsConfig, resource: &Resource) -
 pub async fn switch_context<Fut>(
     app: &mut App,
     connect: Fut,
-    check: impl FnOnce(&App) -> Result<()>,
+    check: impl FnOnce(&AwsContext) -> Result<()>,
 ) -> Result<()>
 where
-    Fut: std::future::Future<Output = Result<App>>,
+    Fut: std::future::Future<Output = Result<AwsContext>>,
 {
-    let mut next = tokio::time::timeout(std::time::Duration::from_secs(30), connect)
-        .await
-        .map_err(|_| anyhow::anyhow!("Connecting to the new Region timed out after 30s"))??;
+    let timeout = crate::aws_context::CONNECT_TIMEOUT;
+    let next = tokio::time::timeout(timeout, connect).await.map_err(|_| {
+        anyhow::anyhow!("Connecting to the new Region timed out after {timeout:?}")
+    })??;
     check(&next)?;
-    next.tabs = app.tabs.clone();
-    next.current_tab = app.current_tab;
-    next.current_service = app.current_service;
-    next.service_selected = app.service_selected;
-    next.bookmarks = std::mem::take(&mut app.bookmarks);
-    *app = next;
+    app.replace_context(next);
     Ok(())
 }
 
@@ -167,7 +164,7 @@ where
 /// and must resolve to the same account.
 pub async fn open_from_finder(app: &mut App, resource: Resource) -> Result<bool> {
     open_from_finder_with(app, resource, |profile, region| {
-        App::new(Some(profile), Some(region))
+        AwsContext::connect(Some(profile), Some(region))
     })
     .await
 }
@@ -179,12 +176,12 @@ pub(crate) async fn open_from_finder_with<F, Fut>(
 ) -> Result<bool>
 where
     F: FnOnce(String, String) -> Fut,
-    Fut: std::future::Future<Output = Result<App>>,
+    Fut: std::future::Future<Output = Result<AwsContext>>,
 {
-    if let Some(region) = other_region(&app.config, &resource) {
-        validate_account(&app.config, &resource)?;
-        let account = app.config.account_id.clone();
-        switch_context(app, connect(app.profile.clone(), region.to_string()), |next| {
+    if let Some(region) = other_region(&app.aws.config, &resource) {
+        validate_account(&app.aws.config, &resource)?;
+        let account = app.aws.config.account_id.clone();
+        switch_context(app, connect(app.aws.profile.clone(), region.to_string()), |next| {
             if next.config.account_id != account {
                 bail!(
                     "Profile {} resolved to account {} in {region}, not {account}. No resource was opened.",
@@ -259,9 +256,9 @@ fn open_log_group(app: &mut App, name: &str, lookup: Result<Option<LogGroup>>) -
 /// Returns true when the event loop should run its ordinary Enter path, including
 /// that resource view's existing loaders. Managed inventories enter on completion.
 pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
-    validate_scope(&app.config, &resource)?;
+    validate_scope(&app.aws.config, &resource)?;
     if resource.kind == ResourceKind::LogGroup {
-        let lookup = app.cloudwatch_client.get_log_group(&resource.id).await;
+        let lookup = app.aws.cloudwatch_client.get_log_group(&resource.id).await;
         open_log_group(app, &resource.id, lookup)?;
         return Ok(true);
     }

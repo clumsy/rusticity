@@ -1191,7 +1191,7 @@ mod dynamodb_hint_tests {
             |a| a.dynamodb_state.items_cursor = None,
             |a| a.dynamodb_state.items_context = None,
             |a| a.dynamodb_state.items_loading = true,
-            |a| a.profile = "another-profile".into(),
+            |a| a.aws.profile = "another-profile".into(),
         ];
         for configure in cases {
             let mut app = items_app();

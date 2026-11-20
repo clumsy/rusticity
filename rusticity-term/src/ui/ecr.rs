@@ -18,6 +18,7 @@ pub struct State {
     /// Chosen in Preferences; see `crate::sort::Choice`.
     pub sort: crate::sort::Choice,
     pub repositories: TableState<EcrRepository>,
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<EcrRepository>,
     pub tab: Tab,
     pub current_repository: Option<String>,
     pub current_repository_uri: Option<String>,
@@ -33,10 +34,15 @@ impl Default for State {
 }
 
 impl State {
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.repositories)
+    }
+
     pub fn new() -> Self {
         Self {
             sort: Default::default(),
             repositories: TableState::new(),
+            inventory: Default::default(),
             tab: Tab::Private,
             current_repository: None,
             current_repository_uri: None,
@@ -164,7 +170,17 @@ pub fn render_repository_list(frame: &mut Frame, app: &App, area: Rect) {
         is_active: app.mode != Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    crate::ui::loading::render_table(
+        frame,
+        config,
+        app.ecr_state.load_status(),
+        tab_label,
+        app.ecr_state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No repositories in this account and Region.",
+            has_unfiltered_items: !app.ecr_state.repositories.items.is_empty(),
+        },
+    );
 }
 
 pub fn render_images(frame: &mut Frame, app: &App, area: Rect) {

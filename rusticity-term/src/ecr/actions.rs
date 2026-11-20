@@ -150,7 +150,7 @@ pub fn select_item(app: &mut App) {
             app.ecr_state.current_repository = Some(repo_name);
             app.ecr_state.current_repository_uri = Some(repo_uri);
             app.ecr_state.images.reset();
-            app.ecr_state.repositories.loading = true;
+            app.ecr_state.images.loading = true;
         }
     }
 }
@@ -168,14 +168,12 @@ pub fn go_back(app: &mut App) {
 
 pub fn next_detail_tab(app: &mut App) {
     app.ecr_state.tab = app.ecr_state.tab.next();
-    app.ecr_state.repositories.reset();
-    app.ecr_state.repositories.loading = true;
+    crate::ecr::inventory::request(app);
 }
 
 pub fn prev_detail_tab(app: &mut App) {
     app.ecr_state.tab = app.ecr_state.tab.prev();
-    app.ecr_state.repositories.reset();
-    app.ecr_state.repositories.loading = true;
+    crate::ecr::inventory::request(app);
 }
 
 pub fn yank(app: &App) {

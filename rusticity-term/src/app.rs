@@ -3,7 +3,9 @@ use crate::apig::resource::Column as ResourceColumn;
 use crate::apig::route::Column as RouteColumn;
 pub use crate::aws::{filter_profiles, Profile as AwsProfile, Region as AwsRegion};
 use crate::aws_context::{AwsContext, ContextRequest};
-use crate::cfn::{Column as CfnColumn, Stack as CfnStack};
+use crate::cfn::Column as CfnColumn;
+#[cfg(test)]
+use crate::cfn::Stack as CfnStack;
 use crate::clipboard::ClipboardState;
 use crate::cloudtrail::{CloudTrailEvent, CloudTrailEventColumn, EventResourceColumn};
 use crate::common::{ColumnId, CyclicEnum, InputFocus, PageSize, SortDirection};
@@ -14,8 +16,10 @@ use crate::dynamodb::table::Column as DynamoDbColumn;
 use crate::dynamodb::{actions as ddb_actions, items as ddb_items};
 pub use crate::ec2::{Column as Ec2Column, Instance as Ec2Instance};
 use crate::ecr::image::{Column as EcrImageColumn, Image as EcrImage};
-use crate::ecr::repo::{Column as EcrColumn, Repository as EcrRepository};
-use crate::efs::fs::{Column as EfsColumn, FileSystem as EfsFileSystem};
+use crate::ecr::repo::Column as EcrColumn;
+#[cfg(test)]
+use crate::ecr::repo::Repository as EcrRepository;
+use crate::efs::fs::Column as EfsColumn;
 use crate::fsx::fs::Column as FsxColumn;
 use crate::iam::{
     GroupUser as IamGroupUser, Policy as IamPolicy, RoleColumn, RoleTag as IamRoleTag, UserColumn,
@@ -4188,7 +4192,7 @@ impl App {
                         self.cfn_state.current_stack = Some(stack_name);
                         self.cfn_state.tags.items = tags;
                         self.cfn_state.tags.reset();
-                        self.cfn_state.table.loading = true;
+                        self.cfn_state.detail_loading = true;
                         self.update_current_tab_breadcrumb();
                     }
                 }
@@ -4595,27 +4599,13 @@ impl App {
         Ok(())
     }
 
+    /// Inline repositories read for a finder or bookmark open; the tab-owned
+    /// read stays authoritative for the visible table.
     pub async fn load_ecr_repositories(&mut self) -> anyhow::Result<()> {
-        let repos = match self.ecr_state.tab {
-            EcrTab::Private => self.aws.ecr_client.list_private_repositories().await?,
-            EcrTab::Public => self.aws.ecr_client.list_public_repositories().await?,
-        };
-
-        self.ecr_state.repositories.items = repos
-            .into_iter()
-            .map(|r| EcrRepository {
-                name: r.name,
-                uri: r.uri,
-                created_at: r.created_at,
-                tag_immutability: r.tag_immutability,
-                encryption_type: r.encryption_type,
-            })
-            .collect();
-
-        self.ecr_state
-            .repositories
-            .items
-            .sort_by(|a, b| a.name.cmp(&b.name));
+        let config = self.aws.config.clone();
+        let tab = self.ecr_state.tab;
+        self.ecr_state.repositories.items = crate::ecr::inventory::fetch(config, tab).await?;
+        crate::ecr::inventory::mark_loaded(self);
         Ok(())
     }
 
@@ -4644,38 +4634,12 @@ impl App {
         Ok(())
     }
 
+    /// Inline file-systems read for a finder or bookmark open; the tab-owned
+    /// read stays authoritative for the visible table.
     pub async fn load_efs_file_systems(&mut self) -> anyhow::Result<()> {
-        let file_systems = self.aws.efs_client.list_file_systems().await?;
-        self.efs_state.file_systems.items = file_systems
-            .into_iter()
-            .map(|f| EfsFileSystem {
-                file_system_id: f.file_system_id,
-                file_system_arn: f.file_system_arn,
-                name: f.name,
-                creation_token: f.creation_token,
-                encrypted: f.encrypted,
-                kms_key_id: f.kms_key_id,
-                total_size: f.total_size,
-                size_in_standard: f.size_in_standard,
-                size_in_ia: f.size_in_ia,
-                size_in_archive: f.size_in_archive,
-                provisioned_throughput: f.provisioned_throughput,
-                throughput_mode: f.throughput_mode,
-                life_cycle_state: f.life_cycle_state,
-                number_of_mount_targets: f.number_of_mount_targets,
-                owner_id: f.owner_id,
-                creation_time: f.creation_time,
-                performance_mode: f.performance_mode,
-                availability_zone: f.availability_zone,
-                replication_overwrite_protection: f.replication_overwrite_protection,
-                dns_name: f.dns_name,
-                tags: f.tags,
-                total_size_bytes: f.total_size_bytes,
-                size_in_standard_bytes: f.size_in_standard_bytes,
-                size_in_ia_bytes: f.size_in_ia_bytes,
-                size_in_archive_bytes: f.size_in_archive_bytes,
-            })
-            .collect();
+        let config = self.aws.config.clone();
+        self.efs_state.file_systems.items = crate::efs::inventory::fetch(config).await?;
+        crate::efs::inventory::mark_loaded(self);
         Ok(())
     }
 
@@ -4822,9 +4786,12 @@ impl App {
         Ok(())
     }
 
+    /// Inline file-systems read for a finder or bookmark open; the tab-owned
+    /// read stays authoritative for the visible table.
     pub async fn load_fsx_file_systems(&mut self) -> anyhow::Result<()> {
-        let file_systems = self.aws.fsx_client.list_file_systems().await?;
-        self.fsx_state.file_systems.items = file_systems;
+        let config = self.aws.config.clone();
+        self.fsx_state.file_systems.items = crate::fsx::inventory::fetch(config).await?;
+        crate::fsx::inventory::mark_loaded(self);
         Ok(())
     }
 
@@ -4951,44 +4918,13 @@ impl App {
         Ok(())
     }
 
+    /// Inline stacks read for a finder or bookmark open; the tab-owned read
+    /// stays authoritative for the visible table.
     pub async fn load_cloudformation_stacks(&mut self) -> anyhow::Result<()> {
-        let stacks = self
-            .aws
-            .cloudformation_client
-            .list_stacks(self.cfn_state.view_nested)
-            .await?;
-
-        let mut stacks: Vec<CfnStack> = stacks
-            .into_iter()
-            .map(|s| CfnStack {
-                name: s.name,
-                stack_id: s.stack_id,
-                status: s.status,
-                created_time: s.created_time,
-                updated_time: s.updated_time,
-                deleted_time: s.deleted_time,
-                drift_status: s.drift_status,
-                last_drift_check_time: s.last_drift_check_time,
-                status_reason: s.status_reason,
-                description: s.description,
-                detailed_status: String::new(),
-                root_stack: s.root_stack,
-                parent_stack: s.parent_stack,
-                termination_protection: false,
-                iam_role: String::new(),
-                tags: Vec::new(),
-                stack_policy: String::new(),
-                rollback_monitoring_time: String::new(),
-                rollback_alarms: Vec::new(),
-                notification_arns: Vec::new(),
-            })
-            .collect();
-
-        // Sort by created_time DESC
-        stacks.sort_by(|a, b| b.created_time.cmp(&a.created_time));
-
-        self.cfn_state.table.items = stacks;
-
+        let config = self.aws.config.clone();
+        let nested = self.cfn_state.view_nested;
+        self.cfn_state.table.items = crate::cfn::inventory::fetch(config, nested).await?;
+        crate::cfn::inventory::mark_loaded(self);
         Ok(())
     }
 
@@ -6343,7 +6279,7 @@ mod tests {
 
         // Should be expanded now
         assert!(app.s3_state.expanded_prefixes.contains("parent/child/"));
-        assert!(app.s3_state.buckets.loading); // Should trigger load
+        assert!(app.s3_state.sync_pending); // Should trigger load
     }
 
     #[test]
@@ -6384,7 +6320,7 @@ mod tests {
 
         // Should navigate into the folder
         assert_eq!(app.s3_state.prefix_stack, vec!["parent/child/".to_string()]);
-        assert!(app.s3_state.buckets.loading); // Should trigger load
+        assert!(app.s3_state.sync_pending); // Should trigger load
     }
 
     #[test]
@@ -6397,16 +6333,16 @@ mod tests {
         // Press Esc - should pop from stack
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.prefix_stack, vec!["level1/".to_string()]);
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Press Esc again - should pop to bucket root
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.prefix_stack, Vec::<String>::new());
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Press Esc again - should exit bucket
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.current_bucket, None);
     }
@@ -6478,22 +6414,22 @@ mod tests {
             vec!["parent/".to_string(), "parent/child/".to_string()]
         );
         assert_eq!(app.s3_state.current_bucket, Some("test-bucket".to_string()));
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Now press Esc - should go back to parent
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.prefix_stack, vec!["parent/".to_string()]);
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Press Esc again - should go to bucket root
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.prefix_stack, Vec::<String>::new());
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Press Esc again - should exit bucket
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
         app.handle_action(Action::GoBack);
         assert_eq!(app.s3_state.current_bucket, None);
     }
@@ -8983,6 +8919,83 @@ mod tab_filter_tests {
 }
 
 #[cfg(test)]
+mod leader_from_service_tabs_tests {
+    use super::*;
+    use crate::keymap::handle_key;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use test_helpers::test_app;
+
+    fn press(app: &mut App, code: KeyCode) {
+        let key = KeyEvent::new(code, KeyModifiers::NONE);
+        if let Some(action) = handle_key(key, app.mode) {
+            app.handle_action(action);
+        }
+    }
+
+    fn tab_app(service: Service) -> App {
+        let mut app = test_app();
+        app.aws.connected = true;
+        app.service_selected = true;
+        app.mode = Mode::Normal;
+        app.current_service = service;
+        app.tabs.push(Tab {
+            id: TabId::new(),
+            service,
+            title: service.name().into(),
+            breadcrumb: service.name().into(),
+        });
+        crate::tab_runtime::sync_active(&mut app);
+        app
+    }
+
+    /// Space opens the menu from EVERY service tab, including the five whose
+    /// lists moved to tab-owned reads, and every menu letter then acts.
+    #[test]
+    fn space_leader_works_from_every_service_tab_even_while_its_list_loads() {
+        for service in [
+            Service::S3Buckets,
+            Service::EcrRepositories,
+            Service::EfsFileSystems,
+            Service::FsxFileSystems,
+            Service::CloudFormationStacks,
+            Service::KmsKeys,
+            Service::VpcVpcs,
+        ] {
+            let mut app = tab_app(service);
+            // Queue the tab-owned list read so the leader runs while busy.
+            match service {
+                Service::S3Buckets => crate::s3::inventory::request(&mut app),
+                Service::EcrRepositories => crate::ecr::inventory::request(&mut app),
+                Service::EfsFileSystems => crate::efs::inventory::request(&mut app),
+                Service::FsxFileSystems => crate::fsx::inventory::request(&mut app),
+                Service::CloudFormationStacks => crate::cfn::inventory::request(&mut app),
+                _ => {}
+            }
+
+            press(&mut app, KeyCode::Char(' '));
+            assert_eq!(app.mode, Mode::SpaceMenu, "{service:?} Space opens menu");
+
+            for (letter, mode) in [
+                ('f', Mode::ResourceFinder),
+                ('b', Mode::TabPicker),
+                ('t', Mode::TabPicker),
+                ('k', Mode::BookmarkPicker),
+                ('s', Mode::SessionPicker),
+                ('r', Mode::RegionPicker),
+                ('p', Mode::ProfilePicker),
+                ('o', Mode::ServicePicker),
+                ('h', Mode::HelpModal),
+            ] {
+                app.mode = Mode::SpaceMenu;
+                press(&mut app, KeyCode::Char(letter));
+                assert_eq!(app.mode, mode, "{service:?} leader ␣{letter}");
+                app.mode = Mode::Normal;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod region_latency_tests {
     use super::*;
     use test_helpers::*;
@@ -10016,7 +10029,11 @@ mod region_latency_tests {
 
         app.handle_action(Action::NextDetailTab);
         assert_eq!(app.ecr_state.tab, EcrTab::Public);
-        assert!(app.ecr_state.repositories.loading);
+        assert!(app.ecr_state.repositories.items.is_empty());
+        assert!(matches!(
+            app.ecr_state.load_status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        ));
         assert_eq!(app.ecr_state.repositories.selected, 0);
     }
 
@@ -10069,7 +10086,7 @@ mod region_latency_tests {
             app.ecr_state.current_repository,
             Some("my-repo".to_string())
         );
-        assert!(app.ecr_state.repositories.loading);
+        assert!(app.ecr_state.images.loading);
     }
 
     #[test]
@@ -14938,17 +14955,13 @@ mod sqs_tests {
 
         assert!(app.cfn_state.view_nested, "view_nested must be toggled on");
         assert_eq!(app.cfn_state.table.selected, 0, "selection must reset");
-        // Regression fix: toggling view_nested must clear items and set loading=true
-        // so main.rs triggers a reload with the new include_nested value.
-        // Items stay visible during reload (no flash of empty)
-        assert!(
-            app.cfn_state.table.loading,
-            "loading must be set to trigger reload in main.rs"
-        );
-        assert!(
-            app.cfn_state.table.loading,
-            "loading must be set to trigger reload in main.rs"
-        );
+        // Toggling view_nested queues a fresh tab-owned read for the new
+        // include_nested value; the old rows drop at once, never linger.
+        assert!(app.cfn_state.table.items.is_empty());
+        assert!(matches!(
+            app.cfn_state.load_status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        ));
     }
 
     #[test]
@@ -14990,15 +15003,15 @@ mod sqs_tests {
             !app.cfn_state.view_nested,
             "view_nested must be toggled off"
         );
-        // Items stay visible during reload
+        // The fresh tab-owned read replaces the old rows at once.
         assert!(
-            !app.cfn_state.table.items.is_empty(),
-            "items must stay visible during reload (no flash)"
+            app.cfn_state.table.items.is_empty(),
+            "items must drop for the fresh nested read"
         );
-        assert!(
-            app.cfn_state.table.loading,
-            "loading must be set to trigger reload"
-        );
+        assert!(matches!(
+            app.cfn_state.load_status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        ));
     }
 
     #[test]
@@ -17574,7 +17587,7 @@ mod lambda_version_tab_tests {
         );
         // Bucket must be marked as expanded and loading
         assert!(app.s3_state.expanded_prefixes.contains("bucket0"));
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
     }
 
     #[test]
@@ -17650,7 +17663,7 @@ mod lambda_version_tab_tests {
             app.s3_state.selected_row, 0,
             "Must stay on bucket0 while loading"
         );
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
 
         // Step 2: simulate preview arriving (like main.rs does after load_bucket_preview)
         app.s3_state.bucket_preview.insert(
@@ -17663,7 +17676,7 @@ mod lambda_version_tab_tests {
                 storage_class: String::new(),
             }],
         );
-        app.s3_state.buckets.loading = false;
+        app.s3_state.sync_pending = false;
 
         // Step 3: right arrow again — must go to first child (row 1), not sibling (row 2)
         app.handle_action(Action::NextPane);
@@ -17707,7 +17720,7 @@ mod lambda_version_tab_tests {
             "Selection must stay on bucket0 until children are visible"
         );
         assert!(app.s3_state.expanded_prefixes.contains("bucket0"));
-        assert!(app.s3_state.buckets.loading);
+        assert!(app.s3_state.sync_pending);
     }
 
     #[test]

@@ -160,10 +160,11 @@ Enter opens the tab and Esc closes the picker.
 
 ## Loading and freshness
 
-Tab-owned asynchronous loading currently covers ACM, EC2 (instances, load
-balancers, target groups and their details), EventBridge, KMS, RDS, Secrets
-Manager, SNS, Step Functions, VPC, the SQS queues, Lambda functions and DynamoDB
-tables lists, and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
+Tab-owned asynchronous loading currently covers ACM, CloudFormation
+stacks, EC2 (instances, load balancers, target groups and their details), ECR
+repositories, EFS and FSx file systems, EventBridge, KMS, RDS, S3 buckets,
+Secrets Manager, SNS, Step Functions, VPC, the SQS queues, Lambda functions
+and DynamoDB tables lists, and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
 after a successful read (including an empty result), or `!` after a failure.
 Indicators use the same text color as their tab label, including on the selected
 background. Filters and table headers remain visible while loading; the table body

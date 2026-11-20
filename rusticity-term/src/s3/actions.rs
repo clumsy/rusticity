@@ -58,7 +58,7 @@ pub fn page_up_filter_input(app: &mut App) {
 pub fn go_back(app: &mut App) {
     if !app.s3_state.prefix_stack.is_empty() {
         app.s3_state.prefix_stack.pop();
-        app.s3_state.buckets.loading = true;
+        app.s3_state.sync_pending = true;
     } else {
         app.s3_state.current_bucket = None;
         app.s3_state.objects.clear();
@@ -416,7 +416,7 @@ pub fn expand_row(app: &mut App) {
                 if !app.s3_state.expanded_prefixes.contains(&obj.key) {
                     app.s3_state.expanded_prefixes.insert(obj.key.clone());
                     if !app.s3_state.prefix_preview.contains_key(&obj.key) {
-                        app.s3_state.buckets.loading = true;
+                        app.s3_state.sync_pending = true;
                     }
                 }
                 if app.s3_state.expanded_prefixes.contains(&obj.key) {
@@ -443,7 +443,7 @@ pub fn expand_row(app: &mut App) {
                     if !app.s3_state.bucket_preview.contains_key(&bucket.name)
                         && !app.s3_state.bucket_errors.contains_key(&bucket.name)
                     {
-                        app.s3_state.buckets.loading = true;
+                        app.s3_state.sync_pending = true;
                     }
                 }
                 if app.s3_state.expanded_prefixes.contains(&bucket.name) {
@@ -488,7 +488,7 @@ pub fn expand_row(app: &mut App) {
                         &mut app.s3_state.expanded_prefixes,
                         &app.s3_state.prefix_preview,
                         &mut found,
-                        &mut app.s3_state.buckets.loading,
+                        &mut app.s3_state.sync_pending,
                         &mut app.s3_state.selected_row,
                     );
                     if found || row_idx > app.s3_state.selected_row {
@@ -524,7 +524,7 @@ pub fn select_item(app: &mut App) {
             if row_idx == app.s3_state.selected_row {
                 app.s3_state.current_bucket = Some(bucket.name.clone());
                 app.s3_state.prefix_stack.clear();
-                app.s3_state.buckets.loading = true;
+                app.s3_state.sync_pending = true;
                 return;
             }
             row_idx += 1;
@@ -542,7 +542,7 @@ pub fn select_item(app: &mut App) {
                             if obj.is_prefix {
                                 app.s3_state.current_bucket = Some(bucket.name.clone());
                                 app.s3_state.prefix_stack = vec![obj.key.clone()];
-                                app.s3_state.buckets.loading = true;
+                                app.s3_state.sync_pending = true;
                             }
                             return;
                         }
@@ -557,7 +557,7 @@ pub fn select_item(app: &mut App) {
                                             app.s3_state.current_bucket = Some(bucket.name.clone());
                                             app.s3_state.prefix_stack =
                                                 vec![obj.key.clone(), nested_obj.key.clone()];
-                                            app.s3_state.buckets.loading = true;
+                                            app.s3_state.sync_pending = true;
                                         }
                                         return;
                                     }
@@ -577,7 +577,7 @@ pub fn select_item(app: &mut App) {
         if let Some(object) = crate::s3::object::selected(app).cloned() {
             if object.is_prefix {
                 app.s3_state.prefix_stack.push(object.key);
-                app.s3_state.buckets.loading = true;
+                app.s3_state.sync_pending = true;
             }
         }
     }
@@ -755,7 +755,7 @@ fn expand_buckets(app: &mut App) {
                 }
             } else {
                 app.s3_state.expanded_prefixes.insert(bucket.name.clone());
-                app.s3_state.buckets.loading = true;
+                app.s3_state.sync_pending = true;
                 if let Some(preview) = app.s3_state.bucket_preview.get(&bucket.name) {
                     if !preview.is_empty() {
                         app.s3_state.selected_row = row_idx + 1;
@@ -781,7 +781,7 @@ fn expand_buckets(app: &mut App) {
                 ) {
                     app.s3_state.selected_row = new_row;
                     if loading {
-                        app.s3_state.buckets.loading = true;
+                        app.s3_state.sync_pending = true;
                     }
                     adjust_bucket_scroll(app);
                     return;
@@ -803,7 +803,7 @@ fn expand_objects(app: &mut App) {
     ) {
         app.s3_state.selected_object = new_row;
         if loading {
-            app.s3_state.buckets.loading = true;
+            app.s3_state.sync_pending = true;
         }
     }
 }

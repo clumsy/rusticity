@@ -291,7 +291,9 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
         }
         ResourceKind::Bucket => {
             app.s3_state = ui::s3::State::new();
-            ui::s3::load_s3_buckets(app).await?;
+            let config = app.aws.config.clone();
+            app.s3_state.buckets.items = crate::s3::inventory::fetch(config).await?;
+            crate::s3::inventory::mark_loaded(app);
             focus!(app.s3_state.buckets, name);
             app.s3_state.current_bucket = Some(resource.id.clone());
             if resource.region != "global" && !resource.region.is_empty() {

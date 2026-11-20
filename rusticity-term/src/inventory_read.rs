@@ -17,6 +17,16 @@ pub(crate) struct OwnedInventory<T> {
     error: Option<String>,
 }
 
+impl<T> OwnedInventory<T> {
+    /// A queued or running read; Esc may cancel it.
+    pub(crate) fn is_busy(&self) -> bool {
+        matches!(
+            self.read.status(),
+            crate::async_read::ReadStatus::Loading { .. }
+        )
+    }
+}
+
 impl<T> Default for OwnedInventory<T> {
     fn default() -> Self {
         Self {

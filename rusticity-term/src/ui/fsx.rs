@@ -97,6 +97,7 @@ pub struct State {
     /// Chosen in Preferences; see `crate::sort::Choice`.
     pub sort: crate::sort::Choice,
     pub file_systems: TableState<FsxFileSystem>,
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<FsxFileSystem>,
     pub input_focus: InputFocus,
     pub current_file_system: Option<String>,
     pub detail_tab: DetailTab,
@@ -113,10 +114,15 @@ impl Default for State {
 }
 
 impl State {
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.file_systems)
+    }
+
     pub fn new() -> Self {
         Self {
             sort: Default::default(),
             file_systems: TableState::new(),
+            inventory: Default::default(),
             input_focus: InputFocus::Filter,
             current_file_system: None,
             detail_tab: DetailTab::NetworkSecurity,
@@ -667,7 +673,17 @@ pub fn render_file_systems_list(frame: &mut Frame, app: &App, area: Rect) {
         is_active: app.mode != crate::keymap::Mode::FilterInput,
     };
 
-    render_table(frame, config);
+    crate::ui::loading::render_table(
+        frame,
+        config,
+        app.fsx_state.load_status(),
+        "File systems",
+        app.fsx_state.inventory.error(),
+        crate::ui::loading::EmptyState {
+            no_items: "No file systems in this Region.",
+            has_unfiltered_items: !app.fsx_state.file_systems.items.is_empty(),
+        },
+    );
 }
 
 /// Header of the order in effect: the chosen column, else the table default.

@@ -1,4 +1,4 @@
-use crate::app::{App, S3Bucket as AppS3Bucket, S3Object as AppS3Object};
+use crate::app::{App, S3Object as AppS3Object};
 use crate::common::{
     filter_by_field, format_bytes, format_iso_timestamp, render_scrollbar, CyclicEnum, InputFocus,
     UTC_TIMESTAMP_WIDTH,
@@ -17,6 +17,10 @@ use std::collections::{HashMap, HashSet};
 
 pub struct State {
     pub buckets: TableState<S3Bucket>,
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<S3Bucket>,
+    /// Queues the legacy inline sync pass for object previews and bucket
+    /// contents after the list read (and its rows) land.
+    pub sync_pending: bool,
     pub bucket_type: BucketType,
     pub selected_row: usize,
     pub bucket_scroll_offset: usize,
@@ -46,9 +50,15 @@ impl Default for State {
 }
 
 impl State {
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.buckets)
+    }
+
     pub fn new() -> Self {
         Self {
             buckets: TableState::new(),
+            inventory: Default::default(),
+            sync_pending: false,
             bucket_type: BucketType::GeneralPurpose,
             selected_row: 0,
             bucket_scroll_offset: 0,
@@ -816,6 +826,36 @@ fn render_bucket_list(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(table, chunks[2]);
 
+    // The tab-owned list read owns the body: no stale rows while loading or
+    // failed, and a distinct message for a successful empty account list.
+    {
+        let status = app.s3_state.load_status();
+        let body = Rect {
+            x: chunks[2].x + 1,
+            y: chunks[2].y + 2,
+            width: chunks[2].width.saturating_sub(2),
+            height: chunks[2].height.saturating_sub(3),
+        };
+        if body.width > 0 && body.height > 0 {
+            if status == crate::async_read::ReadStatus::Ready
+                && app.s3_state.buckets.items.is_empty()
+            {
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new("No buckets in this account."),
+                    body,
+                );
+            } else if status != crate::async_read::ReadStatus::Ready {
+                crate::ui::loading::render(
+                    frame,
+                    body,
+                    status,
+                    "Buckets",
+                    app.s3_state.inventory.error(),
+                );
+            }
+        }
+    }
+
     // Render scrollbar if content exceeds visible area
     let total_rows = app.s3_state.calculate_total_bucket_rows();
     let visible_rows = chunks[2].height.saturating_sub(3) as usize; // Subtract borders and header
@@ -1336,18 +1376,6 @@ fn render_bucket_properties(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 // S3-specific helper functions
-pub async fn load_s3_buckets(app: &mut App) -> anyhow::Result<()> {
-    let buckets = app.aws.s3_client.list_buckets().await?;
-    app.s3_state.buckets.items = buckets
-        .into_iter()
-        .map(|(name, region, date)| AppS3Bucket {
-            name,
-            region,
-            creation_date: date,
-        })
-        .collect();
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

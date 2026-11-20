@@ -10,7 +10,7 @@ pub fn init(i18n: &mut HashMap<String, String>) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FileSystem {
     pub file_system_id: String,
     pub file_system_arn: String,

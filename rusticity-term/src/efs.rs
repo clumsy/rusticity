@@ -1,6 +1,7 @@
 pub mod access_point;
 pub mod actions;
 pub mod fs;
+pub mod inventory;
 pub mod mount_target;
 
 use crate::console::{component, ConsoleUrl};

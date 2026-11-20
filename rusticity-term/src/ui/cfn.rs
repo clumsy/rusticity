@@ -55,9 +55,12 @@ pub struct State {
     /// Chosen in Preferences; see `crate::sort::Choice`.
     pub sort: crate::sort::Choice,
     pub table: TableState<CfnStack>,
+    pub(crate) inventory: crate::inventory_read::OwnedInventory<CfnStack>,
     pub input_focus: InputFocus,
     pub status_filter: StatusFilter,
     pub view_nested: bool,
+    /// Stack detail tabs are still inline loads; this queues them in main.
+    pub detail_loading: bool,
     pub current_stack: Option<String>,
     pub detail_tab: DetailTab,
     pub overview_scroll: u16,
@@ -90,13 +93,19 @@ impl Default for State {
 }
 
 impl State {
+    pub(crate) fn load_status(&self) -> crate::async_read::ReadStatus {
+        self.inventory.status(&self.table)
+    }
+
     pub fn new() -> Self {
         Self {
             sort: Default::default(),
             table: TableState::new(),
+            inventory: Default::default(),
             input_focus: InputFocus::Filter,
             status_filter: StatusFilter::All,
             view_nested: false,
+            detail_loading: false,
             current_stack: None,
             detail_tab: DetailTab::StackInfo,
             overview_scroll: 0,
@@ -582,6 +591,35 @@ pub fn render_cloudformation_stack_list(frame: &mut Frame, app: &App, area: Rect
     };
 
     render_table(frame, config);
+
+    // The list read owns the rows; overlays mirror the shared loading table.
+    {
+        let status = app.cfn_state.load_status();
+        let body = Rect {
+            x: chunks[1].x + 1,
+            y: chunks[1].y + 2,
+            width: chunks[1].width.saturating_sub(2),
+            height: chunks[1].height.saturating_sub(3),
+        };
+        if body.width > 0 && body.height > 0 {
+            if status == crate::async_read::ReadStatus::Ready
+                && app.cfn_state.table.items.is_empty()
+            {
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new("No stacks in this Region."),
+                    body,
+                );
+            } else if status != crate::async_read::ReadStatus::Ready {
+                crate::ui::loading::render(
+                    frame,
+                    body,
+                    status,
+                    "Stacks",
+                    app.cfn_state.inventory.error(),
+                );
+            }
+        }
+    }
 
     // Render dropdown for StatusFilter when focused (after table so it appears on top)
     if app.mode == Mode::FilterInput && app.cfn_state.input_focus == STATUS_FILTER {

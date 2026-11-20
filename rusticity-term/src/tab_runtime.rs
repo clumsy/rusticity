@@ -601,6 +601,11 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
         Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
+        Service::S3Buckets => crate::s3::inventory::request(app),
+        Service::EcrRepositories => crate::ecr::inventory::request(app),
+        Service::EfsFileSystems => crate::efs::inventory::request(app),
+        Service::FsxFileSystems => crate::fsx::inventory::request(app),
+        Service::CloudFormationStacks => crate::cfn::inventory::request(app),
         _ => {}
     }
 }
@@ -701,6 +706,11 @@ fn is_managed(service: Service) -> bool {
             | Service::SqsQueues
             | Service::LambdaFunctions
             | Service::DynamoDbTables
+            | Service::S3Buckets
+            | Service::EcrRepositories
+            | Service::EfsFileSystems
+            | Service::FsxFileSystems
+            | Service::CloudFormationStacks
     )
 }
 
@@ -748,6 +758,11 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::SqsQueues => app.sqs_state.load_status(),
         Service::LambdaFunctions => app.lambda_state.load_status(),
         Service::DynamoDbTables => app.dynamodb_state.load_status(),
+        Service::S3Buckets => app.s3_state.load_status(),
+        Service::EcrRepositories => app.ecr_state.load_status(),
+        Service::EfsFileSystems => app.efs_state.load_status(),
+        Service::FsxFileSystems => app.fsx_state.load_status(),
+        Service::CloudFormationStacks => app.cfn_state.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -770,6 +785,11 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::SqsQueues(s, _) => s.load_status(),
         Snapshot::LambdaFunctions(s, _) => s.load_status(),
         Snapshot::DynamoDbTables(s, _) => s.load_status(),
+        Snapshot::S3Buckets(s, _) => s.load_status(),
+        Snapshot::EcrRepositories(s, _) => s.load_status(),
+        Snapshot::EfsFileSystems(s, _) => s.load_status(),
+        Snapshot::FsxFileSystems(s, _) => s.load_status(),
+        Snapshot::CloudFormationStacks(s, _) => s.load_status(),
         _ => ReadStatus::Idle,
     }
 }
@@ -806,6 +826,11 @@ pub fn handle_action(app: &mut App, action: &crate::keymap::Action) -> bool {
         Service::SqsQueues => crate::sqs::inventory::handle_action(app, action),
         Service::LambdaFunctions => crate::lambda::inventory::handle_action(app, action),
         Service::DynamoDbTables => crate::dynamodb::inventory::handle_action(app, action),
+        Service::S3Buckets => crate::s3::inventory::handle_action(app, action),
+        Service::EcrRepositories => crate::ecr::inventory::handle_action(app, action),
+        Service::EfsFileSystems => crate::efs::inventory::handle_action(app, action),
+        Service::FsxFileSystems => crate::fsx::inventory::handle_action(app, action),
+        Service::CloudFormationStacks => crate::cfn::inventory::handle_action(app, action),
         _ => false,
     }
 }
@@ -963,6 +988,11 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         Service::SqsQueues => crate::sqs::inventory::poll(app).await,
         Service::LambdaFunctions => crate::lambda::inventory::poll(app).await,
         Service::DynamoDbTables => crate::dynamodb::inventory::poll(app).await,
+        Service::S3Buckets => crate::s3::inventory::poll(app).await,
+        Service::EcrRepositories => crate::ecr::inventory::poll(app).await,
+        Service::EfsFileSystems => crate::efs::inventory::poll(app).await,
+        Service::FsxFileSystems => crate::fsx::inventory::poll(app).await,
+        Service::CloudFormationStacks => crate::cfn::inventory::poll(app).await,
         _ => false,
     }
 }

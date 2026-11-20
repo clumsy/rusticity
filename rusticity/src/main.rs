@@ -81,20 +81,19 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.mode == Mode::ResourceFinder
             || app.log_groups_state.loading
             || app.kms_state.keys.loading
-            || app.ecr_state.repositories.loading
-            || app.cfn_state.table.loading
+            || app.ecr_state.images.loading
+            || app.cfn_state.detail_loading
+            || app.s3_state.sync_pending
             || app.lambda_state.table.loading
             || app.lambda_application_state.table.loading
             || app.alarms_state.table.loading
             || app.cloudtrail_state.table.loading
             || app.apig_state.apis.loading
-            || app.efs_state.file_systems.loading
             || app.sns_state.topics.loading
             || app.kms_state.detail.busy()
             || app.sns_state.subscriptions.busy()
             || app.stepfunctions_state.machines.loading
             || app.stepfunctions_state.executions.busy()
-            || app.fsx_state.file_systems.loading
             || app.fsx_state.backups_loading
             || app.sqs_state.queues.loading
             || app.dynamodb_state.tables.loading
@@ -307,19 +306,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.log_groups_state.loading_message.clear();
                         }
 
-                        // Load S3 buckets when service is switched to and empty
-                        if app.service_selected && app.current_service == Service::S3Buckets
-                            && (!prev_service_selected || opened_new_tab || prev_service != Service::S3Buckets)
-                            && app.s3_state.buckets.items.is_empty() {
-                            app.s3_state.buckets.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = rusticity_term::ui::s3::load_s3_buckets(&mut app).await {
-                                app.error_message = Some(format!("Failed to load S3 buckets: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.s3_state.buckets.loading = false;
-                        }
+                        // S3 buckets load as a tab-owned background read
+                        // (tab_runtime); the legacy inline sync pass below still
+                        // fills object previews and bucket contents.
 
                         // SQS queues load as a tab-owned background read (tab_runtime).
 
@@ -671,24 +660,12 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.alarms_state.metrics_loading = false;
                         }
 
-                        // Load ECR repositories when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::EcrRepositories
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::EcrRepositories)
-                                || app.ecr_state.repositories.loading)
-                            && app.ecr_state.current_repository.is_none() {
-                            app.ecr_state.repositories.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_ecr_repositories().await {
-                                app.error_message = Some(format!("Failed to load ECR repositories: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.ecr_state.repositories.loading = false;
-                        }
+                        // ECR repositories load as a tab-owned background read
+                        // (tab_runtime).
 
                         // Load ECR images when drilling into repository
                         if app.current_service == Service::EcrRepositories
-                            && app.ecr_state.repositories.loading
+                            && app.ecr_state.images.loading
                             && app.ecr_state.current_repository.is_some() {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_ecr_images().await {
@@ -696,25 +673,13 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
-                            app.ecr_state.repositories.loading = false;
+                            app.ecr_state.images.loading = false;
                         }
 
                         // KMS inventory reads are queued and polled by tab_runtime.
 
-                        // Load EFS file systems when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::EfsFileSystems
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::EfsFileSystems)
-                                || app.efs_state.file_systems.loading) {
-                            app.efs_state.file_systems.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_efs_file_systems().await {
-                                app.error_message = Some(format!("Failed to load EFS file systems: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.efs_state.file_systems.loading = false;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // EFS file systems load as a tab-owned background read
+                        // (tab_runtime).
 
                         // VPCs load as a tab-owned background read (tab_runtime).
 
@@ -830,20 +795,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.dynamodb_state.settings_loading = false;
                         }
 
-                        // Load FSx file systems when service is switched to, empty, or loading
-                        if app.service_selected && app.current_service == Service::FsxFileSystems
-                            && ((!prev_service_selected || opened_new_tab || prev_service != Service::FsxFileSystems)
-                                || app.fsx_state.file_systems.loading) {
-                            app.fsx_state.file_systems.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_fsx_file_systems().await {
-                                app.error_message = Some(format!("Failed to load FSx file systems: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.fsx_state.file_systems.loading = false;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                        }
+                        // FSx file systems load as a tab-owned background read
+                        // (tab_runtime).
 
                         // Load FSx backups when viewing the Backups detail tab
                         if app.current_service == Service::FsxFileSystems
@@ -893,25 +846,14 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             app.lambda_application_state.table.loading = false;
                         }
 
-                        // Load CloudFormation stacks when service is switched to, empty, or explicitly reloading (e.g. view_nested toggled)
-                        if app.service_selected && app.current_service == Service::CloudFormationStacks
-                            && (app.cfn_state.table.loading
-                                || ((!prev_service_selected || opened_new_tab || prev_service != Service::CloudFormationStacks)
-                                    && app.cfn_state.table.items.is_empty())) {
-                            app.cfn_state.table.loading = true;
-                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
-                            if let Err(e) = app.load_cloudformation_stacks().await {
-                                app.error_message = Some(format!("Failed to load CloudFormation stacks: {:#}", e));
-                                app.error_scroll = 0;
-                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
-                            }
-                            app.cfn_state.table.loading = false;
-                        }
+                        // CloudFormation stacks load as a tab-owned background read
+                        // (tab_runtime). Stack detail tabs keep inline loaders,
+                        // queued by `detail_loading` when a stack is entered.
 
                         // Load CFN template when stack is selected
                         if app.service_selected && app.current_service == Service::CloudFormationStacks
                             && app.cfn_state.current_stack.is_some()
-                            && app.cfn_state.table.loading {
+                            && app.cfn_state.detail_loading {
                             let stack_name = app.cfn_state.current_stack.clone().unwrap();
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
                             if let Err(e) = app.load_cfn_template(&stack_name).await {
@@ -944,7 +886,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 app.error_scroll = 0;
                                 app.mode = rusticity_term::keymap::Mode::ErrorModal;
                             }
-                            app.cfn_state.table.loading = false;
+                            app.cfn_state.detail_loading = false;
                         }
 
                         // Load IAM users when service is switched to and empty
@@ -1149,7 +1091,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         }
 
                         // Load S3 objects when drilling into bucket/prefix
-                        if app.current_service == Service::S3Buckets && app.s3_state.buckets.loading {
+                        if app.current_service == Service::S3Buckets && app.s3_state.sync_pending {
                             terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
 
                             // Check if we're loading preview or full objects
@@ -1259,7 +1201,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                     }
                                 }
                             }
-                            app.s3_state.buckets.loading = false;
+                            app.s3_state.sync_pending = false;
                         }
 
                         // Execute Insights query if loading was triggered

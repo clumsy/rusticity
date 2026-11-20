@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod inventory;
 pub mod object;
 
 use crate::common::translate_column;

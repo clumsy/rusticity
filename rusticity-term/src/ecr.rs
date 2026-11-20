@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod image;
+pub mod inventory;
 pub mod repo;
 pub mod scan;
 use crate::console::{component, ConsoleUrl};

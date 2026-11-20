@@ -51,7 +51,7 @@ fn object_enter_previews_the_filtered_row_and_folder_enter_still_navigates() {
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert!(app.s3_state.object_view.pending.is_none());
     assert_eq!(app.s3_state.prefix_stack, ["folder/"]);
-    assert!(app.s3_state.buckets.loading);
+    assert!(app.s3_state.sync_pending);
 }
 
 #[test]

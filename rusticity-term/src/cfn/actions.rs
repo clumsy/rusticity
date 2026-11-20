@@ -236,9 +236,9 @@ pub fn toggle_filter_checkbox(app: &mut App) {
             app.cfn_state.view_nested = !app.cfn_state.view_nested;
             // Clear expanded nested stack state
             app.cfn_state.expanded_items.clear();
-            // Set loading=true to trigger a reload with the new nested setting.
+            // Reload the list for the new nested setting as a tab-owned read.
             app.cfn_state.table.reset();
-            app.cfn_state.table.loading = true;
+            crate::cfn::inventory::request(app);
         }
         _ => {}
     }
@@ -615,7 +615,7 @@ pub fn select_item(app: &mut App) {
             app.cfn_state.current_stack = Some(stack_name);
             app.cfn_state.tags.items = tags;
             app.cfn_state.tags.reset();
-            app.cfn_state.table.loading = true;
+            app.cfn_state.detail_loading = true;
             app.update_current_tab_breadcrumb();
         }
     }

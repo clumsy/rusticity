@@ -153,10 +153,12 @@ Region. Once tabs are in more than one Region, the tab bar shows each Region
 after its tab. Sessions save the Region of every tab.
 
 `Space`, then `b` or `t`, opens the tab picker, which lists every tab with its
-Region. The list has focus first. Typing, or `i`, moves focus to the filter,
-which keeps tabs whose name or Region contains every typed word in any case
-(`ec2 west`). Enter or Esc in the filter returns to the list; on the list,
-Enter opens the tab and Esc closes the picker.
+Region. Every popup picker (service, tab, Region, profile and session) shares
+one focus model: the list has focus first, typing or `i` moves focus to the
+filter, Enter or Esc in the filter returns to the list, arrows and Enter act
+only on the list, and the filter keeps rows whose text holds every typed word
+in any case (`ec2 west`, `cloudwatch logs`). In the tab picker, Enter opens the
+tab and Esc closes the picker.
 
 ## Loading and freshness
 

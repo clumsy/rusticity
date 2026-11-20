@@ -1074,7 +1074,11 @@ fn render_service_picker(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("█", Style::default().fg(Color::Green)),
         ]
     } else {
-        vec![Span::raw(&app.service_picker.filter)]
+        crate::picker::filter_line(
+            &app.service_picker.filter,
+            false,
+            Some("Type to filter services..."),
+        )
     };
     let active_color = Color::Green;
     let inactive_color = Color::White;
@@ -1130,31 +1134,17 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    // Filter input; only one of the filter and the list is active, as in
-    // the service picker.
-    let filter_text = if app.tab_filter_active {
-        vec![
-            Span::raw(&app.tab_filter),
-            Span::styled("█", Style::default().fg(Color::Green)),
-        ]
-    } else if app.tab_filter.is_empty() {
-        vec![Span::styled(
-            "Type to filter tabs by name or Region...",
-            Style::default().fg(Color::DarkGray),
-        )]
-    } else {
-        vec![Span::raw(&app.tab_filter)]
-    };
+    let filter_text = crate::picker::filter_line(
+        &app.tab_filter,
+        app.tab_filter_active,
+        Some("Type to filter tabs by name or Region..."),
+    );
     let filter = Paragraph::new(Line::from(filter_text)).block(
         Block::default()
             .title(SEARCH_ICON)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if app.tab_filter_active {
-                Color::Green
-            } else {
-                Color::White
-            })),
+            .border_style(crate::picker::filter_border(app.tab_filter_active)),
     );
     frame.render_widget(Clear, main_chunks[0]);
     frame.render_widget(filter, main_chunks[0]);
@@ -1198,11 +1188,7 @@ fn render_tab_picker(frame: &mut Frame, app: &App, area: Rect) {
                 )))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(if app.tab_filter_active {
-                    Style::default().fg(Color::White)
-                } else {
-                    active_border()
-                }),
+                .border_style(crate::picker::list_border(app.tab_filter_active)),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("► ");
@@ -1436,14 +1422,8 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
         .split(popup_area);
 
     // Filter input at top
-    let filter_text = if app.region_filter_active {
-        vec![
-            Span::from(&app.region_filter),
-            Span::styled("█", Style::default().fg(Color::Green)),
-        ]
-    } else {
-        vec![Span::from(&app.region_filter)]
-    };
+    let filter_text =
+        crate::picker::filter_line(&app.region_filter, app.region_filter_active, None);
     let filter = filter_area(filter_text, app.region_filter_active);
 
     // Filtered list below
@@ -1471,11 +1451,7 @@ fn render_region_selector(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_type(BorderType::Rounded)
-                .border_style(if !app.region_filter_active {
-                    active_border()
-                } else {
-                    Style::default()
-                }),
+                .border_style(crate::picker::list_border(app.region_filter_active)),
         )
         .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");

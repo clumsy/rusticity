@@ -1009,52 +1009,40 @@ impl App {
             | Action::NextTableFocus
             | Action::PrevTableFocus => {}
             Action::EnterFilterMode => match self.mode {
-                Mode::ServicePicker => self.service_picker.filter_active = true,
-                Mode::RegionPicker => self.region_filter_active = true,
-                Mode::SessionPicker => self.session_filter_active = true,
-                Mode::ProfilePicker => self.profile_filter_active = true,
-                Mode::TabPicker => self.tab_filter_active = true,
+                Mode::ServicePicker => crate::picker::focus(&mut self.service_picker.filter_active),
+                Mode::RegionPicker => crate::picker::focus(&mut self.region_filter_active),
+                Mode::SessionPicker => crate::picker::focus(&mut self.session_filter_active),
+                Mode::ProfilePicker => crate::picker::focus(&mut self.profile_filter_active),
+                Mode::TabPicker => crate::picker::focus(&mut self.tab_filter_active),
                 _ => {}
             },
-            Action::ExitFilterMode => match self.mode {
-                Mode::ServicePicker => {
-                    if self.service_picker.filter_active {
-                        self.service_picker.filter_active = false;
-                    } else {
-                        self.mode = Mode::Normal;
+            Action::ExitFilterMode => {
+                let leave_filter = match self.mode {
+                    Mode::ServicePicker => {
+                        crate::picker::exit_filter(&mut self.service_picker.filter_active)
                     }
-                }
-                Mode::TabPicker => {
-                    if self.tab_filter_active {
-                        self.tab_filter_active = false;
-                    } else {
-                        self.tab_filter.clear();
-                        self.mode = Mode::Normal;
+                    Mode::RegionPicker => {
+                        crate::picker::exit_filter(&mut self.region_filter_active)
                     }
-                }
-                Mode::RegionPicker => {
-                    if self.region_filter_active {
-                        self.region_filter_active = false;
-                    } else {
-                        self.mode = Mode::Normal;
+                    Mode::SessionPicker => {
+                        crate::picker::exit_filter(&mut self.session_filter_active)
                     }
-                }
-                Mode::SessionPicker => {
-                    if self.session_filter_active {
-                        self.session_filter_active = false;
-                    } else {
-                        self.mode = Mode::Normal;
+                    Mode::ProfilePicker => {
+                        crate::picker::exit_filter(&mut self.profile_filter_active)
                     }
-                }
-                Mode::ProfilePicker => {
-                    if self.profile_filter_active {
-                        self.profile_filter_active = false;
-                    } else {
-                        self.mode = Mode::Normal;
+                    Mode::TabPicker => {
+                        let left = crate::picker::exit_filter(&mut self.tab_filter_active);
+                        if !left {
+                            self.tab_filter.clear();
+                        }
+                        left
                     }
+                    _ => false,
+                };
+                if !leave_filter {
+                    self.mode = Mode::Normal;
                 }
-                _ => {}
-            },
+            }
             Action::Quit => {
                 self.mode = Mode::QuitConfirm;
             }
@@ -1093,13 +1081,21 @@ impl App {
                 self.service_picker.selected = 0;
             }
             Action::NextItem => {
-                // Only navigate when filter is not active
+                // Only navigate when the filter lacks focus, in every picker.
                 let should_navigate = match self.mode {
-                    Mode::ServicePicker => !self.service_picker.filter_active,
-                    Mode::RegionPicker => !self.region_filter_active,
-                    Mode::SessionPicker => !self.session_filter_active,
-                    Mode::ProfilePicker => !self.profile_filter_active,
-                    Mode::TabPicker => !self.tab_filter_active,
+                    Mode::ServicePicker => crate::picker::can_navigate(
+                        self.service_picker.filter_active,
+                    ),
+                    Mode::RegionPicker => {
+                        crate::picker::can_navigate(self.region_filter_active)
+                    }
+                    Mode::SessionPicker => {
+                        crate::picker::can_navigate(self.session_filter_active)
+                    }
+                    Mode::ProfilePicker => {
+                        crate::picker::can_navigate(self.profile_filter_active)
+                    }
+                    Mode::TabPicker => crate::picker::can_navigate(self.tab_filter_active),
                     _ => true,
                 };
                 if should_navigate {
@@ -1107,13 +1103,21 @@ impl App {
                 }
             }
             Action::PrevItem => {
-                // Only navigate when filter is not active
+                // Only navigate when the filter lacks focus, in every picker.
                 let should_navigate = match self.mode {
-                    Mode::ServicePicker => !self.service_picker.filter_active,
-                    Mode::RegionPicker => !self.region_filter_active,
-                    Mode::SessionPicker => !self.session_filter_active,
-                    Mode::ProfilePicker => !self.profile_filter_active,
-                    Mode::TabPicker => !self.tab_filter_active,
+                    Mode::ServicePicker => crate::picker::can_navigate(
+                        self.service_picker.filter_active,
+                    ),
+                    Mode::RegionPicker => {
+                        crate::picker::can_navigate(self.region_filter_active)
+                    }
+                    Mode::SessionPicker => {
+                        crate::picker::can_navigate(self.session_filter_active)
+                    }
+                    Mode::ProfilePicker => {
+                        crate::picker::can_navigate(self.profile_filter_active)
+                    }
+                    Mode::TabPicker => crate::picker::can_navigate(self.tab_filter_active),
                     _ => true,
                 };
                 if should_navigate {
@@ -1326,46 +1330,57 @@ impl App {
             }
             Action::FilterInput(c) => {
                 if self.mode == Mode::TabPicker {
-                    // On the list, `i` moves to the filter and any other
-                    // character starts it, as in the service picker.
-                    if self.tab_filter_active || c != 'i' {
-                        self.tab_filter.push(c);
-                        self.tab_picker_selected = 0;
-                    }
-                    self.tab_filter_active = true;
-                } else if self.mode == Mode::ServicePicker && self.service_picker.filter_active {
-                    self.service_picker.filter.push(c);
-                    self.service_picker.selected = 0;
-                } else if self.mode == Mode::ServicePicker && c == 'q' {
-                    self.mode = Mode::QuitConfirm;
-                } else if self.mode == Mode::ServicePicker && c == 'i' {
-                    self.service_picker.filter_active = true;
+                    crate::picker::typed(
+                        &mut self.tab_filter,
+                        &mut self.tab_filter_active,
+                        &mut self.tab_picker_selected,
+                        c,
+                    );
                 } else if self.mode == Mode::ServicePicker {
-                    // Any other char auto-activates filter and types it
-                    self.service_picker.filter_active = true;
-                    self.service_picker.filter.push(c);
-                    self.service_picker.selected = 0;
-                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
-                    self.region_filter.push(c);
-                    self.region_picker_selected = 0;
-                } else if self.mode == Mode::ProfilePicker && self.profile_filter_active {
-                    self.profile_filter.push(c);
-                    self.profile_picker_selected = 0;
-                } else if self.mode == Mode::SessionPicker && self.session_filter_active {
-                    self.session_filter.push(c);
-                    self.session_picker_selected = 0;
-                } else if self.mode == Mode::RegionPicker {
-                    // The list has focus: `i` starts the filter, `j`/`k` move.
-                    match c {
-                        'i' => self.region_filter_active = true,
-                        'j' => self.next_item(),
-                        'k' => self.prev_item(),
-                        _ => {}
+                    if !self.service_picker.filter_active && c == 'q' {
+                        self.mode = Mode::QuitConfirm;
+                    } else {
+                        crate::picker::typed(
+                            &mut self.service_picker.filter,
+                            &mut self.service_picker.filter_active,
+                            &mut self.service_picker.selected,
+                            c,
+                        );
                     }
-                } else if self.mode == Mode::ProfilePicker && c == 'i' {
-                    self.profile_filter_active = true;
-                } else if self.mode == Mode::SessionPicker && c == 'i' {
-                    self.session_filter_active = true;
+                } else if self.mode == Mode::RegionPicker {
+                    if !self.region_filter_active {
+                        match c {
+                            'j' => self.next_item(),
+                            'k' => self.prev_item(),
+                            _ => crate::picker::typed(
+                                &mut self.region_filter,
+                                &mut self.region_filter_active,
+                                &mut self.region_picker_selected,
+                                c,
+                            ),
+                        }
+                    } else {
+                        crate::picker::typed(
+                            &mut self.region_filter,
+                            &mut self.region_filter_active,
+                            &mut self.region_picker_selected,
+                            c,
+                        );
+                    }
+                } else if self.mode == Mode::ProfilePicker {
+                    crate::picker::typed(
+                        &mut self.profile_filter,
+                        &mut self.profile_filter_active,
+                        &mut self.profile_picker_selected,
+                        c,
+                    );
+                } else if self.mode == Mode::SessionPicker {
+                    crate::picker::typed(
+                        &mut self.session_filter,
+                        &mut self.session_filter_active,
+                        &mut self.session_picker_selected,
+                        c,
+                    );
                 } else if self.mode == Mode::InsightsInput {
                     match self.insights_state.insights.insights_focus {
                         InsightsFocus::Query => {
@@ -1523,21 +1538,36 @@ impl App {
                 }
             }
             Action::FilterBackspace => {
-                if self.mode == Mode::ServicePicker && self.service_picker.filter_active {
-                    self.service_picker.filter.pop();
-                    self.service_picker.selected = 0;
-                } else if self.mode == Mode::TabPicker && self.tab_filter_active {
-                    self.tab_filter.pop();
-                    self.tab_picker_selected = 0;
-                } else if self.mode == Mode::RegionPicker && self.region_filter_active {
-                    self.region_filter.pop();
-                    self.region_picker_selected = 0;
-                } else if self.mode == Mode::ProfilePicker && self.profile_filter_active {
-                    self.profile_filter.pop();
-                    self.profile_picker_selected = 0;
-                } else if self.mode == Mode::SessionPicker && self.session_filter_active {
-                    self.session_filter.pop();
-                    self.session_picker_selected = 0;
+                if self.mode == Mode::ServicePicker {
+                    crate::picker::backspace(
+                        &mut self.service_picker.filter,
+                        &mut self.service_picker.filter_active,
+                        &mut self.service_picker.selected,
+                    );
+                } else if self.mode == Mode::TabPicker {
+                    crate::picker::backspace(
+                        &mut self.tab_filter,
+                        &mut self.tab_filter_active,
+                        &mut self.tab_picker_selected,
+                    );
+                } else if self.mode == Mode::RegionPicker {
+                    crate::picker::backspace(
+                        &mut self.region_filter,
+                        &mut self.region_filter_active,
+                        &mut self.region_picker_selected,
+                    );
+                } else if self.mode == Mode::ProfilePicker {
+                    crate::picker::backspace(
+                        &mut self.profile_filter,
+                        &mut self.profile_filter_active,
+                        &mut self.profile_picker_selected,
+                    );
+                } else if self.mode == Mode::SessionPicker {
+                    crate::picker::backspace(
+                        &mut self.session_filter,
+                        &mut self.session_filter_active,
+                        &mut self.session_picker_selected,
+                    );
                 } else if self.mode == Mode::InsightsInput {
                     match self.insights_state.insights.insights_focus {
                         InsightsFocus::Query => {
@@ -2793,19 +2823,13 @@ impl App {
     }
 
     pub fn filtered_services(&self) -> Vec<&'static str> {
-        let mut services = if self.service_picker.filter.is_empty() {
-            self.service_picker.services.clone()
-        } else {
-            self.service_picker
-                .services
-                .iter()
-                .filter(|s| {
-                    s.to_lowercase()
-                        .contains(&self.service_picker.filter.to_lowercase())
-                })
-                .copied()
-                .collect()
-        };
+        let mut services: Vec<&'static str> = self
+            .service_picker
+            .services
+            .iter()
+            .filter(|s| crate::picker::matches(s, &self.service_picker.filter))
+            .copied()
+            .collect();
         services.sort();
         services
     }
@@ -3951,6 +3975,9 @@ impl App {
                 };
             }
         } else if self.mode == Mode::ProfilePicker {
+            if crate::picker::exit_filter(&mut self.profile_filter_active) {
+                return;
+            }
             let filtered = self.get_filtered_profiles();
             if let Some(profile) = filtered.get(self.profile_picker_selected) {
                 let profile_name = profile.name.clone();
@@ -4077,6 +4104,9 @@ impl App {
                 crate::tab_runtime::sync_active(self);
             }
         } else if self.mode == Mode::SessionPicker {
+            if crate::picker::exit_filter(&mut self.session_filter_active) {
+                return;
+            }
             let filtered = self.get_filtered_sessions();
             if let Some(&session) = filtered.get(self.session_picker_selected) {
                 let session = session.clone();
@@ -8024,19 +8054,14 @@ impl App {
             region.latency_ms = self.region_latencies.get(region.code).copied();
         }
 
-        // Filter by search term
-        let filtered: Vec<AwsRegion> = if self.region_filter.is_empty() {
-            all
-        } else {
-            let filter_lower = self.region_filter.to_lowercase();
-            all.into_iter()
-                .filter(|r| {
-                    r.name.to_lowercase().contains(&filter_lower)
-                        || r.code.to_lowercase().contains(&filter_lower)
-                        || r.group.to_lowercase().contains(&filter_lower)
-                })
-                .collect()
-        };
+        // Filter by search term: every typed word, in any case.
+        let filtered: Vec<AwsRegion> = all
+            .into_iter()
+            .filter(|r| {
+                let text = format!("{} {} {}", r.name, r.code, r.group);
+                crate::picker::matches(&text, &self.region_filter)
+            })
+            .collect();
 
         // Sort by latency (lowest first), treat None as 1000ms
         let mut sorted = filtered;
@@ -8098,17 +8123,11 @@ impl App {
     }
 
     pub fn get_filtered_sessions(&self) -> Vec<&Session> {
-        if self.session_filter.is_empty() {
-            return self.sessions.iter().collect();
-        }
-        let filter_lower = self.session_filter.to_lowercase();
         self.sessions
             .iter()
             .filter(|s| {
-                s.profile.to_lowercase().contains(&filter_lower)
-                    || s.region.to_lowercase().contains(&filter_lower)
-                    || s.account_id.to_lowercase().contains(&filter_lower)
-                    || s.role_arn.to_lowercase().contains(&filter_lower)
+                let text = format!("{} {} {} {}", s.profile, s.region, s.account_id, s.role_arn);
+                crate::picker::matches(&text, &self.session_filter)
             })
             .collect()
     }
@@ -8117,8 +8136,6 @@ impl App {
     /// in any case: `west` finds the tabs in us-west-2 and eu-west-1, and
     /// `ec2 west` the EC2 tabs among them.
     pub fn get_filtered_tabs(&self) -> Vec<(usize, &Tab)> {
-        let filter = self.tab_filter.to_lowercase();
-        let words: Vec<&str> = filter.split_whitespace().collect();
         self.tabs
             .iter()
             .enumerate()
@@ -8128,9 +8145,8 @@ impl App {
                     tab.title,
                     tab.breadcrumb,
                     self.tab_region(tab.id)
-                )
-                .to_lowercase();
-                words.iter().all(|word| text.contains(word))
+                );
+                crate::picker::matches(&text, &self.tab_filter)
             })
             .collect()
     }
@@ -8992,6 +9008,58 @@ mod leader_from_service_tabs_tests {
                 app.mode = Mode::Normal;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod picker_word_filter_tests {
+    use super::*;
+    use test_helpers::test_app;
+
+    #[test]
+    fn matcher_requires_every_word_in_any_case() {
+        assert!(crate::picker::matches(
+            "EC2 › Instances us-west-2",
+            "ec2 west"
+        ));
+        assert!(!crate::picker::matches(
+            "EC2 › Instances us-west-2",
+            "ec2 sns"
+        ));
+        assert!(crate::picker::matches("anything", ""));
+    }
+
+    #[test]
+    fn service_region_and_tab_filters_take_words() {
+        let mut app = test_app();
+        app.service_picker.filter = "cloudwatch logs".into();
+        let services = app.filtered_services();
+        assert!(services.iter().all(|s| {
+            s.to_lowercase().contains("logs") && s.to_lowercase().contains("cloudwatch")
+        }));
+        assert!(services.iter().any(|s| s.contains("Logs Insights")));
+
+        app.region_filter = "us west".into();
+        let regions = app.get_filtered_regions();
+        assert!(!regions.is_empty());
+        assert!(regions.iter().all(|r| {
+            let text = format!("{} {} {}", r.name, r.code, r.group).to_lowercase();
+            text.contains("us") && text.contains("west")
+        }));
+
+        app.tabs.push(Tab {
+            id: TabId::new(),
+            service: Service::S3Buckets,
+            title: "S3 › Buckets".into(),
+            breadcrumb: "S3 › Buckets".into(),
+        });
+        app.current_tab = 0;
+        app.current_service = Service::S3Buckets;
+        crate::tab_runtime::sync_active(&mut app);
+        app.tab_filter = "buckets".into();
+        assert_eq!(app.get_filtered_tabs().len(), 1);
+        app.tab_filter = "buckets sns".into();
+        assert!(app.get_filtered_tabs().is_empty());
     }
 }
 

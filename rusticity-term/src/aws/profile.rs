@@ -160,14 +160,8 @@ pub fn render_profile_picker(
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    let filter_text = if app.profile_filter_active {
-        vec![
-            Span::raw(&app.profile_filter),
-            Span::styled("█", Style::default().fg(Color::Green)),
-        ]
-    } else {
-        vec![Span::raw(&app.profile_filter)]
-    };
+    let filter_text =
+        crate::picker::filter_line(&app.profile_filter, app.profile_filter_active, None);
     let filter = filter_area(filter_text, app.profile_filter_active);
 
     frame.render_widget(Clear, popup_area);
@@ -199,29 +193,20 @@ pub fn render_profile_picker(
 }
 
 pub fn filter_profiles<'a>(profiles: &'a [Profile], filter: &str) -> Vec<&'a Profile> {
-    let mut filtered: Vec<&Profile> = if filter.is_empty() {
-        profiles.iter().collect()
-    } else {
-        let filter_lower = filter.to_lowercase();
-        profiles
-            .iter()
-            .filter(|p| {
-                p.name.to_lowercase().contains(&filter_lower)
-                    || p.region
-                        .as_ref()
-                        .is_some_and(|r| r.to_lowercase().contains(&filter_lower))
-                    || p.account
-                        .as_ref()
-                        .is_some_and(|a| a.to_lowercase().contains(&filter_lower))
-                    || p.role_arn
-                        .as_ref()
-                        .is_some_and(|r| r.to_lowercase().contains(&filter_lower))
-                    || p.source_profile
-                        .as_ref()
-                        .is_some_and(|s| s.to_lowercase().contains(&filter_lower))
-            })
-            .collect()
-    };
+    let mut filtered: Vec<&Profile> = profiles
+        .iter()
+        .filter(|p| {
+            let text = format!(
+                "{} {} {} {} {}",
+                p.name,
+                p.region.as_deref().unwrap_or_default(),
+                p.account.as_deref().unwrap_or_default(),
+                p.role_arn.as_deref().unwrap_or_default(),
+                p.source_profile.as_deref().unwrap_or_default(),
+            );
+            crate::picker::matches(&text, filter)
+        })
+        .collect();
     filtered.sort_by(|a, b| a.name.cmp(&b.name));
     filtered
 }

@@ -2,7 +2,7 @@ use super::Session;
 use crate::common::SortDirection;
 use crate::ui::filter_area;
 use crate::ui::table::{self};
-use ratatui::prelude::{Color, Constraint, Direction, Layout, Span, Style};
+use ratatui::prelude::{Constraint, Direction, Layout, Style};
 use ratatui::widgets::Clear;
 
 enum SessionColumn {
@@ -59,14 +59,8 @@ pub fn render_session_picker(
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(popup_area);
 
-    let filter_text = if app.session_filter_active {
-        vec![
-            Span::raw(&app.session_filter),
-            Span::styled("█", Style::default().fg(Color::Green)),
-        ]
-    } else {
-        vec![Span::raw(&app.session_filter)]
-    };
+    let filter_text =
+        crate::picker::filter_line(&app.session_filter, app.session_filter_active, None);
     let filter = filter_area(filter_text, app.session_filter_active);
 
     frame.render_widget(Clear, popup_area);

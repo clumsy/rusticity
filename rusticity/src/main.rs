@@ -95,6 +95,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             || app.stepfunctions_state.machines.loading
             || app.stepfunctions_state.executions.busy()
             || app.fsx_state.backups_loading
+            || app.vpc_state.detail_loading
             || app.sqs_state.queues.loading
             || app.dynamodb_state.tables.loading
             || app.dynamodb_state.items_loading
@@ -682,6 +683,22 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         // (tab_runtime).
 
                         // VPCs load as a tab-owned background read (tab_runtime).
+
+                        // Load VPC detail (describe plus tags) when entered
+                        if app.service_selected && app.current_service == Service::VpcVpcs
+                            && app.vpc_state.current_vpc.is_some()
+                            && app.vpc_state.detail_loading {
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                            if let Err(e) = app.load_vpc_detail().await {
+                                app.vpc_state.detail_error = Some(format!("{:#}", e));
+                                terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                                app.error_message = Some(format!("Failed to load VPC details: {:#}", e));
+                                app.error_scroll = 0;
+                                app.mode = rusticity_term::keymap::Mode::ErrorModal;
+                            }
+                            app.vpc_state.detail_loading = false;
+                            terminal.draw(|f| rusticity_term::ui::render(f, &app))?;
+                        }
 
                         // RDS databases load as a tab-owned background read (tab_runtime).
 

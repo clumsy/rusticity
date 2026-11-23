@@ -53,21 +53,38 @@ pub enum TagSort {
 }
 
 pub fn filtered<'a, T: Tag>(items: &'a [T], filter: &str, sort: TagSort) -> Vec<&'a T> {
+    filtered_in(items, filter, sort, SortDirection::Asc)
+}
+
+/// [`filtered`] in a chosen direction. `Source` keeps the source order.
+pub fn filtered_in<'a, T: Tag>(
+    items: &'a [T],
+    filter: &str,
+    sort: TagSort,
+    direction: SortDirection,
+) -> Vec<&'a T> {
+    let mut rows = filtered_unordered(items, filter);
+    match sort {
+        TagSort::Source => return rows,
+        TagSort::Key => rows.sort_by(|a, b| a.key().cmp(b.key())),
+        TagSort::Value => rows.sort_by(|a, b| a.value().cmp(b.value())),
+    }
+    if direction == SortDirection::Desc {
+        rows.reverse();
+    }
+    rows
+}
+
+fn filtered_unordered<'a, T: Tag>(items: &'a [T], filter: &str) -> Vec<&'a T> {
     let query = filter.to_lowercase();
-    let mut rows: Vec<_> = items
+    items
         .iter()
         .filter(|t| {
             query.is_empty()
                 || t.key().to_lowercase().contains(&query)
                 || t.value().to_lowercase().contains(&query)
         })
-        .collect();
-    match sort {
-        TagSort::Source => {}
-        TagSort::Key => rows.sort_by(|a, b| a.key().cmp(b.key())),
-        TagSort::Value => rows.sort_by(|a, b| a.value().cmp(b.value())),
-    }
-    rows
+        .collect()
 }
 
 pub enum TagColumn {
@@ -107,6 +124,8 @@ pub struct TagsConfig<'a, T> {
     pub items: &'a [T],
     pub columns: Vec<Box<dyn Column<T>>>,
     pub sort: TagSort,
+    /// Direction of `sort`, shown as the header arrow and applied to the rows.
+    pub direction: SortDirection,
     pub window: TableWindow,
     pub focus: InputFocus,
     pub mode: Mode,
@@ -116,7 +135,12 @@ pub struct TagsConfig<'a, T> {
 pub fn render<T: Tag>(frame: &mut Frame, area: Rect, config: TagsConfig<'_, T>) {
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
     let view = config.table.prepare_view(
-        filtered(config.items, &config.table.filter, config.sort),
+        filtered_in(
+            config.items,
+            &config.table.filter,
+            config.sort,
+            config.direction,
+        ),
         config.window,
     );
     let pagination = render_pagination_text(view.current_page, view.total_pages);
@@ -154,7 +178,7 @@ pub fn render<T: Tag>(frame: &mut Frame, area: Rect, config: TagsConfig<'_, T>) 
             expanded_index: view.expanded_index,
             columns: &config.columns,
             sort_column,
-            sort_direction: SortDirection::Asc,
+            sort_direction: config.direction,
             title: format_title(&format!("Tags ({})", view.total_items)),
             area: chunks[1],
             get_expanded_content: Some(Box::new(|tag| expanded_from_columns(&config.columns, tag))),
@@ -414,6 +438,54 @@ mod tests {
     }
 
     #[test]
+    fn shared_render_applies_and_shows_the_sort_direction() {
+        let rows = rows();
+        let desc = filtered_in(&rows, "", TagSort::Key, SortDirection::Desc);
+        assert_eq!(desc[0].0, "key24");
+        let source = filtered_in(&rows, "", TagSort::Source, SortDirection::Desc);
+        assert_eq!(source[0].0, "key24", "Source keeps source order");
+        let state = TableState::new();
+        for (direction, arrow, first, last) in [
+            (SortDirection::Asc, "Key ↑", "key00", "key24"),
+            (SortDirection::Desc, "Key ↓", "key24", "key00"),
+        ] {
+            let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render(
+                        frame,
+                        frame.area(),
+                        TagsConfig {
+                            table: &state,
+                            items: &rows,
+                            columns: columns(),
+                            sort: TagSort::Key,
+                            direction,
+                            window: TableWindow::SelectedPage,
+                            focus: InputFocus::Filter,
+                            mode: Mode::Normal,
+                            loading: false,
+                        },
+                    )
+                })
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            assert!(text.contains(arrow), "{direction:?}: {text}");
+            let first_at = text.find(first).expect("first row on screen");
+            assert!(
+                text.find(last).is_none_or(|last_at| first_at < last_at),
+                "{direction:?} starts with {first}"
+            );
+        }
+    }
+
+    #[test]
     fn tags_renderer_applies_page_size_and_expansion_to_tuple_rows() {
         let rows = rows();
         let state = TableState {
@@ -433,6 +505,7 @@ mod tests {
                         items: &rows,
                         columns: columns(),
                         sort: TagSort::Key,
+                        direction: SortDirection::Asc,
                         window: TableWindow::SelectedPage,
                         focus: InputFocus::Filter,
                         mode: Mode::Normal,

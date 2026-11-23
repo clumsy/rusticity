@@ -496,6 +496,7 @@ fn render_tags(frame: &mut Frame, app: &App, area: Rect) {
             items: &ec2.tags.items,
             columns,
             sort: TagSort::Value,
+            direction: crate::common::SortDirection::Asc,
             window: TableWindow::SelectedPage,
             focus: ec2.input_focus,
             mode: app.mode,

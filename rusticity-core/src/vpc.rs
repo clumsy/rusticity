@@ -103,6 +103,40 @@ impl VpcClient {
         }
         Ok(vpcs)
     }
+    /// Read-only describe of one VPC with its console properties. The VPC
+    /// must exist in the account; a missing id is an explicit error.
+    pub async fn describe_vpc(&self, vpc_id: &str) -> Result<Vpc> {
+        self.list_vpcs_with_properties()
+            .await?
+            .into_iter()
+            .find(|vpc| vpc.vpc_id == vpc_id)
+            .ok_or_else(|| anyhow::anyhow!("VPC {vpc_id} was not found in this Region"))
+    }
+
+    /// Tags of one VPC, read-only, sorted by key.
+    pub async fn list_vpc_tags(&self, vpc_id: &str) -> Result<Vec<(String, String)>> {
+        let mut stream = self
+            .config
+            .ec2_client()
+            .describe_tags()
+            .filters(Filter::builder().name("resource-id").values(vpc_id).build())
+            .into_paginator()
+            .items()
+            .send();
+        let mut tags = Vec::new();
+        while let Some(tag) = stream.next().await {
+            tags.push(tag_from_sdk(&tag?));
+        }
+        tags.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(tags)
+    }
+}
+
+fn tag_from_sdk(tag: &aws_sdk_ec2::types::TagDescription) -> (String, String) {
+    (
+        tag.key().unwrap_or_default().to_string(),
+        tag.value().unwrap_or_default().to_string(),
+    )
 }
 
 fn apply_main_route_tables(vpcs: &mut [Vpc], routes: &[RouteTable]) {
@@ -304,6 +338,15 @@ mod tests {
         assert_eq!(vpc.tenancy, "default");
         assert_eq!(vpc.dhcp_options_id, "dopt-test");
         assert_eq!(vpc.arn, "arn:aws:ec2:us-east-2:123456789012:vpc/vpc-test");
+    }
+
+    #[test]
+    fn vpc_tag_mapping_keeps_key_and_value_verbatim() {
+        let tag = aws_sdk_ec2::types::TagDescription::builder()
+            .key("Team")
+            .value("platform")
+            .build();
+        assert_eq!(tag_from_sdk(&tag), ("Team".into(), "platform".into()));
     }
 
     #[test]

@@ -321,7 +321,7 @@ fn bookmarking_and_status_hint_require_a_dedicated_view() {
             arn: String::new(),
             region: "us-east-1".into(),
         }];
-        let expected = kind != ResourceKind::Vpc;
+        let expected = kind != ResourceKind::Reference;
         assert_eq!(available(&app), expected, "{kind:?}");
         assert_eq!(
             screen(&app, 160, 30).contains("^b bookmark"),
@@ -342,7 +342,7 @@ async fn legacy_inventory_only_bookmark_is_refused_before_reconnecting() {
     let temp = Temp::new();
     let mut app = app(&temp);
     let mut entry = selected(&app).unwrap();
-    entry.resource.kind = ResourceKind::Vpc;
+    entry.resource.kind = ResourceKind::Reference;
     entry.resource.arn.clear();
     entry.profile = "other-profile".into();
     app.bookmarks.pending_open = Some(entry);

@@ -728,6 +728,7 @@ fn render_tags_tab(frame: &mut Frame, app: &App, fs: &EfsFileSystem, area: Rect)
             items: &fs.tags,
             columns: tags::columns(),
             sort: TagSort::Key,
+            direction: crate::common::SortDirection::Asc,
             window: crate::table::TableWindow::SelectedPage,
             focus: app.efs_state.input_focus,
             mode: app.mode,

@@ -1293,6 +1293,7 @@ fn render_tags_tab(frame: &mut Frame, app: &App, area: Rect) {
             items: &app.dynamodb_state.tags_table.items,
             columns: tags::columns(),
             sort: TagSort::Key,
+            direction: crate::common::SortDirection::Asc,
             window: TableWindow::SelectedPage,
             focus: app.dynamodb_state.input_focus,
             mode: app.mode,

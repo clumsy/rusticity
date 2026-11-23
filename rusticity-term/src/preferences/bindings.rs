@@ -14,6 +14,7 @@ enum Source {
     EcrImageDetails,
     EfsFiles,
     EfsTags,
+    VpcTags,
     EfsAccessPoints,
     EfsMountTargets,
     FsxFiles,
@@ -150,6 +151,12 @@ impl Source {
             Service::KmsKeys => Self::KmsKeys,
             Service::RdsInstances if crate::rds::detail::active(app) => Self::RdsInstanceDetails,
             Service::RdsInstances => Self::RdsInstances,
+            Service::VpcVpcs
+                if app.vpc_state.current_vpc.is_some()
+                    && app.vpc_state.detail_tab == crate::ui::vpc::DetailTab::Tags =>
+            {
+                Self::VpcTags
+            }
             Service::VpcVpcs => Self::VpcVpcs,
             Service::SnsTopics if app.sns_state.subscriptions.topic.is_some() => {
                 Self::SnsSubscriptions
@@ -224,6 +231,7 @@ impl Source {
                 None,
             ),
             Self::EfsTags => tags::fixed_columns(),
+            Self::VpcTags => tags::fixed_columns(),
             Self::FsxFiles => columns(
                 &app.fsx_column_ids,
                 &app.fsx_visible_column_ids,
@@ -442,6 +450,7 @@ impl Source {
             }
             Self::EfsFiles => app.efs_state.file_systems.page_size,
             Self::EfsTags => app.efs_state.tags_table.page_size,
+            Self::VpcTags => app.vpc_state.tags.page_size,
             Self::EfsAccessPoints => app.efs_state.access_points.page_size,
             Self::EfsMountTargets => app.efs_state.mount_targets.page_size,
             Self::FsxFiles => app.fsx_state.file_systems.page_size,
@@ -503,6 +512,7 @@ impl Source {
                 .set_page_size(size),
             Self::EfsFiles => app.efs_state.file_systems.set_page_size(size),
             Self::EfsTags => app.efs_state.tags_table.set_page_size(size),
+            Self::VpcTags => app.vpc_state.tags.set_page_size(size),
             Self::EfsAccessPoints => app.efs_state.access_points.set_page_size(size),
             Self::EfsMountTargets => app.efs_state.mount_targets.set_page_size(size),
             Self::FsxFiles => app.fsx_state.file_systems.set_page_size(size),

@@ -102,6 +102,20 @@ fn describe(app: &App, service: Service) -> Option<Described> {
                 crate::ui::rds::default_sort(),
             )
         }
+        Service::VpcVpcs if app.vpc_state.current_vpc.is_some() => {
+            if app.vpc_state.detail_tab != crate::ui::vpc::DetailTab::Tags {
+                return None;
+            }
+            // Tags always have an order (Key, ascending), so Sort by marks
+            // it instead of offering a "Default order" row.
+            let visible: Vec<ColumnId> = vec!["Key", "Value"];
+            Described::order(
+                vec![("Key", "Key"), ("Value", "Value")],
+                &visible,
+                app.vpc_state.tags_sort,
+                crate::ui::vpc::tags_default_sort(),
+            )
+        }
         Service::VpcVpcs => {
             let s = &app.vpc_state;
             use crate::vpc::columns::Column;
@@ -371,6 +385,16 @@ pub(crate) fn choose(app: &mut App, service: Service, value: &'static str) -> bo
         Service::RdsInstances => {
             toggle_order(&mut app.rds_state.sort, crate::ui::rds::default_sort());
             app.rds_state.instances.reset();
+        }
+        Service::VpcVpcs if app.vpc_state.current_vpc.is_some() => {
+            if app.vpc_state.detail_tab != crate::ui::vpc::DetailTab::Tags {
+                return false;
+            }
+            toggle_order(
+                &mut app.vpc_state.tags_sort,
+                crate::ui::vpc::tags_default_sort(),
+            );
+            app.vpc_state.tags.reset();
         }
         Service::VpcVpcs => {
             toggle_order(&mut app.vpc_state.sort, crate::ui::vpc::default_sort());

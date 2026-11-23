@@ -28,6 +28,11 @@ pub fn request(app: &mut App) {
 }
 
 pub fn handle_action(app: &mut App, action: &Action) -> bool {
+    // While the detail view is open, it owns GoBack, tab cycling and refresh;
+    // the shared list controls stay parked until it closes.
+    if app.vpc_state.current_vpc.is_some() {
+        return crate::vpc::actions::handle_action(app, action);
+    }
     if !active(app) {
         return false;
     }

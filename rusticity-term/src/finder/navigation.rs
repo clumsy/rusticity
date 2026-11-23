@@ -10,7 +10,7 @@ use rusticity_core::LogGroup;
 /// Only kinds with a dedicated resource view can be bookmarked.
 pub fn has_detail(kind: ResourceKind) -> bool {
     match kind {
-        ResourceKind::Vpc | ResourceKind::Reference => false,
+        ResourceKind::Reference => false,
         ResourceKind::Database
         | ResourceKind::Secret
         | ResourceKind::Api
@@ -31,7 +31,8 @@ pub fn has_detail(kind: ResourceKind) -> bool {
         | ResourceKind::Bucket
         | ResourceKind::Queue
         | ResourceKind::Topic
-        | ResourceKind::StateMachine => true,
+        | ResourceKind::StateMachine
+        | ResourceKind::Vpc => true,
     }
 }
 
@@ -310,8 +311,18 @@ pub async fn open_resource(app: &mut App, resource: Resource) -> Result<bool> {
             app.load_s3_objects().await?;
         }
         ResourceKind::Vpc => {
-            crate::vpc::inventory::request(app);
-            app.vpc_state.pending_focus = Some(resource.id.clone());
+            // The dedicated detail view: seeded from the finder identity, tags
+            // loaded by the inline detail loader.
+            app.vpc_state.pending_focus = None;
+            app.vpc_state.vpcs.filter.clear();
+            app.vpc_state.current_vpc = Some(resource.id.clone());
+            app.vpc_state.detail = None;
+            app.vpc_state.detail_tab = ui::vpc::DetailTab::Cidrs;
+            app.vpc_state.tags.items.clear();
+            app.vpc_state.tags.reset();
+            app.vpc_state.detail_loading = true;
+            app.vpc_state.detail_error = None;
+            app.update_current_tab_breadcrumb();
         }
         ResourceKind::Database => {
             app.rds_state.detail.close();

@@ -130,6 +130,13 @@ fn vpc_inventory_controls_preserve_filter_page_and_expansion_contracts() {
             "arn:aws:ec2:us-east-2:123456789012:vpc/vpc-001"
         );
         app.handle_action(Action::Select);
+        assert_eq!(
+            crate::vpc::actions::console_url(&app),
+            "https://us-east-2.console.aws.amazon.com/vpcconsole/home?region=us-east-2#VpcDetails:VpcId=vpc-001"
+        );
+        crate::vpc::actions::go_back(&mut app);
+        crate::vpc::actions::go_back(&mut app);
+        app.handle_action(Action::ExpandRow);
         assert_eq!(app.vpc_state.vpcs.expanded_item, Some(1));
         app.handle_action(Action::PageDown);
         assert_eq!(app.vpc_state.vpcs.selected, 11);
@@ -609,5 +616,234 @@ mod tab_owned_list {
         app.vpc_state.pending_focus = Some("vpc-gone".into());
         finish(&mut app, Ok(vec![vpc("vpc-a")])).await;
         assert!(screen(&app, 240, 45).contains("Resource not found"));
+    }
+}
+
+#[cfg(test)]
+mod detail_tests {
+    use crate::app::{App, Service, Tab};
+    use crate::common::CyclicEnum;
+    use crate::keymap::{Action, Mode};
+    use crate::tab_runtime::TabId;
+    use rusticity_core::vpc::Vpc;
+
+    fn app_with_vpc() -> App {
+        let mut app = App::new_without_client("t".into(), Some("us-east-1".into()));
+        app.service_selected = true;
+        app.current_service = Service::VpcVpcs;
+        app.mode = Mode::Normal;
+        app.tabs.push(Tab {
+            id: TabId::new(),
+            service: Service::VpcVpcs,
+            title: "VPC › VPCs".into(),
+            breadcrumb: "VPC › VPCs".into(),
+        });
+        // Bind the tab first, then seed the live rows: later action-time
+        // sync_active sees the same owner and keeps them.
+        crate::tab_runtime::sync_active(&mut app);
+        app.vpc_state.vpcs.items.push(Vpc {
+            name: "net".into(),
+            vpc_id: "vpc-1".into(),
+            state: "available".into(),
+            ipv4_cidrs: "10.0.0.0/16".into(),
+            tenancy: "default".into(),
+            region: "us-east-1".into(),
+            arn: "arn:aws:ec2:us-east-1:1:vpc/vpc-1".into(),
+            ..Default::default()
+        });
+        app
+    }
+
+    fn screen(app: &App) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|f| crate::ui::render(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn direct_actions_open_and_close_the_detail_view() {
+        let mut app = app_with_vpc();
+        crate::vpc::actions::select_item(&mut app);
+        assert_eq!(app.vpc_state.current_vpc.as_deref(), Some("vpc-1"));
+        crate::vpc::actions::go_back(&mut app);
+        assert!(app.vpc_state.current_vpc.is_none());
+    }
+
+    /// Space on a "Sort by" row in Preferences must move the header arrow
+    /// AND reorder the rows, through the same path the keys take.
+    #[test]
+    fn tags_sort_choice_drives_header_arrow_and_row_order() {
+        let mut app = app_with_vpc();
+        app.handle_action(Action::Select);
+        app.vpc_state.detail_loading = false;
+        app.vpc_state.detail_tab = crate::ui::vpc::DetailTab::Tags;
+        app.vpc_state.tags.items = vec![("a".into(), "zeta".into()), ("b".into(), "alpha".into())];
+        // No choice yet: Key ascending, as the console lists tags.
+        assert!(screen(&app).contains("Key ↑"), "{}", screen(&app));
+
+        let value_row = crate::preferences::bindings::model_for(&app, Service::VpcVpcs)
+            .rows()
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    crate::preferences::PreferenceRow::Sort { label: "Value", .. }
+                )
+            })
+            .expect("Value sort row");
+        let press_value = |app: &mut App| {
+            app.mode = Mode::ColumnSelector;
+            app.column_selector_index = value_row;
+            app.handle_action(Action::ToggleColumn);
+            app.mode = Mode::Normal;
+        };
+
+        press_value(&mut app);
+        let text = screen(&app);
+        assert!(text.contains("Value ↑"), "{text}");
+        assert!(text.find("alpha").unwrap() < text.find("zeta").unwrap());
+
+        press_value(&mut app);
+        let text = screen(&app);
+        assert!(text.contains("Value ↓"), "{text}");
+        assert!(text.find("zeta").unwrap() < text.find("alpha").unwrap());
+    }
+
+    #[test]
+    fn preferences_follow_the_active_vpc_detail_tab() {
+        let mut app = app_with_vpc();
+        app.handle_action(Action::Select);
+        let list_model = crate::preferences::bindings::model_for(&app, Service::VpcVpcs);
+        assert!(list_model.columns().any(|c| c.label.contains("IPv4")));
+
+        app.vpc_state.detail_tab = crate::ui::vpc::DetailTab::Tags;
+        let tags_model = crate::preferences::bindings::model_for(&app, Service::VpcVpcs);
+        // No "Default order" row: Key is already selected, ascending.
+        let sort_rows: Vec<(&str, bool, Option<crate::common::SortDirection>)> = tags_model
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                crate::preferences::PreferenceRow::Sort {
+                    label,
+                    selected,
+                    direction,
+                    ..
+                } => Some((*label, *selected, *direction)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sort_rows,
+            [
+                ("Key", true, Some(crate::common::SortDirection::Asc)),
+                ("Value", false, None),
+            ]
+        );
+        assert!(tags_model.columns().any(|c| c.label == "Key"));
+        assert!(tags_model.columns().any(|c| c.label == "Value"));
+        assert!(!tags_model.columns().any(|c| c.label.contains("IPv4")));
+    }
+
+    #[test]
+    fn tabs_follow_console_names_and_order() {
+        let names: Vec<_> = crate::ui::vpc::DetailTab::ALL
+            .iter()
+            .map(|tab| tab.name())
+            .collect();
+        // Only tabs Rusticity fully reads, in console order.
+        assert_eq!(names, ["CIDRs", "Tags"]);
+    }
+
+    /// Nothing unfinished reaches the screen: no placeholder tabs, no
+    /// placeholder message, no fields that were never read.
+    #[test]
+    fn detail_view_shows_only_what_was_read() {
+        let mut app = app_with_vpc();
+        app.handle_action(Action::Select);
+        app.vpc_state.detail_loading = false;
+        for tab in crate::ui::vpc::DetailTab::ALL {
+            app.vpc_state.detail_tab = *tab;
+            let text = screen(&app);
+            for hidden in [
+                "Resource map",
+                "Flow logs",
+                "Related resources",
+                "Integrations",
+                "not available",
+                "DNS hostnames",
+                "DNS resolution",
+                "IPv6 pool",
+                "Network Address Usage",
+                "firewall coverage",
+                "Route 53 Resolver",
+            ] {
+                assert!(!text.contains(hidden), "{tab:?} shows {hidden}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn enter_opens_the_detail_view_and_esc_returns_to_the_list() {
+        let mut app = app_with_vpc();
+        app.handle_action(Action::Select);
+        assert_eq!(app.vpc_state.current_vpc.as_deref(), Some("vpc-1"));
+        assert!(app.vpc_state.detail.is_some());
+        assert!(app.vpc_state.detail_loading);
+        assert_eq!(app.vpc_state.detail_tab, crate::ui::vpc::DetailTab::Cidrs);
+        let text = screen(&app);
+        assert!(text.contains("Details"), "{text}");
+        // The ribbon sits below the persistent Details pane, not above it.
+        {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|f| crate::ui::render(f, &app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let row_of = |needle: &str| {
+                (0..buffer.area.height)
+                    .map(|y| {
+                        (0..buffer.area.width)
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect::<String>()
+                    })
+                    .position(|row| row.contains(needle))
+                    .unwrap_or(usize::MAX)
+            };
+            let details = row_of("Details");
+            let ribbon = row_of("CIDRs");
+            assert!(details < ribbon, "Details pane above the ribbon");
+        }
+
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.vpc_state.detail_tab, crate::ui::vpc::DetailTab::Tags);
+        app.handle_action(Action::NextDetailTab);
+        assert_eq!(app.vpc_state.detail_tab, crate::ui::vpc::DetailTab::Cidrs);
+        app.handle_action(Action::PrevDetailTab);
+        assert_eq!(app.vpc_state.detail_tab, crate::ui::vpc::DetailTab::Tags);
+
+        app.handle_action(Action::GoBack);
+        assert!(app.vpc_state.current_vpc.is_none());
+        assert!(app.vpc_state.detail.is_none());
+    }
+
+    #[test]
+    fn tags_tab_renders_loaded_rows_and_errors_stay_inline() {
+        let mut app = app_with_vpc();
+        app.handle_action(Action::Select);
+        app.vpc_state.detail_loading = false;
+        app.vpc_state.tags.items = vec![("Team".into(), "platform".into())];
+        app.vpc_state.detail_tab = crate::ui::vpc::DetailTab::Tags;
+        let text = screen(&app);
+        assert!(text.contains("Tags"));
+        assert!(text.contains("Team"));
+
+        app.vpc_state.detail_error = Some("AccessDenied".into());
+        assert!(screen(&app).contains("AccessDenied"));
     }
 }

@@ -2900,7 +2900,12 @@ impl App {
                     parts.push(instance.identifier.clone());
                 }
             }
-            Service::VpcVpcs => parts.extend(["VPC".into(), "VPCs".into()]),
+            Service::VpcVpcs => {
+                parts.extend(["VPC".into(), "VPCs".into()]);
+                if let Some(vpc_id) = &self.vpc_state.current_vpc {
+                    parts.push(vpc_id.clone());
+                }
+            }
             Service::SnsTopics => {
                 parts.extend(["SNS".into(), "Topics".into()]);
                 if let Some(topic) = &self.sns_state.subscriptions.topic {
@@ -4232,6 +4237,8 @@ impl App {
                 crate::cloudtrail::actions::select_item(self);
             } else if self.current_service == Service::EcrRepositories {
                 crate::ecr::actions::select_item(self);
+            } else if self.current_service == Service::VpcVpcs {
+                vpc_actions::select_item(self);
             } else if self.current_service == Service::KmsKeys {
                 // KMS keys list — no drill-down yet; tab switch on Enter
             } else if self.current_service == Service::EfsFileSystems {
@@ -4919,6 +4926,21 @@ impl App {
             .collect();
         rows.sort_by(|a, b| b.launch_time.cmp(&a.launch_time));
         rows
+    }
+
+    /// Inline VPC detail read (describe plus tags) for the detail view.
+    pub async fn load_vpc_detail(&mut self) -> anyhow::Result<()> {
+        let Some(vpc_id) = self.vpc_state.current_vpc.clone() else {
+            return Ok(());
+        };
+        let config = self.aws.config.clone();
+        let client = rusticity_core::VpcClient::new(config);
+        let vpc = client.describe_vpc(&vpc_id).await?;
+        let tags = client.list_vpc_tags(&vpc_id).await?;
+        self.vpc_state.detail = Some(vpc);
+        self.vpc_state.tags.items = tags;
+        self.vpc_state.tags.reset();
+        Ok(())
     }
 
     pub async fn load_ecr_images(&mut self) -> anyhow::Result<()> {

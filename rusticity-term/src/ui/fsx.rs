@@ -615,6 +615,7 @@ fn render_tags_tab(frame: &mut Frame, app: &App, fs: &FsxFileSystem, area: Rect)
             items: &fs.tags,
             columns: tags::columns(),
             sort: TagSort::Key,
+            direction: crate::common::SortDirection::Asc,
             window: crate::table::TableWindow::SelectedPage,
             focus: app.fsx_state.input_focus,
             mode: app.mode,

@@ -50,7 +50,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🔀 **Step Functions**: State machines and Standard-workflow execution metadata (no execution input/output)
 - 📣 **SNS**: Topics
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
-- 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns
+- 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns; VPC details (details pane, CIDRs and tags) via Enter, finder and bookmarks
 
 **Want to see support for another AWS service?** [Request it here](../../issues/new?template=feature_request.md) or upvote existing requests!
 

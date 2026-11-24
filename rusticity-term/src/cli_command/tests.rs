@@ -274,6 +274,12 @@ fn table_commands_exist_without_a_selected_row_and_copy_matches_execution() {
         (Service::SqsQueues, "sqs", "list-queues"),
         (Service::RdsInstances, "rds", "describe-db-instances"),
         (Service::VpcVpcs, "ec2", "describe-vpcs"),
+        (Service::VpcSubnets, "ec2", "describe-subnets"),
+        (
+            Service::VpcSecurityGroups,
+            "ec2",
+            "describe-security-groups",
+        ),
         (Service::Ec2Instances, "ec2", "describe-instances"),
         (Service::KmsKeys, "kms", "list-keys"),
         (Service::EfsFileSystems, "efs", "describe-file-systems"),

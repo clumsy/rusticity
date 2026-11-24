@@ -171,6 +171,8 @@ fn expected_list_url(service: Service, region: &str) -> String {
         Service::Ec2Instances => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#Instances:"),
         Service::Ec2LoadBalancers => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#LoadBalancers:"),
         Service::Ec2TargetGroups => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#TargetGroups:"),
+        Service::VpcSubnets => format!("https://{region}.console.aws.amazon.com/vpcconsole/home?region={region}#subnets:"),
+        Service::VpcSecurityGroups => format!("https://{region}.console.aws.amazon.com/vpcconsole/home?region={region}#SecurityGroups:"),
         Service::CloudTrailEvents => format!("https://{region}.console.aws.amazon.com/cloudtrail/home?region={region}#/events"),
         Service::KmsKeys => format!("https://{region}.console.aws.amazon.com/kms/home?region={region}#/kms/keys"),
         Service::CliOutput(_) => String::new(),
@@ -218,6 +220,8 @@ impl App {
             Service::IamRoles => self.iam_state.roles.selected = selected,
             Service::IamUserGroups => self.iam_state.groups.selected = selected,
             Service::CloudWatchLogGroups => self.log_groups_state.log_groups.selected = selected,
+            Service::VpcSubnets => self.subnets_state.list.rows.selected = selected,
+            Service::VpcSecurityGroups => self.security_groups_state.list.rows.selected = selected,
             _ => {}
         }
     }
@@ -568,6 +572,8 @@ fn simple_inventories_route_to_list_in_both_regions() {
         Service::EventBridgeEventBuses,
         Service::Ec2LoadBalancers,
         Service::Ec2TargetGroups,
+        Service::VpcSubnets,
+        Service::VpcSecurityGroups,
     ];
     for service in services {
         for region in [R1, R2] {
@@ -657,6 +663,8 @@ fn list_route_matrix_covers_every_service_picker_entry() {
         Service::StepFunctionsStateMachines,
         Service::SqsQueues,
         Service::VpcVpcs,
+        Service::VpcSubnets,
+        Service::VpcSecurityGroups,
         Service::Ec2Instances,
         Service::Ec2LoadBalancers,
         Service::Ec2TargetGroups,

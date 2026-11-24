@@ -45,7 +45,9 @@ pub fn selected(app: &App) -> Option<Resource> {
         | Service::AcmCertificates
         | Service::EventBridgeEventBuses
         | Service::Ec2LoadBalancers
-        | Service::Ec2TargetGroups => None,
+        | Service::Ec2TargetGroups
+        | Service::VpcSubnets
+        | Service::VpcSecurityGroups => None,
         // ── Services with explicit detail parent tracking ──
         Service::DynamoDbTables => {
             if let Some(name) = &app.dynamodb_state.current_table {

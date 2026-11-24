@@ -45,6 +45,8 @@ enum Source {
     Ec2InstanceDetails,
     Ec2LoadBalancers,
     Ec2TargetGroups,
+    VpcSubnets,
+    VpcSecurityGroups,
     EventBridge,
 }
 
@@ -176,6 +178,8 @@ impl Source {
             Service::EventBridgeEventBuses => Self::EventBridge,
             Service::Ec2LoadBalancers => Self::Ec2LoadBalancers,
             Service::Ec2TargetGroups => Self::Ec2TargetGroups,
+            Service::VpcSubnets => Self::VpcSubnets,
+            Service::VpcSecurityGroups => Self::VpcSecurityGroups,
             _ => return None,
         })
     }
@@ -369,9 +373,12 @@ impl Source {
                     None,
                 )
             }
-            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
+            Self::Ec2LoadBalancers
+            | Self::Ec2TargetGroups
+            | Self::VpcSubnets
+            | Self::VpcSecurityGroups => {
                 // Panes carry no columns.
-                let Some(table) = elb_table(app, self) else {
+                let Some(table) = spec_table_of(app, self) else {
                     return Preferences::columns_only(Vec::new(), false).read_only();
                 };
                 let (ids, visible) = table.columns();
@@ -483,12 +490,14 @@ impl Source {
             Self::SecretsManagerSecretDetails => secret_detail(app).data().table.page_size,
             Self::AcmCertificates => app.acm_state.certificates.page_size,
             Self::EventBridge => crate::eventbridge::page_size(app),
-            Self::Ec2LoadBalancers => elb_table(app, self)
+            Self::Ec2LoadBalancers => spec_table_of(app, self)
                 .map(|t| t.page_size())
                 .unwrap_or(app.load_balancers_state.list.rows.page_size),
-            Self::Ec2TargetGroups => elb_table(app, self)
+            Self::Ec2TargetGroups => spec_table_of(app, self)
                 .map(|t| t.page_size())
                 .unwrap_or(app.target_groups_state.list.rows.page_size),
+            Self::VpcSubnets => app.subnets_state.list.rows.page_size,
+            Self::VpcSecurityGroups => app.security_groups_state.list.rows.page_size,
             Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
             Self::Ec2InstanceDetails => ec2_detail(app).rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
@@ -546,8 +555,11 @@ impl Source {
             }
             Self::AcmCertificates => app.acm_state.certificates.set_page_size(size),
             Self::EventBridge => crate::eventbridge::set_page_size(app, size),
-            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
-                if let Some(table) = elb_table_mut(app, self) {
+            Self::Ec2LoadBalancers
+            | Self::Ec2TargetGroups
+            | Self::VpcSubnets
+            | Self::VpcSecurityGroups => {
+                if let Some(table) = spec_table_mut(app, self) {
                     table.set_page_size(size);
                 }
             }
@@ -603,9 +615,10 @@ impl Source {
             }
             Self::AcmCertificates => &mut app.acm_state.visible_column_ids,
             Self::EventBridge => crate::eventbridge::visible_mut(app),
-            Self::Ec2LoadBalancers | Self::Ec2TargetGroups => {
-                return elb_table_mut(app, self).map(|t| t.visible_mut())
-            }
+            Self::Ec2LoadBalancers
+            | Self::Ec2TargetGroups
+            | Self::VpcSubnets
+            | Self::VpcSecurityGroups => return spec_table_mut(app, self).map(|t| t.visible_mut()),
             Self::RdsInstanceDetails => {
                 &mut rds_detail_mut(app).active_table_mut().visible_column_ids
             }
@@ -615,16 +628,21 @@ impl Source {
     }
 }
 
-fn elb_table(app: &App, source: Source) -> Option<&dyn crate::spec_table::AnyTable> {
+/// The spec table on screen for a spec table source; none on a pane tab.
+fn spec_table_of(app: &App, source: Source) -> Option<&dyn crate::spec_table::AnyTable> {
     match source {
         Source::Ec2LoadBalancers => crate::elb::load_balancers::table(app),
+        Source::VpcSubnets => Some(&app.subnets_state.list),
+        Source::VpcSecurityGroups => Some(&app.security_groups_state.list),
         _ => crate::elb::target_groups::table(app),
     }
 }
 
-fn elb_table_mut(app: &mut App, source: Source) -> Option<&mut dyn crate::spec_table::AnyTable> {
+fn spec_table_mut(app: &mut App, source: Source) -> Option<&mut dyn crate::spec_table::AnyTable> {
     match source {
         Source::Ec2LoadBalancers => crate::elb::load_balancers::table_mut(app),
+        Source::VpcSubnets => Some(&mut app.subnets_state.list),
+        Source::VpcSecurityGroups => Some(&mut app.security_groups_state.list),
         _ => crate::elb::target_groups::table_mut(app),
     }
 }

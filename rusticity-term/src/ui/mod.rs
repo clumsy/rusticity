@@ -783,6 +783,8 @@ fn render_service(frame: &mut Frame, app: &App, area: Rect) {
         Service::EventBridgeEventBuses => crate::eventbridge::render(frame, app, area),
         Service::Ec2LoadBalancers => crate::elb::render_load_balancers(frame, app, area),
         Service::Ec2TargetGroups => crate::elb::render_target_groups(frame, app, area),
+        Service::VpcSubnets => crate::vpc::subnets::render(frame, app, area),
+        Service::VpcSecurityGroups => crate::vpc::security_groups::render(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }
@@ -1265,6 +1267,8 @@ fn render_service_preview(frame: &mut Frame, app: &App, service: Service, area: 
         Service::EventBridgeEventBuses => crate::eventbridge::render(frame, app, area),
         Service::Ec2LoadBalancers => crate::elb::render_load_balancers(frame, app, area),
         Service::Ec2TargetGroups => crate::elb::render_target_groups(frame, app, area),
+        Service::VpcSubnets => crate::vpc::subnets::render(frame, app, area),
+        Service::VpcSecurityGroups => crate::vpc::security_groups::render(frame, app, area),
         Service::StepFunctionsStateMachines => {
             stepfunctions::render_state_machines(frame, app, area)
         }

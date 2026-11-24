@@ -50,7 +50,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🔀 **Step Functions**: State machines and Standard-workflow execution metadata (no execution input/output)
 - 📣 **SNS**: Topics
 - 📬 **SQS**: Queues with monitoring and Lambda triggers
-- 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns; VPC details (details pane, CIDRs and tags) via Enter, finder and bookmarks
+- 🌐 **VPC**: Read-only VPC inventory with IPv4/IPv6 CIDRs, default status, tenancy, owner and customizable columns; VPC details (details pane, CIDRs and tags) via Enter, finder and bookmarks; read-only subnets (state, CIDRs, available IPv4 addresses, Availability Zone and network border group, route table, network ACL, automated internet firewall connectivity type, auto-assign settings) and security groups (ID, name, VPC, description, owner, inbound and outbound rule counts)
 
 **Want to see support for another AWS service?** [Request it here](../../issues/new?template=feature_request.md) or upvote existing requests!
 
@@ -165,7 +165,7 @@ tab and Esc closes the picker.
 Tab-owned asynchronous loading currently covers ACM, CloudFormation
 stacks, EC2 (instances, load balancers, target groups and their details), ECR
 repositories, EFS and FSx file systems, EventBridge, KMS, RDS, S3 buckets,
-Secrets Manager, SNS, Step Functions, VPC, the SQS queues, Lambda functions
+Secrets Manager, SNS, Step Functions, VPC (VPCs, subnets, security groups), the SQS queues, Lambda functions
 and DynamoDB tables lists, and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
 after a successful read (including an empty result), or `!` after a failure.
 Indicators use the same text color as their tab label, including on the selected
@@ -187,7 +187,7 @@ not yet been migrated to this loading lifecycle.
 `Ctrl+B` toggles a bookmark for the selected resource (or the supported parent
 resource in a nested view), only when it has a dedicated resource view. It also
 works on a selected finder result. The status bar shows the shortcut only for
-eligible selections. VPC and unsupported references cannot be bookmarked
+eligible selections. Unsupported references cannot be bookmarked
 until dedicated views exist. `Space`,
 then `k`, opens the bookmark picker: `i`/Tab filters, arrows select, Right/Left
 show/hide the identity, Enter opens, Delete removes, and `Ctrl+R` reloads the file.

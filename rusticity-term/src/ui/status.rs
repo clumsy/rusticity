@@ -126,6 +126,8 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
             "target group details"
         }
         Service::Ec2TargetGroups => "target groups",
+        Service::VpcSubnets => "subnets",
+        Service::VpcSecurityGroups => "security groups",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
         Service::DynamoDbTables => "DynamoDB tables",
@@ -360,6 +362,8 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
                 | Service::EventBridgeEventBuses
                 | Service::Ec2LoadBalancers
                 | Service::Ec2TargetGroups
+                | Service::VpcSubnets
+                | Service::VpcSecurityGroups
         )
     {
         let mut hints = first_hint("↑↓", "scroll");

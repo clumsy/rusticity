@@ -188,6 +188,7 @@ const VIEW_OPERATIONS: &[&str] = &[
     "rds describe-db-instances",
     "rds list-tags-for-resource",
     "ec2 describe-vpcs",
+    "ec2 describe-subnets",
     "ec2 describe-instances",
     "ec2 describe-instance-status",
     "ec2 describe-security-group-rules",

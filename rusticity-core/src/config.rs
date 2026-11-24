@@ -1098,6 +1098,96 @@ mod pagination_tests {
     }
 
     #[tokio::test]
+    async fn subnets_paginate_join_related_reads_and_survive_denied_ones() {
+        use aws_smithy_http_client::test_util::infallible_client_fn;
+        for deny_routes in [false, true] {
+            let http = infallible_client_fn(move |request| {
+                let body = std::str::from_utf8(request.body().bytes().unwrap())
+                    .unwrap()
+                    .to_string();
+                let (status, response) = if body.contains("Action=DescribeSubnets&") {
+                    if body.contains("NextToken=subnet2") {
+                        (200, "<DescribeSubnetsResponse><subnetSet><item><subnetId>subnet-a</subnetId><vpcId>vpc-a</vpcId><ownerId>123456789012</ownerId><availabilityZone>us-east-1a</availabilityZone></item></subnetSet></DescribeSubnetsResponse>")
+                    } else {
+                        (200, "<DescribeSubnetsResponse><subnetSet><item><subnetId>subnet-b</subnetId><vpcId>vpc-a</vpcId><availableIpAddressCount>11</availableIpAddressCount></item></subnetSet><nextToken>subnet2</nextToken></DescribeSubnetsResponse>")
+                    }
+                } else if body.contains("Action=DescribeRouteTables&") {
+                    if deny_routes {
+                        (403, "<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>denied</Message></Error></Errors></Response>")
+                    } else {
+                        (200, "<DescribeRouteTablesResponse><routeTableSet><item><vpcId>vpc-a</vpcId><routeTableId>rtb-main</routeTableId><associationSet><item><main>true</main></item></associationSet></item><item><vpcId>vpc-a</vpcId><routeTableId>rtb-a</routeTableId><associationSet><item><subnetId>subnet-a</subnetId></item></associationSet></item></routeTableSet></DescribeRouteTablesResponse>")
+                    }
+                } else if body.contains("Action=DescribeNetworkAcls&") {
+                    (200, "<DescribeNetworkAclsResponse><networkAclSet><item><networkAclId>acl-a</networkAclId><associationSet><item><subnetId>subnet-a</subnetId></item><item><subnetId>subnet-b</subnetId></item></associationSet></item></networkAclSet></DescribeNetworkAclsResponse>")
+                } else if body.contains("Action=DescribeAvailabilityZones&") {
+                    if deny_routes {
+                        (403, "<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>denied</Message></Error></Errors></Response>")
+                    } else {
+                        (200, "<DescribeAvailabilityZonesResponse><availabilityZoneInfo><item><zoneName>us-east-1a</zoneName><networkBorderGroup>us-east-1</networkBorderGroup></item></availabilityZoneInfo></DescribeAvailabilityZonesResponse>")
+                    }
+                } else {
+                    panic!("Unexpected operation: {body}");
+                };
+                http::Response::builder()
+                    .status(status)
+                    .body(response)
+                    .unwrap()
+            });
+            let mut config = config(&StaticReplayClient::new(vec![]));
+            config.sdk_config = config.sdk_config.to_builder().http_client(http).build();
+            let rows = VpcClient::new(config).list_subnets().await.unwrap();
+            let ids: Vec<_> = rows.iter().map(|s| s.subnet_id.as_str()).collect();
+            assert_eq!(ids, ["subnet-a", "subnet-b"]);
+            assert_eq!(rows[1].available_ipv4, Some(11));
+            assert_eq!(
+                rows[0].arn,
+                "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-a"
+            );
+            let routes: Vec<_> = rows.iter().map(|s| s.route_table.as_str()).collect();
+            let groups: Vec<_> = rows
+                .iter()
+                .map(|s| s.network_border_group.as_str())
+                .collect();
+            if deny_routes {
+                assert_eq!(routes, ["Unavailable", "Unavailable"]);
+                assert_eq!(groups, ["Unavailable", "Unavailable"]);
+            } else {
+                assert_eq!(routes, ["rtb-a", "rtb-main"]);
+                assert_eq!(groups, ["us-east-1", ""], "no zone, no group");
+            }
+            assert!(rows.iter().all(|s| s.network_acl == "acl-a"));
+        }
+    }
+
+    #[tokio::test]
+    async fn security_groups_paginate_and_fail_on_a_failed_later_page() {
+        let uri = "https://ec2.us-east-1.amazonaws.com/";
+        let request = "Action=DescribeSecurityGroups&Version=2016-11-15";
+        let page1 = "<DescribeSecurityGroupsResponse><securityGroupInfo><item><groupId>sg-b</groupId><groupName>web</groupName><ipPermissions><item><ipProtocol>tcp</ipProtocol><fromPort>443</fromPort><toPort>443</toPort><ipRanges><item><cidrIp>0.0.0.0/0</cidrIp></item></ipRanges></item></ipPermissions></item></securityGroupInfo><nextToken>page2</nextToken></DescribeSecurityGroupsResponse>";
+        let page2 = "<DescribeSecurityGroupsResponse><securityGroupInfo><item><groupId>sg-a</groupId><groupName>default</groupName></item></securityGroupInfo></DescribeSecurityGroupsResponse>";
+        let http = StaticReplayClient::new(vec![
+            replay(uri, request.into(), 200, page1.into()),
+            replay(uri, format!("{request}&NextToken=page2"), 200, page2.into()),
+        ]);
+        let rows = VpcClient::new(config(&http))
+            .list_security_groups()
+            .await
+            .unwrap();
+        let ids: Vec<_> = rows.iter().map(|g| g.group_id.as_str()).collect();
+        assert_eq!(ids, ["sg-a", "sg-b"]);
+        assert_eq!((rows[1].inbound_rules, rows[1].outbound_rules), (1, 0));
+        http.assert_requests_match(&[]);
+        let http = StaticReplayClient::new(vec![
+            replay(uri, request.into(), 200, page1.into()),
+            replay(uri, format!("{request}&NextToken=page2"), 403, "<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>denied</Message></Error></Errors></Response>".into()),
+        ]);
+        assert!(VpcClient::new(config(&http))
+            .list_security_groups()
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
     async fn finder_indexed_search_streams_pages_and_filters_unsupported_resources() {
         use crate::finder::{search, SearchCache, SearchQuery, SearchUpdate};
         use std::sync::Arc;

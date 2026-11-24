@@ -1,13 +1,15 @@
 //! A table whose columns are a static spec of (header, width, cell): its rows,
 //! filter, visible columns and sort order, plus the shared filter and paging
 //! input and the shared rendering (filter bar above a bordered table). Used by
-//! EventBridge and Elastic Load Balancing.
+//! EventBridge, Elastic Load Balancing and the VPC subnet and security group
+//! lists.
 use crate::{
     app::App,
     async_read::ReadStatus,
     common::{render_pagination_text, InputFocus, SortDirection},
     inventory::{self, InventoryInput},
     keymap::{Action, Mode},
+    sort::SortOrder,
     table::{TableState, TableWindow},
     ui::{
         self,
@@ -27,6 +29,11 @@ pub(crate) struct Table<T: 'static> {
     pub(crate) visible: Vec<crate::common::ColumnId>,
     pub(crate) focus: InputFocus,
     pub(crate) sort: crate::sort::Choice,
+    /// The order when no column is chosen. `None` keeps the read order and
+    /// offers "Default order" in Sort by; a fixed order is marked there.
+    default_sort: Option<SortOrder>,
+    /// Text the filter also matches that is not a column, such as a Name tag.
+    search: Option<fn(&T) -> String>,
     spec: Spec<T>,
 }
 
@@ -37,12 +44,57 @@ impl<T: 'static> Table<T> {
             visible: spec.iter().map(|(id, ..)| *id).collect(),
             focus: InputFocus::Filter,
             sort: Default::default(),
+            default_sort: None,
+            search: None,
             spec,
         }
     }
 
+    /// The filter also matches `text` of each row.
+    pub(crate) fn searching(mut self, text: fn(&T) -> String) -> Self {
+        self.search = Some(text);
+        self
+    }
+
+    /// A table that is always ordered: `order` until another column is chosen.
+    pub(crate) fn sorted_by(mut self, order: SortOrder) -> Self {
+        self.default_sort = Some(order);
+        self
+    }
+
+    /// Only these columns are shown at first; the rest are in preferences.
+    pub(crate) fn showing(mut self, visible: &[crate::common::ColumnId]) -> Self {
+        self.visible = self
+            .spec
+            .iter()
+            .map(|(id, ..)| *id)
+            .filter(|id| visible.contains(id))
+            .collect();
+        self
+    }
+
     pub(crate) fn spec(&self) -> Spec<T> {
         self.spec
+    }
+
+    /// The order applied: the chosen column while it is visible, else the
+    /// fixed default, else none (the read order).
+    pub(crate) fn order(&self) -> Option<SortOrder> {
+        self.sort.effective(&self.visible).or(self.default_sort)
+    }
+
+    /// Space on a "Sort by" row of this table.
+    pub(crate) fn toggle_sort(&mut self, value: &'static str) {
+        let Some(default) = self.default_sort else {
+            self.sort.toggle(value, &self.visible);
+            return;
+        };
+        let mut order = self.order().unwrap_or(default);
+        order.toggle(value, default, &self.visible);
+        self.sort = crate::sort::Choice {
+            column: Some(order.column),
+            direction: order.direction,
+        };
     }
 
     /// Every column id, and the visible ones.
@@ -65,15 +117,20 @@ impl<T: 'static> Table<T> {
                         .spec
                         .iter()
                         .any(|(_, _, cell)| cell(row).to_lowercase().contains(&filter))
+                    || self
+                        .search
+                        .is_some_and(|text| text(row).to_lowercase().contains(&filter))
             })
             .collect();
         let spec = self.spec;
-        self.sort.apply(&mut rows, &self.visible, |row, id| {
-            spec.iter()
-                .find(|(name, ..)| *name == id)
-                .map(|(_, _, cell)| cell(row))
-                .unwrap_or_default()
-        });
+        if let Some(order) = self.order() {
+            crate::sort::apply(&mut rows, order, |row, id| {
+                spec.iter()
+                    .find(|(name, ..)| *name == id)
+                    .map(|(_, _, cell)| cell(row))
+                    .unwrap_or_default()
+            });
+        }
         rows
     }
 
@@ -91,7 +148,10 @@ pub(crate) trait AnyTable {
     fn page_size(&self) -> crate::common::PageSize;
     fn set_page_size(&mut self, size: crate::common::PageSize);
     fn sort(&self) -> crate::sort::Choice;
-    fn sort_mut(&mut self) -> &mut crate::sort::Choice;
+    /// The fixed order of an always-ordered table, if it is one.
+    fn default_sort(&self) -> Option<SortOrder>;
+    /// Space on a "Sort by" row.
+    fn toggle_sort(&mut self, value: &'static str);
     /// Back to the first row, as after a new order.
     fn reset(&mut self);
 }
@@ -112,8 +172,11 @@ impl<T: 'static> AnyTable for Table<T> {
     fn sort(&self) -> crate::sort::Choice {
         self.sort
     }
-    fn sort_mut(&mut self) -> &mut crate::sort::Choice {
-        &mut self.sort
+    fn default_sort(&self) -> Option<SortOrder> {
+        self.default_sort
+    }
+    fn toggle_sort(&mut self, value: &'static str) {
+        Table::toggle_sort(self, value)
     }
     fn reset(&mut self) {
         self.rows.reset()
@@ -257,11 +320,12 @@ pub(crate) fn render<T: 'static>(
             )) as Box<dyn Column<T>>
         })
         .collect();
-    let sort_header = table.sort.header(
-        &table.visible,
-        |id| Some(id.to_string()),
-        ("", SortDirection::Asc),
-    );
+    let sort_header = table
+        .order()
+        .filter(|o| table.visible.contains(&o.column))
+        .map_or((String::new(), SortDirection::Asc), |o| {
+            (o.column.to_string(), o.direction)
+        });
     render_table(
         frame,
         TableConfig {

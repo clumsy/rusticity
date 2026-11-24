@@ -99,11 +99,7 @@ impl Column {
     }
     pub fn render(self, vpc: &Vpc) -> (String, Style) {
         let (value, color) = match self {
-            Self::State => match vpc.state.to_ascii_lowercase().as_str() {
-                "available" => ("✅ Available".into(), Color::Green),
-                "pending" => ("⏳ Pending".into(), Color::Yellow),
-                _ => (vpc.state.clone(), Color::White),
-            },
+            Self::State => super::state_label(&vpc.state),
             Self::DefaultVpc => match vpc.is_default {
                 Some(true) => ("Yes".into(), Color::Green),
                 Some(false) => ("No".into(), Color::White),
@@ -112,14 +108,7 @@ impl Column {
             Self::VpcId => (vpc.vpc_id.clone(), Color::White),
             Self::EncryptionControlId => (vpc.encryption_control_id.clone(), Color::White),
             Self::EncryptionControlMode => (vpc.encryption_control_mode.clone(), Color::White),
-            Self::BlockPublicAccess => {
-                match vpc.block_public_access.to_ascii_lowercase().as_str() {
-                    "off" => ("❌ Off".into(), Color::White),
-                    "block-ingress" => ("✅ Block ingress".into(), Color::Green),
-                    "block-bidirectional" => ("✅ Block bidirectional".into(), Color::Green),
-                    _ => (vpc.block_public_access.clone(), Color::White),
-                }
-            }
+            Self::BlockPublicAccess => super::block_public_access_label(&vpc.block_public_access),
             Self::Ipv4Cidrs => (vpc.ipv4_cidrs.clone(), Color::White),
             Self::Ipv6Cidrs => (vpc.ipv6_cidrs.clone(), Color::White),
             Self::DhcpOptions => (vpc.dhcp_options_id.clone(), Color::White),

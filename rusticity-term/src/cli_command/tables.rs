@@ -73,6 +73,14 @@ pub(super) fn target(app: &App) -> Result<Option<Target>, String> {
         Service::Ec2Instances => ec2(app),
         Service::Ec2LoadBalancers => Ok(load_balancers(app)),
         Service::Ec2TargetGroups => Ok(target_groups(app)),
+        // Flat Region lists, never a row.
+        Service::VpcSubnets => Ok(Some(view("ec2 describe-subnets", json!({}), None, None))),
+        Service::VpcSecurityGroups => Ok(Some(view(
+            "ec2 describe-security-groups",
+            json!({}),
+            None,
+            None,
+        ))),
         Service::KmsKeys => kms(app),
         Service::EfsFileSystems => efs(app),
         Service::FsxFileSystems => fsx(app),

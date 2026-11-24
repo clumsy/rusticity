@@ -81,6 +81,8 @@ enum Snapshot {
     EventBridgeEventBuses(Box<crate::eventbridge::State>, ViewMode),
     Ec2LoadBalancers(Box<crate::elb::load_balancers::State>, ViewMode),
     Ec2TargetGroups(Box<crate::elb::target_groups::State>, ViewMode),
+    VpcSubnets(Box<crate::vpc::subnets::State>, ViewMode),
+    VpcSecurityGroups(Box<crate::vpc::security_groups::State>, ViewMode),
     StepFunctionsStateMachines(Box<crate::ui::stepfunctions::State>, ViewMode),
     SqsQueues(Box<crate::app::SqsState>, ViewMode),
     VpcVpcs(Box<crate::app::VpcState>, ViewMode),
@@ -117,6 +119,8 @@ impl Snapshot {
             Snapshot::EventBridgeEventBuses(..) => Service::EventBridgeEventBuses,
             Snapshot::Ec2LoadBalancers(..) => Service::Ec2LoadBalancers,
             Snapshot::Ec2TargetGroups(..) => Service::Ec2TargetGroups,
+            Snapshot::VpcSubnets(..) => Service::VpcSubnets,
+            Snapshot::VpcSecurityGroups(..) => Service::VpcSecurityGroups,
             Snapshot::StepFunctionsStateMachines(..) => Service::StepFunctionsStateMachines,
             Snapshot::SqsQueues(..) => Service::SqsQueues,
             Snapshot::VpcVpcs(..) => Service::VpcVpcs,
@@ -189,6 +193,13 @@ fn take_live(app: &mut App, service: Service) -> Option<Snapshot> {
         ),
         Service::Ec2TargetGroups => Snapshot::Ec2TargetGroups(
             Box::new(std::mem::take(&mut app.target_groups_state)),
+            view_mode,
+        ),
+        Service::VpcSubnets => {
+            Snapshot::VpcSubnets(Box::new(std::mem::take(&mut app.subnets_state)), view_mode)
+        }
+        Service::VpcSecurityGroups => Snapshot::VpcSecurityGroups(
+            Box::new(std::mem::take(&mut app.security_groups_state)),
             view_mode,
         ),
         Service::EventBridgeEventBuses => Snapshot::EventBridgeEventBuses(
@@ -296,6 +307,14 @@ fn hydrate(app: &mut App, snap: Snapshot) {
         }
         Snapshot::Ec2TargetGroups(s, vm) => {
             app.target_groups_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::VpcSubnets(s, vm) => {
+            app.subnets_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::VpcSecurityGroups(s, vm) => {
+            app.security_groups_state = *s;
             app.view_mode = vm;
         }
         Snapshot::EventBridgeEventBuses(s, vm) => {
@@ -598,6 +617,8 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::EventBridgeEventBuses => crate::eventbridge::request(app),
         Service::Ec2LoadBalancers => crate::elb::load_balancers::request(app),
         Service::Ec2TargetGroups => crate::elb::target_groups::request(app),
+        Service::VpcSubnets => crate::vpc::subnets::request(app),
+        Service::VpcSecurityGroups => crate::vpc::security_groups::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
         Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
@@ -700,6 +721,8 @@ fn is_managed(service: Service) -> bool {
             | Service::EventBridgeEventBuses
             | Service::Ec2LoadBalancers
             | Service::Ec2TargetGroups
+            | Service::VpcSubnets
+            | Service::VpcSecurityGroups
             | Service::RdsInstances
             | Service::VpcVpcs
             | Service::Ec2Instances
@@ -752,6 +775,8 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::EventBridgeEventBuses => app.eventbridge_state.load_status(),
         Service::Ec2LoadBalancers => app.load_balancers_state.load_status(),
         Service::Ec2TargetGroups => app.target_groups_state.load_status(),
+        Service::VpcSubnets => app.subnets_state.load_status(),
+        Service::VpcSecurityGroups => app.security_groups_state.load_status(),
         Service::VpcVpcs => app.vpc_state.load_status(),
         Service::Ec2Instances => app.ec2_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
@@ -779,6 +804,8 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::EventBridgeEventBuses(s, _) => s.load_status(),
         Snapshot::Ec2LoadBalancers(s, _) => s.load_status(),
         Snapshot::Ec2TargetGroups(s, _) => s.load_status(),
+        Snapshot::VpcSubnets(s, _) => s.load_status(),
+        Snapshot::VpcSecurityGroups(s, _) => s.load_status(),
         Snapshot::VpcVpcs(s, _) => s.load_status(),
         Snapshot::Ec2Instances(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
@@ -981,6 +1008,8 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         Service::EventBridgeEventBuses => crate::eventbridge::poll(app).await,
         Service::Ec2LoadBalancers => crate::elb::load_balancers::poll(app).await,
         Service::Ec2TargetGroups => crate::elb::target_groups::poll(app).await,
+        Service::VpcSubnets => crate::vpc::subnets::poll(app).await,
+        Service::VpcSecurityGroups => crate::vpc::security_groups::poll(app).await,
         Service::RdsInstances => {
             let inventory = crate::rds::inventory::poll(app).await;
             crate::rds::detail::poll(app).await || inventory

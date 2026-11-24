@@ -53,7 +53,7 @@ fn vpc_registration_and_service_selection() {
     assert_eq!(Service::VpcVpcs.name(), "VPC › VPCs");
     assert!(app.service_picker.services.contains(&"VPC › VPCs"));
     app.mode = Mode::ServicePicker;
-    app.service_picker.filter = "vpc".into();
+    app.service_picker.filter = "vpcs".into();
     app.service_picker.filter_active = false;
     app.handle_action(Action::Select);
     assert_eq!(app.current_service, Service::VpcVpcs);

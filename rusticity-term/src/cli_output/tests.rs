@@ -281,6 +281,8 @@ fn every_service_opens_an_independent_output_tab_or_explicit_unsupported_result(
         Service::Ec2Instances,
         Service::Ec2LoadBalancers,
         Service::Ec2TargetGroups,
+        Service::VpcSubnets,
+        Service::VpcSecurityGroups,
         Service::EcrRepositories,
         Service::KmsKeys,
         Service::EfsFileSystems,

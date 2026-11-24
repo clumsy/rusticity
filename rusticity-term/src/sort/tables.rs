@@ -2,9 +2,10 @@
 //! order. Preferences reads `extend` to draw "Sort by" and calls `choose`
 //! when Space is pressed on one of its rows.
 //!
-//! Two kinds of table: the five lists with a fixed default column (RDS, EC2,
-//! VPC, Secrets Manager, ACM) keep a `SortOrder`; every other table keeps a
-//! `Choice`, whose "Default order" row is the order it already had. S3
+//! Two kinds of table: the lists with a fixed default column (RDS, EC2, VPC
+//! with its Tags tab, subnets, security groups, Secrets Manager, ACM) mark
+//! that column; every other table keeps a `Choice`, whose "Default order"
+//! row is the order it already had. S3
 //! buckets (a prefix tree), CloudTrail events (time-ordered pages) and the
 //! CloudFormation nested view keep their own structure and are not offered.
 use super::{Choice, SortOrder, DEFAULT_VALUE};
@@ -70,9 +71,17 @@ fn choice_of<T: 'static>(t: &crate::eventbridge::Table<T>) -> Described {
     Described::choice(columns(&all, &t.visible, Some), &t.visible, t.sort)
 }
 
-fn choice_dyn(t: &dyn crate::spec_table::AnyTable) -> Described {
+/// A spec table: a fixed default order marks its column; else "Default order".
+fn spec_dyn(t: &dyn crate::spec_table::AnyTable) -> Described {
     let (all, visible) = t.columns();
-    Described::choice(columns(&all, &visible, Some), &visible, t.sort())
+    let columns = columns(&all, &visible, Some);
+    match t.default_sort() {
+        Some(default) => {
+            let order = t.sort().effective(&visible).unwrap_or(default);
+            Described::order(columns, &visible, order, default)
+        }
+        None => Described::choice(columns, &visible, t.sort()),
+    }
 }
 
 /// The sortable table on screen for `service`, if any.
@@ -323,8 +332,10 @@ fn describe(app: &App, service: Service) -> Option<Described> {
                 s.sort,
             )
         }
-        Service::Ec2LoadBalancers => choice_dyn(crate::elb::load_balancers::table(app)?),
-        Service::Ec2TargetGroups => choice_dyn(crate::elb::target_groups::table(app)?),
+        Service::Ec2LoadBalancers => spec_dyn(crate::elb::load_balancers::table(app)?),
+        Service::Ec2TargetGroups => spec_dyn(crate::elb::target_groups::table(app)?),
+        Service::VpcSubnets => spec_dyn(&app.subnets_state.list),
+        Service::VpcSecurityGroups => spec_dyn(&app.security_groups_state.list),
         Service::EventBridgeEventBuses => {
             let state = &app.eventbridge_state;
             match (crate::eventbridge::level(app), &state.bus) {
@@ -481,16 +492,20 @@ pub(crate) fn choose(app: &mut App, service: Service, value: &'static str) -> bo
             toggle_choice(&mut app.stepfunctions_state.sort);
             app.stepfunctions_state.machines.reset();
         }
-        Service::Ec2LoadBalancers | Service::Ec2TargetGroups => {
-            let table = if service == Service::Ec2LoadBalancers {
-                crate::elb::load_balancers::table_mut(app)
-            } else {
-                crate::elb::target_groups::table_mut(app)
+        Service::Ec2LoadBalancers
+        | Service::Ec2TargetGroups
+        | Service::VpcSubnets
+        | Service::VpcSecurityGroups => {
+            let table: Option<&mut dyn crate::spec_table::AnyTable> = match service {
+                Service::Ec2LoadBalancers => crate::elb::load_balancers::table_mut(app),
+                Service::Ec2TargetGroups => crate::elb::target_groups::table_mut(app),
+                Service::VpcSubnets => Some(&mut app.subnets_state.list),
+                _ => Some(&mut app.security_groups_state.list),
             };
             let Some(table) = table else {
                 return false;
             };
-            toggle_choice(table.sort_mut());
+            table.toggle_sort(value);
             table.reset();
         }
         Service::EventBridgeEventBuses => {

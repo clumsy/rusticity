@@ -157,6 +157,8 @@ pub struct App {
     pub eventbridge_state: crate::eventbridge::State,
     pub load_balancers_state: crate::elb::load_balancers::State,
     pub target_groups_state: crate::elb::target_groups::State,
+    pub subnets_state: crate::vpc::subnets::State,
+    pub security_groups_state: crate::vpc::security_groups::State,
     pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
@@ -389,6 +391,8 @@ pub enum Service {
     StepFunctionsStateMachines,
     SqsQueues,
     VpcVpcs,
+    VpcSubnets,
+    VpcSecurityGroups,
     Ec2Instances,
     Ec2LoadBalancers,
     Ec2TargetGroups,
@@ -423,6 +427,8 @@ impl Service {
             Service::StepFunctionsStateMachines => "Step Functions › State machines",
             Service::SqsQueues => "SQS › Queues",
             Service::VpcVpcs => "VPC › VPCs",
+            Service::VpcSubnets => "VPC › Subnets",
+            Service::VpcSecurityGroups => "VPC › Security groups",
             Service::Ec2Instances => "EC2 › Instances",
             Service::Ec2LoadBalancers => "EC2 › Load balancers",
             Service::Ec2TargetGroups => "EC2 › Target groups",
@@ -682,6 +688,8 @@ impl App {
             eventbridge_state: crate::eventbridge::State::default(),
             load_balancers_state: Default::default(),
             target_groups_state: Default::default(),
+            subnets_state: Default::default(),
+            security_groups_state: Default::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -989,6 +997,8 @@ impl App {
             || crate::eventbridge::handle_action(self, &action)
             || crate::elb::load_balancers::handle_action(self, &action)
             || crate::elb::target_groups::handle_action(self, &action)
+            || crate::vpc::subnets::handle_action(self, &action)
+            || crate::vpc::security_groups::handle_action(self, &action)
         {
             return;
         }
@@ -2922,6 +2932,8 @@ impl App {
             Service::EventBridgeEventBuses => parts.extend(crate::eventbridge::breadcrumb(self)),
             Service::Ec2LoadBalancers => parts.extend(crate::elb::load_balancers::breadcrumb(self)),
             Service::Ec2TargetGroups => parts.extend(crate::elb::target_groups::breadcrumb(self)),
+            Service::VpcSubnets => parts.extend(crate::vpc::subnets::breadcrumb()),
+            Service::VpcSecurityGroups => parts.extend(crate::vpc::security_groups::breadcrumb()),
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()]);
                 if let Some(secret) = &self.secretsmanager_state.detail.source {
@@ -3022,6 +3034,8 @@ impl App {
             Service::EventBridgeEventBuses => crate::eventbridge::console_url(self),
             Service::Ec2LoadBalancers => crate::elb::load_balancers::console_url(self),
             Service::Ec2TargetGroups => crate::elb::target_groups::console_url(self),
+            Service::VpcSubnets => crate::vpc::subnets::console_url(self),
+            Service::VpcSecurityGroups => crate::vpc::security_groups::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4037,6 +4051,8 @@ impl App {
                     "FSx › File Systems" => Service::FsxFileSystems,
                     "RDS › Databases" | "RDS › DB Instances" => Service::RdsInstances,
                     "VPC › VPCs" => Service::VpcVpcs,
+                    "VPC › Subnets" => Service::VpcSubnets,
+                    "VPC › Security groups" => Service::VpcSecurityGroups,
                     "DynamoDB › Tables" => Service::DynamoDbTables,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
@@ -5503,6 +5519,8 @@ impl ServicePickerState {
                 "SNS › Topics",
                 "SQS › Queues",
                 "VPC › VPCs",
+                "VPC › Subnets",
+                "VPC › Security groups",
             ],
         }
     }
@@ -5532,6 +5550,8 @@ fn session_service(name: &str) -> Option<Service> {
         "FsxFileSystems" => Some(Service::FsxFileSystems),
         "RdsInstances" => Some(Service::RdsInstances),
         "VpcVpcs" => Some(Service::VpcVpcs),
+        "VpcSubnets" => Some(Service::VpcSubnets),
+        "VpcSecurityGroups" => Some(Service::VpcSecurityGroups),
         "DynamoDbTables" => Some(Service::DynamoDbTables),
         "LambdaFunctions" => Some(Service::LambdaFunctions),
         "LambdaApplications" => Some(Service::LambdaApplications),

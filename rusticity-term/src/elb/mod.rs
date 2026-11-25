@@ -24,10 +24,8 @@ pub struct TagRow {
     pub value: String,
 }
 
-pub(crate) const TAG_COLUMNS: Spec<TagRow> = &[
-    ("Key", 32, |t| t.key.clone()),
-    ("Value", 60, |t| t.value.clone()),
-];
+pub(crate) const TAG_COLUMNS: Spec<TagRow> =
+    &[("Key", |t| t.key.clone()), ("Value", |t| t.value.clone())];
 
 pub(crate) fn tag_rows(tags: &[(String, String)]) -> Vec<TagRow> {
     tags.iter()

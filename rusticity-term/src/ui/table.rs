@@ -120,6 +120,7 @@ pub trait Column<T> {
 
     /// Opt into compact sizing based on the rendered rows. width() caps data
     /// width, including the two-cell prefix; the full header always takes priority.
+    /// When every column opts in, the last one also takes the remaining space.
     /// Other columns retain the existing widest-column auto-fill behavior.
     fn fit_content(&self) -> bool {
         false
@@ -182,6 +183,7 @@ fn column_constraints<T>(
         .filter(|c| !c.fit_content())
         .map(|c| c.width())
         .max();
+    let last = columns.len().saturating_sub(1);
     columns
         .iter()
         .enumerate()
@@ -195,7 +197,14 @@ fn column_constraints<T>(
                     .max()
                     .unwrap_or(0);
                 let width = header_width.max(data_width.min(column.width() as usize));
-                Constraint::Length(width.min(u16::MAX as usize) as u16)
+                let width = width.min(u16::MAX as usize) as u16;
+                // With no auto-fill column, the last one takes the rest of the
+                // row: its text is left aligned, so the extra space trails it.
+                if stretch_width.is_none() && index == last {
+                    Constraint::Min(width)
+                } else {
+                    Constraint::Length(width)
+                }
             } else if Some(column.width()) == stretch_width {
                 Constraint::Fill(1)
             } else {
@@ -825,11 +834,11 @@ mod compact_column_tests {
         let value = "界界e\u{301}".to_string(); // Five display cells, not six scalars or eleven bytes.
         assert_eq!(
             column_constraints(&columns, &[&value], "ID", SortDirection::Asc),
-            vec![Constraint::Length(7)]
+            vec![Constraint::Min(7)]
         );
         assert_eq!(
             column_constraints(&columns, &[], "ID", SortDirection::Desc),
-            vec![Constraint::Length(6)]
+            vec![Constraint::Min(6)]
         );
     }
 
@@ -839,8 +848,34 @@ mod compact_column_tests {
         let value = "x".repeat(200);
         assert_eq!(
             column_constraints(&columns, &[&value], "A long header", SortDirection::Asc),
-            vec![Constraint::Length(12), Constraint::Length(17)]
+            vec![Constraint::Length(12), Constraint::Min(17)]
         );
         assert!(column_constraints::<String>(&[], &[], "", SortDirection::Asc).is_empty());
+    }
+
+    #[test]
+    fn only_the_last_of_all_compact_columns_takes_the_remaining_space() {
+        let value = "subnet-0c389dc8fe7220914".to_string();
+        let all_compact = vec![
+            col("Subnet ID", u16::MAX, true),
+            col("State", u16::MAX, true),
+        ];
+        // Test columns show the row itself, so both fit the 26-cell value.
+        assert_eq!(
+            column_constraints(&all_compact, &[&value], "Subnet ID", SortDirection::Asc),
+            vec![Constraint::Length(26), Constraint::Min(26)],
+            "the ID fits its value; the last column stretches"
+        );
+        assert_eq!(
+            column_constraints(&all_compact, &[], "Subnet ID", SortDirection::Asc),
+            vec![Constraint::Length(13), Constraint::Min(7)],
+            "with no rows, the headers decide, with their two-cell prefix"
+        );
+        let mixed = vec![col("ID", u16::MAX, true), col("Text", 30, false)];
+        assert_eq!(
+            column_constraints(&mixed, &[&value], "", SortDirection::Asc),
+            vec![Constraint::Length(26), Constraint::Fill(1)],
+            "an auto-fill column keeps the rest"
+        );
     }
 }

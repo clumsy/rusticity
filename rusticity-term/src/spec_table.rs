@@ -20,8 +20,9 @@ use crate::{
 };
 use ratatui::prelude::*;
 
-/// A column: (id and header, width, cell).
-pub(crate) type Spec<T> = &'static [(&'static str, u16, fn(&T) -> String)];
+/// A column: (id and header, cell). Its width fits the header and the rows
+/// on screen; the last visible column takes the remaining space.
+pub(crate) type Spec<T> = &'static [(&'static str, fn(&T) -> String)];
 
 /// One table with its filter focus and visible columns.
 pub(crate) struct Table<T: 'static> {
@@ -116,7 +117,7 @@ impl<T: 'static> Table<T> {
                     || self
                         .spec
                         .iter()
-                        .any(|(_, _, cell)| cell(row).to_lowercase().contains(&filter))
+                        .any(|(_, cell)| cell(row).to_lowercase().contains(&filter))
                     || self
                         .search
                         .is_some_and(|text| text(row).to_lowercase().contains(&filter))
@@ -127,7 +128,7 @@ impl<T: 'static> Table<T> {
             crate::sort::apply(&mut rows, order, |row, id| {
                 spec.iter()
                     .find(|(name, ..)| *name == id)
-                    .map(|(_, _, cell)| cell(row))
+                    .map(|(_, cell)| cell(row))
                     .unwrap_or_default()
             });
         }
@@ -305,13 +306,14 @@ pub(crate) fn render<T: 'static>(
     let columns: Vec<Box<dyn Column<T>>> = spec
         .iter()
         .filter(|(id, ..)| table.visible.contains(id))
-        .map(|(name, width, cell)| {
+        .map(|(name, cell)| {
             let cell = *cell;
+            // Fit the header and the rows on screen, with no upper bound.
             Box::new(ui::table::OwnedColumn::new(
                 name,
                 name,
-                *width,
-                false,
+                u16::MAX,
+                true,
                 move |row: &T| {
                     let text = value(&cell(row));
                     let color = style(&text);
@@ -339,7 +341,7 @@ pub(crate) fn render<T: 'static>(
             area: parts[1],
             get_expanded_content: Some(Box::new(move |row: &T| {
                 spec.iter()
-                    .map(|(name, _, cell)| {
+                    .map(|(name, cell)| {
                         (format!("{name}: {}", value(&cell(row))), Style::default())
                     })
                     .collect()

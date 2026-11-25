@@ -197,6 +197,33 @@ fn every_subnet_column_is_in_preferences_and_enter_expands_all_fields() {
 }
 
 #[test]
+fn columns_fit_header_and_content_and_the_last_takes_the_rest() {
+    let mut app = app(Service::VpcSubnets);
+    app.subnets_state.list.rows.items[0].subnet_id = "subnet-0c389dc8fe7220914".into();
+    let text = screen(&app);
+    let lines: Vec<String> = text
+        .chars()
+        .collect::<Vec<_>>()
+        .chunks(240)
+        .map(|c| c.iter().collect())
+        .collect();
+    let header = lines.iter().find(|l| l.contains("Subnet ID ↑")).unwrap();
+    let at = |pat: &str| header[..header.find(pat).unwrap()].chars().count();
+    // `► subnet-0c389dc8fe7220914` is 26 cells, wider than `  Subnet ID ↑`;
+    // one cell of column spacing follows it.
+    assert_eq!(
+        at("⋮ State") - at("  Subnet ID"),
+        27,
+        "the ID column fits its widest value: {header}"
+    );
+    let last = &header[header.find("⋮ Default subnet").unwrap()..];
+    assert!(
+        last.ends_with("  │"),
+        "the last column reaches the border: {header}"
+    );
+}
+
+#[test]
 fn security_groups_count_permission_entries() {
     let app = app(Service::VpcSecurityGroups);
     let text = screen(&app);

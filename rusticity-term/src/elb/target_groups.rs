@@ -27,19 +27,17 @@ pub(crate) fn load_balancer_names(arns: &[String]) -> String {
 }
 
 pub(crate) const LIST_COLUMNS: Spec<TargetGroup> = &[
-    ("Name", 32, |t| t.name.clone()),
-    ("ARN", 70, |t| t.arn.clone()),
-    ("Port", 8, |t| {
+    ("Name", |t| t.name.clone()),
+    ("ARN", |t| t.arn.clone()),
+    ("Port", |t| {
         t.port.map(|p| p.to_string()).unwrap_or_default()
     }),
-    ("Protocol", 10, |t| t.protocol.clone()),
-    ("Target type", 16, |t| {
-        super::target_type_name(&t.target_type)
-    }),
-    ("Load balancer", 32, |t| {
+    ("Protocol", |t| t.protocol.clone()),
+    ("Target type", |t| super::target_type_name(&t.target_type)),
+    ("Load balancer", |t| {
         load_balancer_names(&t.load_balancer_arns)
     }),
-    ("VPC ID", 24, |t| t.vpc_id.clone()),
+    ("VPC ID", |t| t.vpc_id.clone()),
 ];
 
 fn port(t: &Target) -> String {
@@ -68,34 +66,34 @@ fn anomaly(t: &Target) -> String {
 
 /// Targets columns by target type, as the console heads them.
 const INSTANCE_TARGETS: Spec<Target> = &[
-    ("Instance ID", 22, |t| t.id.clone()),
-    ("Name", 28, |t| t.name.clone()),
-    ("Port", 8, port),
-    ("Zone", 14, |t| t.zone.clone()),
-    ("Health status", 22, health),
-    ("Health status details", 50, details),
-    ("Administrative override", 24, overridden),
-    ("Anomaly detection result", 24, anomaly),
+    ("Instance ID", |t| t.id.clone()),
+    ("Name", |t| t.name.clone()),
+    ("Port", port),
+    ("Zone", |t| t.zone.clone()),
+    ("Health status", health),
+    ("Health status details", details),
+    ("Administrative override", overridden),
+    ("Anomaly detection result", anomaly),
 ];
 const IP_TARGETS: Spec<Target> = &[
-    ("IP address", 40, |t| t.id.clone()),
-    ("Port", 8, port),
-    ("Zone", 14, |t| t.zone.clone()),
-    ("Health status", 22, health),
-    ("Health status details", 50, details),
-    ("Administrative override", 24, overridden),
-    ("Anomaly detection result", 24, anomaly),
+    ("IP address", |t| t.id.clone()),
+    ("Port", port),
+    ("Zone", |t| t.zone.clone()),
+    ("Health status", health),
+    ("Health status details", details),
+    ("Administrative override", overridden),
+    ("Anomaly detection result", anomaly),
 ];
 const LAMBDA_TARGETS: Spec<Target> = &[
-    ("Lambda function", 70, |t| t.id.clone()),
-    ("Health status", 22, health),
-    ("Health status details", 50, details),
+    ("Lambda function", |t| t.id.clone()),
+    ("Health status", health),
+    ("Health status details", details),
 ];
 const ALB_TARGETS: Spec<Target> = &[
-    ("Application Load Balancer", 70, |t| t.id.clone()),
-    ("Port", 8, port),
-    ("Health status", 22, health),
-    ("Health status details", 50, details),
+    ("Application Load Balancer", |t| t.id.clone()),
+    ("Port", port),
+    ("Health status", health),
+    ("Health status details", details),
 ];
 
 pub(crate) fn target_columns(target_type: &str) -> Spec<Target> {

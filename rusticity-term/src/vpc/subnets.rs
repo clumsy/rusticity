@@ -14,45 +14,43 @@ use rusticity_core::{vpc::Subnet, VpcClient};
 /// The console columns, in console order. Name is not one; the filter
 /// matches it, as in the VPC list.
 pub(crate) const COLUMNS: Spec<Subnet> = &[
-    ("Subnet ID", 26, |s| s.subnet_id.clone()),
-    ("ARN", 70, |s| s.arn.clone()),
-    ("State", 14, |s| super::state_label(&s.state).0),
-    ("VPC", 23, |s| s.vpc_id.clone()),
-    ("Block Public Access", 22, |s| {
+    ("Subnet ID", |s| s.subnet_id.clone()),
+    ("ARN", |s| s.arn.clone()),
+    ("State", |s| super::state_label(&s.state).0),
+    ("VPC", |s| s.vpc_id.clone()),
+    ("Block Public Access", |s| {
         super::block_public_access_label(&s.block_public_access).0
     }),
-    ("Automated internet firewall connectivity type", 16, |s| {
+    ("Automated internet firewall connectivity type", |s| {
         s.firewall_connectivity.clone()
     }),
-    ("Outpost ID", 20, |s| s.outpost_id.clone()),
-    ("IPv4 CIDR", 18, |s| s.ipv4_cidr.clone()),
-    ("IPv6 CIDR", 24, |s| s.ipv6_cidrs.clone()),
-    ("IPv6 CIDR association ID", 32, |s| {
+    ("Outpost ID", |s| s.outpost_id.clone()),
+    ("IPv4 CIDR", |s| s.ipv4_cidr.clone()),
+    ("IPv6 CIDR", |s| s.ipv6_cidrs.clone()),
+    ("IPv6 CIDR association ID", |s| {
         s.ipv6_association_ids.clone()
     }),
-    ("Available IPv4 addresses", 10, |s| {
+    ("Available IPv4 addresses", |s| {
         s.available_ipv4.map(|n| n.to_string()).unwrap_or_default()
     }),
-    ("Availability Zone", 12, |s| s.availability_zone.clone()),
-    ("Network border group", 14, |s| {
-        s.network_border_group.clone()
-    }),
-    ("Route table", 24, |s| s.route_table.clone()),
-    ("Network ACL", 24, |s| s.network_acl.clone()),
-    ("Default subnet", 8, |s| yes_no(s.default_for_az)),
-    ("Auto-assign public IPv4 address", 8, |s| {
+    ("Availability Zone", |s| s.availability_zone.clone()),
+    ("Network border group", |s| s.network_border_group.clone()),
+    ("Route table", |s| s.route_table.clone()),
+    ("Network ACL", |s| s.network_acl.clone()),
+    ("Default subnet", |s| yes_no(s.default_for_az)),
+    ("Auto-assign public IPv4 address", |s| {
         yes_no(s.map_public_ip)
     }),
-    ("Auto-assign customer-owned IPv4 address", 8, |s| {
+    ("Auto-assign customer-owned IPv4 address", |s| {
         yes_no(s.map_customer_owned_ip)
     }),
-    ("Customer-owned IPv4 pool", 20, |s| {
+    ("Customer-owned IPv4 pool", |s| {
         s.customer_owned_ipv4_pool.clone()
     }),
-    ("Auto-assign IPv6 address", 8, |s| yes_no(s.assign_ipv6)),
-    ("Owner ID", 14, |s| s.owner_id.clone()),
-    ("Subnet ARN", 70, |s| s.arn.clone()),
-    ("Enable DNS64", 10, |s| yes_no(s.dns64)),
+    ("Auto-assign IPv6 address", |s| yes_no(s.assign_ipv6)),
+    ("Owner ID", |s| s.owner_id.clone()),
+    ("Subnet ARN", |s| s.arn.clone()),
+    ("Enable DNS64", |s| yes_no(s.dns64)),
 ];
 
 /// Shown at first; the other columns are in preferences.

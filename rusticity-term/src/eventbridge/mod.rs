@@ -22,41 +22,37 @@ pub(crate) use crate::spec_table::{Spec, Table};
 /// Console columns. Status and ID belong to Custom Event Bus (V2) buses,
 /// which ListEventBuses does not return, so they stay empty for these rows.
 pub(crate) const BUS_COLUMNS: Spec<EventBus> = &[
-    ("Name", 32, |b| b.name.clone()),
-    ("Type", 28, |b| b.bus_type().into()),
-    ("Status", 12, |_| String::new()),
-    ("ID", 24, |_| String::new()),
-    ("Amazon Resource Name (ARN)", 70, |b| b.arn.clone()),
-    ("Schema discovery", 18, |b| {
-        view::discovery(&b.schema_discovery)
-    }),
-    ("Description", 40, |b| b.description.clone()),
-    ("Created on", 28, |b| view::timestamp(&b.created)),
-    ("Last modified", 28, |b| view::timestamp(&b.last_modified)),
-    ("Owner account", 16, |b| b.owner_account().into()),
+    ("Name", |b| b.name.clone()),
+    ("Type", |b| b.bus_type().into()),
+    ("Status", |_| String::new()),
+    ("ID", |_| String::new()),
+    ("Amazon Resource Name (ARN)", |b| b.arn.clone()),
+    ("Schema discovery", |b| view::discovery(&b.schema_discovery)),
+    ("Description", |b| b.description.clone()),
+    ("Created on", |b| view::timestamp(&b.created)),
+    ("Last modified", |b| view::timestamp(&b.last_modified)),
+    ("Owner account", |b| b.owner_account().into()),
 ];
 
 pub(crate) const RULE_COLUMNS: Spec<EventRule> = &[
-    ("Name", 36, |r| r.name.clone()),
-    ("Status", 14, |r| view::state(&r.state)),
-    ("Type", 12, |r| r.rule_type().into()),
-    ("Description", 40, |r| r.description.clone()),
-    ("Managed by", 24, |r| r.managed_by.clone()),
-    ("ARN", 70, |r| r.arn.clone()),
+    ("Name", |r| r.name.clone()),
+    ("Status", |r| view::state(&r.state)),
+    ("Type", |r| r.rule_type().into()),
+    ("Description", |r| r.description.clone()),
+    ("Managed by", |r| r.managed_by.clone()),
+    ("ARN", |r| r.arn.clone()),
 ];
 
 pub(crate) const TARGET_COLUMNS: Spec<EventTarget> = &[
-    ("Target ID", 24, |t| t.id.clone()),
-    ("Type", 28, |t| view::target_type(&t.arn)),
-    ("ARN", 70, |t| t.arn.clone()),
-    ("Input", 40, |t| t.input.clone()),
-    ("Role", 60, |t| t.role_arn.clone()),
+    ("Target ID", |t| t.id.clone()),
+    ("Type", |t| view::target_type(&t.arn)),
+    ("ARN", |t| t.arn.clone()),
+    ("Input", |t| t.input.clone()),
+    ("Role", |t| t.role_arn.clone()),
 ];
 
-pub(crate) const TAG_COLUMNS: Spec<TagRow> = &[
-    ("Key", 32, |t| t.key.clone()),
-    ("Value", 60, |t| t.value.clone()),
-];
+pub(crate) const TAG_COLUMNS: Spec<TagRow> =
+    &[("Key", |t| t.key.clone()), ("Value", |t| t.value.clone())];
 
 #[derive(Clone, Debug)]
 pub struct TagRow {

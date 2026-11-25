@@ -18,54 +18,54 @@ use rusticity_core::elb::{
 };
 
 pub(crate) const LIST_COLUMNS: Spec<LoadBalancer> = &[
-    ("Name", 24, |l| l.name.clone()),
-    ("DNS name", 44, |l| l.dns_name.clone()),
-    ("State", 12, |l| super::words(&l.state)),
-    ("VPC ID", 22, |l| l.vpc_id.clone()),
-    ("Availability Zones", 20, |l| match l.zones.len() {
+    ("Name", |l| l.name.clone()),
+    ("DNS name", |l| l.dns_name.clone()),
+    ("State", |l| super::words(&l.state)),
+    ("VPC ID", |l| l.vpc_id.clone()),
+    ("Availability Zones", |l| match l.zones.len() {
         0 => String::new(),
         1 => "1 Availability Zone".into(),
         n => format!("{n} Availability Zones"),
     }),
-    ("Type", 12, |l| l.lb_type.clone()),
-    ("Date created", 26, |l| super::timestamp(&l.created_time)),
+    ("Type", |l| l.lb_type.clone()),
+    ("Date created", |l| super::timestamp(&l.created_time)),
 ];
 
 pub(crate) const LISTENER_COLUMNS: Spec<Listener> = &[
-    ("Protocol:Port", 16, |l| {
+    ("Protocol:Port", |l| {
         format!(
             "{}:{}",
             l.protocol,
             l.port.map(|p| p.to_string()).unwrap_or_default()
         )
     }),
-    ("Default action", 50, |l| l.default_action.clone()),
-    ("Rules", 10, |l| match l.rules {
+    ("Default action", |l| l.default_action.clone()),
+    ("Rules", |l| match l.rules {
         Some(1) => "1 rule".into(),
         Some(n) => format!("{n} rules"),
         None => String::new(),
     }),
-    ("ARN", 70, |l| l.arn.clone()),
-    ("Security policy", 30, |l| l.ssl_policy.clone()),
-    ("Default SSL/TLS certificate", 40, |l| {
+    ("ARN", |l| l.arn.clone()),
+    ("Security policy", |l| l.ssl_policy.clone()),
+    ("Default SSL/TLS certificate", |l| {
         l.default_certificate
             .rsplit('/')
             .next()
             .unwrap_or_default()
             .to_string()
     }),
-    ("mTLS", 12, |l| super::words(&l.mtls_mode)),
-    ("Trust store", 30, |l| {
+    ("mTLS", |l| super::words(&l.mtls_mode)),
+    ("Trust store", |l| {
         rusticity_core::elb::name_from_arn(&l.trust_store_arn)
     }),
 ];
 
 pub(crate) const MAPPING_COLUMNS: Spec<ZoneMapping> = &[
-    ("Availability Zone", 20, |z| z.zone.clone()),
-    ("Subnet", 26, |z| z.subnet_id.clone()),
-    ("IPv4 address", 20, |z| z.ipv4.join(", ")),
-    ("Private IPv4 address", 22, |z| z.private_ipv4.join(", ")),
-    ("IPv6 address", 30, |z| z.ipv6.join(", ")),
+    ("Availability Zone", |z| z.zone.clone()),
+    ("Subnet", |z| z.subnet_id.clone()),
+    ("IPv4 address", |z| z.ipv4.join(", ")),
+    ("Private IPv4 address", |z| z.private_ipv4.join(", ")),
+    ("IPv6 address", |z| z.ipv6.join(", ")),
 ];
 
 fn count(n: Option<usize>) -> String {
@@ -74,18 +74,18 @@ fn count(n: Option<usize>) -> String {
 }
 
 pub(crate) const ROUTE_COLUMNS: Spec<ResourceRoute> = &[
-    ("Listener", 16, |r| r.listener.clone()),
-    ("Rule", 14, |r| r.rule.clone()),
-    ("Target group", 32, |r| r.target_group.clone()),
-    ("Targets", 10, |r| count(r.targets)),
-    ("Healthy", 10, |r| count(r.healthy)),
-    ("Unhealthy", 10, |r| count(r.unhealthy)),
+    ("Listener", |r| r.listener.clone()),
+    ("Rule", |r| r.rule.clone()),
+    ("Target group", |r| r.target_group.clone()),
+    ("Targets", |r| count(r.targets)),
+    ("Healthy", |r| count(r.healthy)),
+    ("Unhealthy", |r| count(r.unhealthy)),
 ];
 
 pub(crate) const GROUP_COLUMNS: Spec<SecurityGroup> = &[
-    ("Security group ID", 24, |g| g.id.clone()),
-    ("Name", 32, |g| g.name.clone()),
-    ("Description", 60, |g| g.description.clone()),
+    ("Security group ID", |g| g.id.clone()),
+    ("Name", |g| g.name.clone()),
+    ("Description", |g| g.description.clone()),
 ];
 
 /// Console tabs, in console order, below the fixed Details pane.

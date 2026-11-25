@@ -23,13 +23,13 @@ fn entries(count: usize) -> String {
 /// The console columns, in console order. Name is not one; the filter
 /// matches it, as in the VPC list.
 pub(crate) const COLUMNS: Spec<SecurityGroup> = &[
-    ("Security group ID", 22, |g| g.group_id.clone()),
-    ("Security group name", 28, |g| g.group_name.clone()),
-    ("VPC ID", 23, |g| g.vpc_id.clone()),
-    ("Description", 40, |g| g.description.clone()),
-    ("Owner", 14, |g| g.owner_id.clone()),
-    ("Inbound rules count", 22, |g| entries(g.inbound_rules)),
-    ("Outbound rules count", 22, |g| entries(g.outbound_rules)),
+    ("Security group ID", |g| g.group_id.clone()),
+    ("Security group name", |g| g.group_name.clone()),
+    ("VPC ID", |g| g.vpc_id.clone()),
+    ("Description", |g| g.description.clone()),
+    ("Owner", |g| g.owner_id.clone()),
+    ("Inbound rules count", |g| entries(g.inbound_rules)),
+    ("Outbound rules count", |g| entries(g.outbound_rules)),
 ];
 
 /// Embedded at `app.security_groups_state`.

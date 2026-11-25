@@ -481,7 +481,7 @@ fn bus_columns_follow_the_console() {
         schema_discovery: "STARTED".into(),
         ..Default::default()
     };
-    let cell = |name: &str| (BUS_COLUMNS.iter().find(|c| c.0 == name).unwrap().2)(&bus);
+    let cell = |name: &str| (BUS_COLUMNS.iter().find(|c| c.0 == name).unwrap().1)(&bus);
     assert_eq!(cell("Type"), "Custom Event Bus - Classic");
     assert_eq!(cell("Schema discovery"), "Started");
     assert_eq!(cell("Owner account"), "123456789012");

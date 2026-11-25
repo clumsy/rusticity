@@ -128,6 +128,7 @@ fn tab_loading_message(app: &App) -> Option<Line<'static>> {
         Service::Ec2TargetGroups => "target groups",
         Service::VpcSubnets => "subnets",
         Service::VpcSecurityGroups => "security groups",
+        Service::ResourceExplorerResources => "resources",
         Service::SqsQueues => "SQS queues",
         Service::LambdaFunctions => "Lambda functions",
         Service::DynamoDbTables => "DynamoDB tables",
@@ -288,6 +289,31 @@ pub fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
         hints.extend(first_hint("⏎", "keep search"));
         hints.extend(hint("⎋", "cancel"));
         hints.extend(last_hint("^w", "delete word"));
+        hints
+    } else if app.mode == Mode::FilterInput && crate::resource_explorer::active(app) {
+        let mut hints = if app.resource_explorer_state.list.dropdown_choice().is_some() {
+            let mut hints = first_hint("↑↓", "template");
+            hints.extend(hint("⏎", "apply"));
+            hints
+        } else {
+            let mut hints = first_hint("⏎", "search");
+            hints.extend(hint("^w", "clear"));
+            hints
+        };
+        hints.extend(hint("⇤⇥", "switch"));
+        hints.extend(last_hint("⎋", "cancel"));
+        hints
+    } else if app.mode == Mode::Normal && crate::resource_explorer::active(app) {
+        let mut hints = first_hint("↑↓", "scroll");
+        hints.extend(hint("⏎ / ←→", "toggle"));
+        hints.extend(hint("i", "query"));
+        hints.extend(hint("y", "copy ARN"));
+        hints.extend(hint("p", "preferences"));
+        hints.extend(hint("^p", "print"));
+        hints.extend(hint("^o", "console"));
+        hints.extend(hint("^r", "refresh"));
+        hints.extend(hint("^w", "close"));
+        hints.extend(last_hint("q", "quit"));
         hints
     } else if app.mode == Mode::FilterInput {
         let mut hints = vec![];

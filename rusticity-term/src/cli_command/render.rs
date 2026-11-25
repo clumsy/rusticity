@@ -189,6 +189,7 @@ const VIEW_OPERATIONS: &[&str] = &[
     "rds list-tags-for-resource",
     "ec2 describe-vpcs",
     "ec2 describe-subnets",
+    "resource-explorer-2 search",
     "ec2 describe-instances",
     "ec2 describe-instance-status",
     "ec2 describe-security-group-rules",

@@ -291,6 +291,7 @@ fn view_targets() -> Vec<Target> {
             "elbv2 describe-tags" => json!({"ResourceArns":["arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/web/50dc6c495c0c9188"]}),
             "ec2 describe-instance-status" => json!({"InstanceIds":["i-0123456789abcdef0"],"IncludeAllInstances":true}),
             "ec2 describe-security-group-rules" => json!({"Filters":[{"Name":"group-id","Values":["sg-0123456789abcdef0"]}]}),
+            "resource-explorer-2 search" => json!({"QueryString":"-tag:none service:ec2"}),
             "ec2 describe-network-interfaces" | "ec2 describe-volumes" => json!({"Filters":[{"Name":"attachment.instance-id","Values":["i-0123456789abcdef0"]}]}),
             "s3api list-objects-v2" => json!({"Bucket":"test-bucket","Prefix":"folder/","Delimiter":"/"}),
             "ecr describe-images" | "ecr-public describe-images" => json!({"repositoryName":"team/repo"}),

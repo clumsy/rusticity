@@ -83,6 +83,7 @@ enum Snapshot {
     Ec2TargetGroups(Box<crate::elb::target_groups::State>, ViewMode),
     VpcSubnets(Box<crate::vpc::subnets::State>, ViewMode),
     VpcSecurityGroups(Box<crate::vpc::security_groups::State>, ViewMode),
+    ResourceExplorerResources(Box<crate::resource_explorer::State>, ViewMode),
     StepFunctionsStateMachines(Box<crate::ui::stepfunctions::State>, ViewMode),
     SqsQueues(Box<crate::app::SqsState>, ViewMode),
     VpcVpcs(Box<crate::app::VpcState>, ViewMode),
@@ -121,6 +122,7 @@ impl Snapshot {
             Snapshot::Ec2TargetGroups(..) => Service::Ec2TargetGroups,
             Snapshot::VpcSubnets(..) => Service::VpcSubnets,
             Snapshot::VpcSecurityGroups(..) => Service::VpcSecurityGroups,
+            Snapshot::ResourceExplorerResources(..) => Service::ResourceExplorerResources,
             Snapshot::StepFunctionsStateMachines(..) => Service::StepFunctionsStateMachines,
             Snapshot::SqsQueues(..) => Service::SqsQueues,
             Snapshot::VpcVpcs(..) => Service::VpcVpcs,
@@ -200,6 +202,10 @@ fn take_live(app: &mut App, service: Service) -> Option<Snapshot> {
         }
         Service::VpcSecurityGroups => Snapshot::VpcSecurityGroups(
             Box::new(std::mem::take(&mut app.security_groups_state)),
+            view_mode,
+        ),
+        Service::ResourceExplorerResources => Snapshot::ResourceExplorerResources(
+            Box::new(std::mem::take(&mut app.resource_explorer_state)),
             view_mode,
         ),
         Service::EventBridgeEventBuses => Snapshot::EventBridgeEventBuses(
@@ -315,6 +321,10 @@ fn hydrate(app: &mut App, snap: Snapshot) {
         }
         Snapshot::VpcSecurityGroups(s, vm) => {
             app.security_groups_state = *s;
+            app.view_mode = vm;
+        }
+        Snapshot::ResourceExplorerResources(s, vm) => {
+            app.resource_explorer_state = *s;
             app.view_mode = vm;
         }
         Snapshot::EventBridgeEventBuses(s, vm) => {
@@ -619,6 +629,7 @@ fn request_fresh_managed(app: &mut App, service: Service) {
         Service::Ec2TargetGroups => crate::elb::target_groups::request(app),
         Service::VpcSubnets => crate::vpc::subnets::request(app),
         Service::VpcSecurityGroups => crate::vpc::security_groups::request(app),
+        Service::ResourceExplorerResources => crate::resource_explorer::request(app),
         Service::SqsQueues => crate::sqs::inventory::request(app),
         Service::LambdaFunctions => crate::lambda::inventory::request(app),
         Service::DynamoDbTables => crate::dynamodb::inventory::request(app),
@@ -723,6 +734,7 @@ fn is_managed(service: Service) -> bool {
             | Service::Ec2TargetGroups
             | Service::VpcSubnets
             | Service::VpcSecurityGroups
+            | Service::ResourceExplorerResources
             | Service::RdsInstances
             | Service::VpcVpcs
             | Service::Ec2Instances
@@ -777,6 +789,7 @@ fn live_status(app: &App, service: Service) -> ReadStatus {
         Service::Ec2TargetGroups => app.target_groups_state.load_status(),
         Service::VpcSubnets => app.subnets_state.load_status(),
         Service::VpcSecurityGroups => app.security_groups_state.load_status(),
+        Service::ResourceExplorerResources => app.resource_explorer_state.load_status(),
         Service::VpcVpcs => app.vpc_state.load_status(),
         Service::Ec2Instances => app.ec2_state.load_status(),
         Service::RdsInstances => app.rds_state.load_status(),
@@ -806,6 +819,7 @@ fn snapshot_status(snap: &Snapshot) -> ReadStatus {
         Snapshot::Ec2TargetGroups(s, _) => s.load_status(),
         Snapshot::VpcSubnets(s, _) => s.load_status(),
         Snapshot::VpcSecurityGroups(s, _) => s.load_status(),
+        Snapshot::ResourceExplorerResources(s, _) => s.load_status(),
         Snapshot::VpcVpcs(s, _) => s.load_status(),
         Snapshot::Ec2Instances(s, _) => s.load_status(),
         Snapshot::RdsInstances(s, _) => s.load_status(),
@@ -1010,6 +1024,7 @@ async fn poll_managed(app: &mut App, service: Service) -> bool {
         Service::Ec2TargetGroups => crate::elb::target_groups::poll(app).await,
         Service::VpcSubnets => crate::vpc::subnets::poll(app).await,
         Service::VpcSecurityGroups => crate::vpc::security_groups::poll(app).await,
+        Service::ResourceExplorerResources => crate::resource_explorer::poll(app).await,
         Service::RdsInstances => {
             let inventory = crate::rds::inventory::poll(app).await;
             crate::rds::detail::poll(app).await || inventory

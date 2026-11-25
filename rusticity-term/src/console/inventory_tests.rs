@@ -173,6 +173,7 @@ fn expected_list_url(service: Service, region: &str) -> String {
         Service::Ec2TargetGroups => format!("https://{region}.console.aws.amazon.com/ec2/home?region={region}#TargetGroups:"),
         Service::VpcSubnets => format!("https://{region}.console.aws.amazon.com/vpcconsole/home?region={region}#subnets:"),
         Service::VpcSecurityGroups => format!("https://{region}.console.aws.amazon.com/vpcconsole/home?region={region}#SecurityGroups:"),
+        Service::ResourceExplorerResources => format!("https://{region}.console.aws.amazon.com/resource-explorer/home?region={region}#/search"),
         Service::CloudTrailEvents => format!("https://{region}.console.aws.amazon.com/cloudtrail/home?region={region}#/events"),
         Service::KmsKeys => format!("https://{region}.console.aws.amazon.com/kms/home?region={region}#/kms/keys"),
         Service::CliOutput(_) => String::new(),
@@ -574,6 +575,7 @@ fn simple_inventories_route_to_list_in_both_regions() {
         Service::Ec2TargetGroups,
         Service::VpcSubnets,
         Service::VpcSecurityGroups,
+        Service::ResourceExplorerResources,
     ];
     for service in services {
         for region in [R1, R2] {
@@ -665,6 +667,7 @@ fn list_route_matrix_covers_every_service_picker_entry() {
         Service::VpcVpcs,
         Service::VpcSubnets,
         Service::VpcSecurityGroups,
+        Service::ResourceExplorerResources,
         Service::Ec2Instances,
         Service::Ec2LoadBalancers,
         Service::Ec2TargetGroups,

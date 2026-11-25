@@ -47,7 +47,8 @@ pub fn selected(app: &App) -> Option<Resource> {
         | Service::Ec2LoadBalancers
         | Service::Ec2TargetGroups
         | Service::VpcSubnets
-        | Service::VpcSecurityGroups => None,
+        | Service::VpcSecurityGroups
+        | Service::ResourceExplorerResources => None,
         // ── Services with explicit detail parent tracking ──
         Service::DynamoDbTables => {
             if let Some(name) = &app.dynamodb_state.current_table {

@@ -75,6 +75,13 @@ pub(super) fn target(app: &App) -> Result<Option<Target>, String> {
         Service::Ec2TargetGroups => Ok(target_groups(app)),
         // Flat Region lists, never a row.
         Service::VpcSubnets => Ok(Some(view("ec2 describe-subnets", json!({}), None, None))),
+        // The query on screen, in the tab's Region.
+        Service::ResourceExplorerResources => Ok(Some(view(
+            "resource-explorer-2 search",
+            crate::resource_explorer::cli_input(app),
+            None,
+            None,
+        ))),
         Service::VpcSecurityGroups => Ok(Some(view(
             "ec2 describe-security-groups",
             json!({}),

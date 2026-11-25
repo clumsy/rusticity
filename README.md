@@ -45,6 +45,7 @@ A snappy terminal UI for AWS written in 🦀 Rust, inspired by 🧬 Helix editor
 - 🔑 **KMS**: Managed keys with read-only metadata, aliases, rotation status, policy and tags
 - λ **Lambda**: Functions, versions, aliases, layers, applications, and monitoring
 - 🛢️ **RDS**: Databases — read-only DB instance inventory with customizable metadata, maintenance, recommendations and monitoring columns
+- 🔎 **Resource Explorer**: Read-only resource search with the Region's default view: the query (keywords and filters such as `service:ec2 tag:none`) and the console query templates, with identifier, service, resource type, Region, owner account, application and tags
 - 🪣 **S3**: Buckets and objects with navigation
 - 🔐 **Secrets Manager**: Secret metadata inventory and secret details (configuration, rotation, replication, versions, tags), with no secret values
 - 🔀 **Step Functions**: State machines and Standard-workflow execution metadata (no execution input/output)
@@ -165,7 +166,7 @@ tab and Esc closes the picker.
 Tab-owned asynchronous loading currently covers ACM, CloudFormation
 stacks, EC2 (instances, load balancers, target groups and their details), ECR
 repositories, EFS and FSx file systems, EventBridge, KMS, RDS, S3 buckets,
-Secrets Manager, SNS, Step Functions, VPC (VPCs, subnets, security groups), the SQS queues, Lambda functions
+Secrets Manager, SNS, Step Functions, VPC (VPCs, subnets, security groups), Resource Explorer, the SQS queues, Lambda functions
 and DynamoDB tables lists, and CLI output. The indicator to the right of each tab is a spinner while loading, `✓`
 after a successful read (including an empty result), or `!` after a failure.
 Indicators use the same text color as their tab label, including on the selected

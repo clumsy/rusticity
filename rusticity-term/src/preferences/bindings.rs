@@ -47,6 +47,7 @@ enum Source {
     Ec2TargetGroups,
     VpcSubnets,
     VpcSecurityGroups,
+    ResourceExplorerResources,
     EventBridge,
 }
 
@@ -180,6 +181,7 @@ impl Source {
             Service::Ec2TargetGroups => Self::Ec2TargetGroups,
             Service::VpcSubnets => Self::VpcSubnets,
             Service::VpcSecurityGroups => Self::VpcSecurityGroups,
+            Service::ResourceExplorerResources => Self::ResourceExplorerResources,
             _ => return None,
         })
     }
@@ -376,7 +378,8 @@ impl Source {
             Self::Ec2LoadBalancers
             | Self::Ec2TargetGroups
             | Self::VpcSubnets
-            | Self::VpcSecurityGroups => {
+            | Self::VpcSecurityGroups
+            | Self::ResourceExplorerResources => {
                 // Panes carry no columns.
                 let Some(table) = spec_table_of(app, self) else {
                     return Preferences::columns_only(Vec::new(), false).read_only();
@@ -498,6 +501,7 @@ impl Source {
                 .unwrap_or(app.target_groups_state.list.rows.page_size),
             Self::VpcSubnets => app.subnets_state.list.rows.page_size,
             Self::VpcSecurityGroups => app.security_groups_state.list.rows.page_size,
+            Self::ResourceExplorerResources => app.resource_explorer_state.list.rows.page_size,
             Self::RdsInstanceDetails => rds_detail(app).active_table().rows.page_size,
             Self::Ec2InstanceDetails => ec2_detail(app).rows.page_size,
             Self::Ec2Tags => app.ec2_state.tags.page_size,
@@ -558,7 +562,8 @@ impl Source {
             Self::Ec2LoadBalancers
             | Self::Ec2TargetGroups
             | Self::VpcSubnets
-            | Self::VpcSecurityGroups => {
+            | Self::VpcSecurityGroups
+            | Self::ResourceExplorerResources => {
                 if let Some(table) = spec_table_mut(app, self) {
                     table.set_page_size(size);
                 }
@@ -618,7 +623,10 @@ impl Source {
             Self::Ec2LoadBalancers
             | Self::Ec2TargetGroups
             | Self::VpcSubnets
-            | Self::VpcSecurityGroups => return spec_table_mut(app, self).map(|t| t.visible_mut()),
+            | Self::VpcSecurityGroups
+            | Self::ResourceExplorerResources => {
+                return spec_table_mut(app, self).map(|t| t.visible_mut())
+            }
             Self::RdsInstanceDetails => {
                 &mut rds_detail_mut(app).active_table_mut().visible_column_ids
             }
@@ -634,6 +642,7 @@ fn spec_table_of(app: &App, source: Source) -> Option<&dyn crate::spec_table::An
         Source::Ec2LoadBalancers => crate::elb::load_balancers::table(app),
         Source::VpcSubnets => Some(&app.subnets_state.list),
         Source::VpcSecurityGroups => Some(&app.security_groups_state.list),
+        Source::ResourceExplorerResources => Some(&app.resource_explorer_state.list),
         _ => crate::elb::target_groups::table(app),
     }
 }
@@ -643,6 +652,7 @@ fn spec_table_mut(app: &mut App, source: Source) -> Option<&mut dyn crate::spec_
         Source::Ec2LoadBalancers => crate::elb::load_balancers::table_mut(app),
         Source::VpcSubnets => Some(&mut app.subnets_state.list),
         Source::VpcSecurityGroups => Some(&mut app.security_groups_state.list),
+        Source::ResourceExplorerResources => Some(&mut app.resource_explorer_state.list),
         _ => crate::elb::target_groups::table_mut(app),
     }
 }

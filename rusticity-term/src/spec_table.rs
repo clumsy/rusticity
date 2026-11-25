@@ -35,8 +35,28 @@ pub(crate) struct Table<T: 'static> {
     default_sort: Option<SortOrder>,
     /// Text the filter also matches that is not a column, such as a Name tag.
     search: Option<fn(&T) -> String>,
+    /// Lines an expanded row shows after its columns.
+    details: Option<fn(&T) -> Vec<String>>,
+    /// The filter text is a query the service runs, not a local filter.
+    query: bool,
+    /// A menu in the filter line, between the text and the pages.
+    dropdown: Option<Dropdown>,
+    /// The rows are the first part of a larger result.
+    pub(crate) partial: bool,
     spec: Spec<T>,
 }
+
+/// A menu of fixed choices in the filter line. Tab reaches it, arrows or
+/// Space move the highlight while the list is open, and the owner acts on
+/// Enter with `dropdown_choice`.
+pub(crate) struct Dropdown {
+    label: &'static str,
+    options: &'static [&'static str],
+    highlighted: usize,
+}
+
+/// The focus of a table dropdown.
+pub(crate) const DROPDOWN: InputFocus = InputFocus::Dropdown("SpecTableDropdown");
 
 impl<T: 'static> Table<T> {
     pub(crate) fn new(spec: Spec<T>) -> Self {
@@ -47,8 +67,55 @@ impl<T: 'static> Table<T> {
             sort: Default::default(),
             default_sort: None,
             search: None,
+            details: None,
+            query: false,
+            dropdown: None,
+            partial: false,
             spec,
         }
+    }
+
+    /// The filter text is a query for the service: rows are never matched
+    /// against it here.
+    pub(crate) fn querying(mut self) -> Self {
+        self.query = true;
+        self
+    }
+
+    /// A `label` menu of `options` in the filter line.
+    pub(crate) fn with_dropdown(
+        mut self,
+        label: &'static str,
+        options: &'static [&'static str],
+    ) -> Self {
+        self.dropdown = Some(Dropdown {
+            label,
+            options,
+            highlighted: 0,
+        });
+        self
+    }
+
+    /// The highlighted option while the dropdown has focus.
+    pub(crate) fn dropdown_choice(&self) -> Option<usize> {
+        let dropdown = self.dropdown.as_ref()?;
+        (self.focus == DROPDOWN).then_some(dropdown.highlighted)
+    }
+
+    /// The filter line controls, in Tab order.
+    fn controls(&self) -> Vec<InputFocus> {
+        let mut controls = vec![InputFocus::Filter];
+        if self.dropdown.is_some() {
+            controls.push(DROPDOWN);
+        }
+        controls.push(InputFocus::Pagination);
+        controls
+    }
+
+    /// An expanded row also shows `lines` of each row, after its columns.
+    pub(crate) fn detailing(mut self, lines: fn(&T) -> Vec<String>) -> Self {
+        self.details = Some(lines);
+        self
     }
 
     /// The filter also matches `text` of each row.
@@ -113,7 +180,8 @@ impl<T: 'static> Table<T> {
             .items
             .iter()
             .filter(|row| {
-                filter.is_empty()
+                self.query
+                    || filter.is_empty()
                     || self
                         .spec
                         .iter()
@@ -138,6 +206,7 @@ impl<T: 'static> Table<T> {
     pub(crate) fn clear(&mut self) {
         self.rows.items.clear();
         self.rows.reset();
+        self.partial = false;
     }
 }
 
@@ -184,8 +253,6 @@ impl<T: 'static> AnyTable for Table<T> {
     }
 }
 
-const CONTROLS: [InputFocus; 2] = [InputFocus::Filter, InputFocus::Pagination];
-
 /// The app state the shared table input needs besides the table.
 pub(crate) struct Keys<'a> {
     pub(crate) mode: &'a mut Mode,
@@ -210,13 +277,34 @@ pub(crate) fn input<T: 'static>(table: &mut Table<T>, keys: Keys<'_>, action: &A
     if *mode == Mode::FilterInput
         && matches!(action, Action::NextFilterFocus | Action::PrevFilterFocus)
     {
+        let controls = table.controls();
         table.focus = if *action == Action::NextFilterFocus {
-            table.focus.next(&CONTROLS)
+            table.focus.next(&controls)
         } else {
-            table.focus.prev(&CONTROLS)
+            table.focus.prev(&controls)
         };
         page_input.clear();
         return true;
+    }
+    if *mode == Mode::FilterInput && table.focus == DROPDOWN {
+        if let Some(dropdown) = table.dropdown.as_mut() {
+            let len = dropdown.options.len().max(1);
+            match action {
+                Action::NextItem | Action::ToggleFilterCheckbox => {
+                    dropdown.highlighted = (dropdown.highlighted + 1) % len;
+                    return true;
+                }
+                Action::PrevItem => {
+                    dropdown.highlighted = (dropdown.highlighted + len - 1) % len;
+                    return true;
+                }
+                // The list takes no text.
+                Action::FilterInput(_) | Action::FilterBackspace | Action::DeleteWord => {
+                    return true
+                }
+                _ => {}
+            }
+        }
     }
     if *mode == Mode::FilterInput && *action == Action::DeleteWord {
         if table.focus == InputFocus::Filter {
@@ -288,6 +376,18 @@ pub(crate) fn render<T: 'static>(
     let prepared = table
         .rows
         .prepare_view(table.filtered(), TableWindow::SelectedPage);
+    let pagination = render_pagination_text(prepared.current_page, prepared.total_pages);
+    let mut controls = Vec::new();
+    if let Some(dropdown) = &table.dropdown {
+        controls.push(FilterControl {
+            text: dropdown.label.to_string(),
+            is_focused: table.focus == DROPDOWN,
+        });
+    }
+    controls.push(FilterControl {
+        text: pagination.clone(),
+        is_focused: table.focus == InputFocus::Pagination,
+    });
     render_filter_bar(
         frame,
         FilterConfig {
@@ -295,10 +395,7 @@ pub(crate) fn render<T: 'static>(
             placeholder: texts.placeholder,
             mode: app.mode,
             is_input_focused: table.focus == InputFocus::Filter,
-            controls: vec![FilterControl {
-                text: render_pagination_text(prepared.current_page, prepared.total_pages),
-                is_focused: table.focus == InputFocus::Pagination,
-            }],
+            controls,
             area: parts[0],
         },
     );
@@ -322,6 +419,7 @@ pub(crate) fn render<T: 'static>(
             )) as Box<dyn Column<T>>
         })
         .collect();
+    let details = table.details;
     let sort_header = table
         .order()
         .filter(|o| table.visible.contains(&o.column))
@@ -337,13 +435,21 @@ pub(crate) fn render<T: 'static>(
             columns: &columns,
             sort_column: &sort_header.0,
             sort_direction: sort_header.1,
-            title: ui::format_title(&format!("{} ({})", texts.title, prepared.total_items)),
+            title: ui::format_title(&format!(
+                "{} ({}{})",
+                texts.title,
+                prepared.total_items,
+                if table.partial { "+" } else { "" }
+            )),
             area: parts[1],
             get_expanded_content: Some(Box::new(move |row: &T| {
-                spec.iter()
-                    .map(|(name, cell)| {
-                        (format!("{name}: {}", value(&cell(row))), Style::default())
-                    })
+                let columns = spec
+                    .iter()
+                    .map(|(name, cell)| format!("{name}: {}", value(&cell(row))));
+                let extra = details.map(|lines| lines(row)).unwrap_or_default();
+                columns
+                    .chain(extra.iter().map(|line| clean(line)))
+                    .map(|line| (line, Style::default()))
                     .collect()
             })),
             is_active: app.mode == Mode::Normal,
@@ -356,4 +462,18 @@ pub(crate) fn render<T: 'static>(
             has_unfiltered_items: !table.rows.items.is_empty(),
         },
     );
+    // The open list, drawn last so it lies over the table.
+    if let Some(dropdown) = &table.dropdown {
+        if app.mode == Mode::FilterInput && table.focus == DROPDOWN {
+            // Right of the list: the separator, the pages and the border.
+            let after = 3 + pagination.chars().count() as u16 + 2;
+            crate::common::render_dropdown(
+                frame,
+                dropdown.options,
+                dropdown.highlighted,
+                parts[0],
+                after,
+            );
+        }
+    }
 }

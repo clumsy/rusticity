@@ -20,6 +20,7 @@ pub mod metrics;
 mod pagination;
 pub mod rds;
 pub mod related;
+pub mod resource_explorer;
 pub mod s3;
 pub mod secretsmanager;
 pub mod sns;

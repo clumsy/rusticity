@@ -159,6 +159,7 @@ pub struct App {
     pub target_groups_state: crate::elb::target_groups::State,
     pub subnets_state: crate::vpc::subnets::State,
     pub security_groups_state: crate::vpc::security_groups::State,
+    pub resource_explorer_state: crate::resource_explorer::State,
     pub stepfunctions_state: crate::ui::stepfunctions::State,
     pub ec2_state: Ec2State,
     pub ecr_state: EcrState,
@@ -393,6 +394,7 @@ pub enum Service {
     VpcVpcs,
     VpcSubnets,
     VpcSecurityGroups,
+    ResourceExplorerResources,
     Ec2Instances,
     Ec2LoadBalancers,
     Ec2TargetGroups,
@@ -429,6 +431,7 @@ impl Service {
             Service::VpcVpcs => "VPC › VPCs",
             Service::VpcSubnets => "VPC › Subnets",
             Service::VpcSecurityGroups => "VPC › Security groups",
+            Service::ResourceExplorerResources => "Resource Explorer › Resources",
             Service::Ec2Instances => "EC2 › Instances",
             Service::Ec2LoadBalancers => "EC2 › Load balancers",
             Service::Ec2TargetGroups => "EC2 › Target groups",
@@ -690,6 +693,7 @@ impl App {
             target_groups_state: Default::default(),
             subnets_state: Default::default(),
             security_groups_state: Default::default(),
+            resource_explorer_state: Default::default(),
             stepfunctions_state: crate::ui::stepfunctions::State::default(),
             ec2_state: Ec2State::default(),
             ecr_state: EcrState::new(),
@@ -999,6 +1003,7 @@ impl App {
             || crate::elb::target_groups::handle_action(self, &action)
             || crate::vpc::subnets::handle_action(self, &action)
             || crate::vpc::security_groups::handle_action(self, &action)
+            || crate::resource_explorer::handle_action(self, &action)
         {
             return;
         }
@@ -2934,6 +2939,9 @@ impl App {
             Service::Ec2TargetGroups => parts.extend(crate::elb::target_groups::breadcrumb(self)),
             Service::VpcSubnets => parts.extend(crate::vpc::subnets::breadcrumb()),
             Service::VpcSecurityGroups => parts.extend(crate::vpc::security_groups::breadcrumb()),
+            Service::ResourceExplorerResources => {
+                parts.extend(crate::resource_explorer::breadcrumb())
+            }
             Service::SecretsManagerSecrets => {
                 parts.extend(["Secrets Manager".into(), "Secrets".into()]);
                 if let Some(secret) = &self.secretsmanager_state.detail.source {
@@ -3036,6 +3044,7 @@ impl App {
             Service::Ec2TargetGroups => crate::elb::target_groups::console_url(self),
             Service::VpcSubnets => crate::vpc::subnets::console_url(self),
             Service::VpcSecurityGroups => crate::vpc::security_groups::console_url(self),
+            Service::ResourceExplorerResources => crate::resource_explorer::console_url(self),
             Service::DynamoDbTables => ddb_actions::console_url(self),
             Service::LambdaFunctions => crate::lambda::functions::console_url(self),
             Service::LambdaApplications => crate::lambda::applications::console_url(self),
@@ -4053,6 +4062,7 @@ impl App {
                     "VPC › VPCs" => Service::VpcVpcs,
                     "VPC › Subnets" => Service::VpcSubnets,
                     "VPC › Security groups" => Service::VpcSecurityGroups,
+                    "Resource Explorer › Resources" => Service::ResourceExplorerResources,
                     "DynamoDB › Tables" => Service::DynamoDbTables,
                     "IAM › Users" => Service::IamUsers,
                     "IAM › Roles" => Service::IamRoles,
@@ -5513,6 +5523,7 @@ impl ServicePickerState {
                 "Lambda › Functions",
                 "Lambda › Applications",
                 "RDS › Databases",
+                "Resource Explorer › Resources",
                 "S3 › Buckets",
                 "Secrets Manager › Secrets",
                 "Step Functions › State machines",
@@ -5552,6 +5563,7 @@ fn session_service(name: &str) -> Option<Service> {
         "VpcVpcs" => Some(Service::VpcVpcs),
         "VpcSubnets" => Some(Service::VpcSubnets),
         "VpcSecurityGroups" => Some(Service::VpcSecurityGroups),
+        "ResourceExplorerResources" => Some(Service::ResourceExplorerResources),
         "DynamoDbTables" => Some(Service::DynamoDbTables),
         "LambdaFunctions" => Some(Service::LambdaFunctions),
         "LambdaApplications" => Some(Service::LambdaApplications),

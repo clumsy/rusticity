@@ -32,6 +32,7 @@ pub(crate) mod list_read;
 pub mod picker;
 pub mod preferences;
 pub mod rds;
+pub mod resource_explorer;
 pub mod s3;
 pub mod secretsmanager;
 pub mod session;

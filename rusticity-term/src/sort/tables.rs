@@ -336,6 +336,7 @@ fn describe(app: &App, service: Service) -> Option<Described> {
         Service::Ec2TargetGroups => spec_dyn(crate::elb::target_groups::table(app)?),
         Service::VpcSubnets => spec_dyn(&app.subnets_state.list),
         Service::VpcSecurityGroups => spec_dyn(&app.security_groups_state.list),
+        Service::ResourceExplorerResources => spec_dyn(&app.resource_explorer_state.list),
         Service::EventBridgeEventBuses => {
             let state = &app.eventbridge_state;
             match (crate::eventbridge::level(app), &state.bus) {
@@ -495,11 +496,13 @@ pub(crate) fn choose(app: &mut App, service: Service, value: &'static str) -> bo
         Service::Ec2LoadBalancers
         | Service::Ec2TargetGroups
         | Service::VpcSubnets
-        | Service::VpcSecurityGroups => {
+        | Service::VpcSecurityGroups
+        | Service::ResourceExplorerResources => {
             let table: Option<&mut dyn crate::spec_table::AnyTable> = match service {
                 Service::Ec2LoadBalancers => crate::elb::load_balancers::table_mut(app),
                 Service::Ec2TargetGroups => crate::elb::target_groups::table_mut(app),
                 Service::VpcSubnets => Some(&mut app.subnets_state.list),
+                Service::ResourceExplorerResources => Some(&mut app.resource_explorer_state.list),
                 _ => Some(&mut app.security_groups_state.list),
             };
             let Some(table) = table else {
